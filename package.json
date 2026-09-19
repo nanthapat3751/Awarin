@@ -1,0 +1,17 @@
+{
+  "name": "systemboq",
+  "private": true,
+  "workspaces": [
+    "server",
+    "staff-app",
+    "client-app",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w server",
+    "dev:staff": "npm run dev -w staff-app",
+    "dev:client": "npm run dev -w client-app",
+    "build": "npm run build -w packages/shared-types && npm run build -w server && npm run build -w staff-app && npm run build -w client-app",
+    "test": "npm run test -w server"
+  }
+}

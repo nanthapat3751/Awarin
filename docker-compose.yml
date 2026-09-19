@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: boq
+      POSTGRES_PASSWORD: boq_dev_password
+      POSTGRES_DB: systemboq
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./server/prisma/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boq -d systemboq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local dev DB browser at http://localhost:5050. Desktop mode (no pgAdmin login) since
+  # it's only reachable from this machine; the dev DB connection is pre-registered via
+  # servers.json, so you only enter the Postgres password on first connect.
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    environment:
+      # Must be a "normal" domain -- pgAdmin rejects reserved TLDs like .local on startup.
+      PGADMIN_DEFAULT_EMAIL: admin@systemboq.dev
+      PGADMIN_DEFAULT_PASSWORD: pgadmin_dev_password
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:
+  pgadmin_data:

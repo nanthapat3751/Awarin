@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+coverage/
+.DS_Store
+# ชุดสำรองข้อมูล — มีข้อมูลลูกค้าทั้งหมด ห้ามขึ้น git
+server/backups/
+backups/
+
+# ไฟล์ที่ผู้ใช้อัปโหลด (รูป/ไฟล์แนบลูกค้า) — ข้อมูลจริง ไม่ใช่โค้ด
+server/uploads/
+server/private-uploads/
+
+# ตั้งค่าเครื่องตัวเอง / มีรหัสผ่านอยู่ข้างใน
+.claude/
+.env.*
+!.env.example
+
+# SonarQube — มี token + ผลสแกน
+hook.text
+issues*.json
+.scannerwork/
+
+# ไฟล์ build / ชั่วคราว
+*.tsbuildinfo
+scratch-*.mjs

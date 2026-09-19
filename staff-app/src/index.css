@@ -1,0 +1,210 @@
+@import "tailwindcss";
+
+@theme {
+  /* สีแบรนด์ฝั่งบริษัท = นาวีสดเดิม #000099 (ให้ตรงกับปุ่ม secondary/การ์ด/ไอคอนของเก่า)
+     ฝั่งลูกค้าใช้ #1a237e แยกต่างหาก */
+  --color-brand: #000099;
+  --color-brand-dark: #000077;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Tailwind v4 เปลี่ยนปุ่มกลับไปใช้เมาส์ลูกศรตามค่าเริ่มต้นของเบราว์เซอร์ (v3 เคยเป็นรูปมือ)
+   ผลคือชี้ปุ่มไหนในแอปก็ไม่มีอะไรบอกว่ากดได้ — ปุ่มที่เป็นข้อความเฉย ๆ ยิ่งดูเหมือนป้ายชื่อ.
+   อยู่ในชั้น base จึงแพ้คลาส cursor-* ที่ใส่เองรายตัวเสมอ (เช่น cursor-not-allowed ของรายการที่เลือกไม่ได้) */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* หน้าแม่แบบสัญญา โหมด "เลือกตัวแปรก่อน แล้วคลิกวาง" (VariablePlacer ติด data-placing ที่ตัวครอบกระดาษ)
+   ช่องที่วางไม่ได้ เมาส์เป็นเครื่องหมายห้าม — ชื่อบนหน้าปกไม่ถูกแทนค่าตัวแปร ·
+   ตารางงวดงานวาดเป็นตารางได้เฉพาะในเนื้อความของข้อสัญญา */
+[data-placing] [data-no-variables],
+[data-placing="block"] textarea:not([data-allow-blocks]),
+[data-placing="block"] input:not([data-allow-blocks]) {
+  cursor: not-allowed;
+}
+
+/* ---- อนิเมชั่นหน้า login ---- */
+/* การ์ดเลื่อนขึ้น + จางเข้าเป็นก้อน */
+@keyframes loginCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/* ลูกในการ์ดทยอยจางโผล่ทีละอัน (opacity อย่างเดียว กันชนกับ transform ของการ์ด) */
+@keyframes loginItemIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.login-card {
+  animation: loginCardIn 0.55s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+.login-card > * {
+  animation: loginItemIn 0.45s ease-out both;
+}
+.login-card > *:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.login-card > *:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.login-card > *:nth-child(3) {
+  animation-delay: 0.22s;
+}
+.login-card > *:nth-child(4) {
+  animation-delay: 0.28s;
+}
+.login-card > *:nth-child(5) {
+  animation-delay: 0.34s;
+}
+.login-card > *:nth-child(6) {
+  animation-delay: 0.4s;
+}
+.login-card > *:nth-child(7) {
+  animation-delay: 0.46s;
+}
+.login-card > *:nth-child(8) {
+  animation-delay: 0.52s;
+}
+.login-card > *:nth-child(9) {
+  animation-delay: 0.58s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card,
+  .login-card > * {
+    animation: none;
+  }
+}
+
+/* ---- เนื้อหาหน้าแรกไล่ขึ้นเป็นชั้นตอนข้อมูลมาถึง ----
+   เดิมโครงเทา (สเกเลตัน) สลับเป็นเนื้อหาจริงในเฟรมเดียว ตากระตุกเพราะทั้งหน้าเปลี่ยนพร้อมกัน.
+   ระยะสั้น 10px/0.45s เท่ากับ .portal-item ฝั่งลูกค้า เพื่อให้สองฝั่งพูดภาษาเดียวกัน —
+   ยาวกว่านี้จะรู้สึกว่าหน้าโหลดช้า ทั้งที่ข้อมูลมาถึงแล้ว. หน่วงต่อชั้นคุมด้วย inline animationDelay */
+@keyframes enterRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.enter-rise {
+  opacity: 0;
+  animation: enterRise 0.45s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .enter-rise {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* ---- ปุ่มย่อ/ขยายเมนู: hamburger เส้นเหลื่อมชิดขวา ----
+   ปกติสามเส้นเท่ากัน พอ hover เส้นสไลด์เป็นความยาวลดหลั่นชิดขวา ทีละเส้นเป็นคลื่น */
+.menu-toggle__lines {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end; /* ชิดขวา */
+  gap: 4px;
+  width: 20px;
+}
+.menu-toggle__lines span {
+  height: 2px;
+  width: 100%;
+  border-radius: 2px;
+  background: currentColor;
+  transition: width 0.3s cubic-bezier(0.22, 0.7, 0.2, 1);
+}
+.menu-toggle:hover .menu-toggle__lines span:nth-child(1) {
+  width: 100%;
+  transition-delay: 0ms;
+}
+.menu-toggle:hover .menu-toggle__lines span:nth-child(2) {
+  width: 60%;
+  transition-delay: 70ms;
+}
+.menu-toggle:hover .menu-toggle__lines span:nth-child(3) {
+  width: 35%;
+  transition-delay: 140ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-toggle__lines span {
+    transition: none;
+  }
+}
+
+/* ---- feedback หน้ายืนยัน 2FA ---- */
+/* ช่อง OTP สั่นเมื่อรหัสผิด */
+@keyframes otpShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+.otp-shake {
+  animation: otpShake 0.4s ease;
+}
+/* เครื่องหมายถูกเด้งเข้าเมื่อยืนยันสำเร็จ */
+@keyframes checkPop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.check-pop {
+  animation: checkPop 0.4s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .otp-shake,
+  .check-pop {
+    animation: none;
+  }
+}
+
+/* ช่องค้นหาที่มีปุ่มล้างของตัวเอง — ซ่อนกากบาทของเบราว์เซอร์ ไม่ให้มีปุ่มล้างซ้อนกันสองอัน
+   (ใส่เฉพาะช่องที่ทำปุ่มเอง ช่องอื่นยังใช้ปุ่มของเบราว์เซอร์ตามเดิม) */
+.search-clean::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}

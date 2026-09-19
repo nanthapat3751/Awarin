@@ -1,0 +1,461 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #1a237e; /* deep navy — matches the logo/Bliss (was electric #0000CD, too vivid) */
+  --color-brand-dark: #0f1657; /* darker navy for hover/active */
+}
+
+:root {
+  /* ความสูงของแถบเมนู fixed — NavBar เขียนค่าจริงทับตอน mount (ค่านี้คือค่าเริ่มต้นกันหน้ากระตุก) */
+  --nav-h: 65px;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---- ช่องกรอกเส้นใต้ + label เวฟทีละตัว (หน้าเข้าระบบ/สมัครสมาชิก) ----
+   label เริ่มอยู่ในช่อง พอโฟกัส/มีค่า อักษรจะลอยขึ้น + วิ่งซ้าย→ขวาเป็นคลื่น
+   (span แต่ละตัวมี transition-delay ไล่กันจาก WaveField) และเส้นใต้โตจากซ้าย→ขวา */
+.wave-field {
+  position: relative;
+  padding-top: 1.5rem;
+}
+.wave-field input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0 0 0.5rem 0;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  color: #1e293b; /* slate-800 */
+  caret-color: var(--color-brand);
+}
+.wave-field input.has-trailing {
+  padding-right: 2rem;
+}
+/* คำใบ้ (placeholder จริง) โผล่เฉพาะตอนโฟกัส เพื่อไม่ให้ทับ label ตอนยังไม่โฟกัส */
+.wave-field input::placeholder {
+  color: transparent;
+}
+.wave-field input:focus::placeholder {
+  color: #94a3b8;
+}
+
+/* เส้นใต้: เส้นจางฐาน + เส้นแบรนด์ที่โตจากซ้าย→ขวา */
+.wave-field .line-base {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 1px;
+  background: #cbd5e1; /* slate-300 */
+}
+.wave-field .line-active {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--color-brand);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.35s ease;
+}
+.wave-field input:focus ~ .line-active,
+.wave-field input:not(:placeholder-shown) ~ .line-active {
+  transform: scaleX(1);
+}
+
+/* label เวฟ: แต่ละอักษรเป็น span ลอยขึ้นทีละตัว (delay มาจาก inline style) */
+.wave-field label {
+  position: absolute;
+  left: 0;
+  top: 1.5rem;
+  display: flex;
+  pointer-events: none;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  letter-spacing: 0.02em;
+}
+.wave-field label span {
+  display: inline-block;
+  white-space: pre;
+  color: #94a3b8; /* slate-400 */
+  transition:
+    transform 0.28s cubic-bezier(0.22, 0.7, 0.2, 1),
+    color 0.28s ease;
+}
+.wave-field input:focus ~ label span,
+.wave-field input:not(:placeholder-shown) ~ label span {
+  transform: translateY(-1.5rem);
+  color: var(--color-brand);
+}
+
+/* สถานะ error */
+.wave-field--error .line-base {
+  background: #f87171; /* red-400 */
+}
+.wave-field--error label span {
+  color: #f87171 !important;
+}
+
+/* ปุ่มท้ายช่อง (เช่น ตาดูรหัสผ่าน) */
+.wave-trailing {
+  position: absolute;
+  right: 0;
+  bottom: 0.3rem;
+  display: flex;
+  align-items: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave-field label span,
+  .wave-field .line-active {
+    transition: none;
+  }
+}
+
+/* ---- Scroll reveal: จางเข้า + เลื่อนขึ้นเมื่อ element เข้าจอ (Reveal.tsx เติม .is-visible ผ่าน
+   IntersectionObserver). ค่าเริ่มต้นซ่อนไว้ พอเข้าจอค่อยโผล่ทีละชิ้นตาม transition-delay ---- */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 0.7, 0.2, 1),
+    transform 0.6s cubic-bezier(0.22, 0.7, 0.2, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+/* ปิดอนิเมชั่นให้ผู้ที่ตั้งค่าลดการเคลื่อนไหว — แสดงเนื้อหาทันที */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ---- Hero entrance: องค์ประกอบใน Hero โผล่ทีละชิ้นตอน "โหลดหน้า" (เล่นครั้งเดียว ไม่ต้องเลื่อนจอ)
+   ต่างจาก .reveal ที่รอ scroll — อันนี้เล่นทันทีที่ mount เพราะ Hero อยู่บนสุด เห็นเลยตั้งแต่แรก.
+   ภาษาไทยไม่มีเว้นวรรคระหว่างคำ เลยไล่ทีละ "องค์ประกอบ" (พาดหัวรอง→พาดหัว→คำโปรย→ปุ่ม→การ์ด)
+   แทนการไล่ทีละคำ — ชัวร์เรื่องตัดคำและดูเรียบร้อยเป็นมืออาชีพ. หน่วงต่อชิ้นคุมด้วย inline animationDelay ---- */
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hero-item {
+  opacity: 0;
+  animation: hero-rise 0.7s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+/* ปิดอนิเมชั่นให้ผู้ที่ตั้งค่าลดการเคลื่อนไหว — แสดงเนื้อหาทันที */
+@media (prefers-reduced-motion: reduce) {
+  .hero-item {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* ---- แผงการแจ้งเตือน: เลื่อนลงเล็กน้อย + จางเข้า ให้รู้สึกว่า "กางออกมาจากกระดิ่ง"
+   ไม่ใช่โผล่มาเฉย ๆ (สั้นแค่ 0.15s เพราะเป็นเมนู ไม่ใช่เนื้อหา ช้ากว่านี้จะหน่วงมือ) ---- */
+@keyframes notif-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.notif-panel {
+  animation: notif-panel-in 0.15s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .notif-panel {
+    animation: none;
+  }
+}
+
+/* ---- ส่วนที่กางออก/พับเก็บกลางฟอร์ม (บล็อกข้อมูลโครงการ · CAPTCHA · ข้อความผิดพลาด)
+   เดิมโผล่/หายทันที ดันปุ่ม "ส่งคำขอ" กระโดดลง 204px กลางที่กรอกฟอร์มอยู่ (วัดจากหน้าจริง).
+   ทรานซิชัน height:auto ตรง ๆ ทำไม่ได้ จึงใช้ grid-template-rows 0fr → 1fr ซึ่งเบราว์เซอร์
+   interpolate ให้ได้ — ไม่ต้องรู้ความสูงล่วงหน้า ไม่ต้องวัดด้วย JS.
+   margin-bottom ติดลบตอนพับ = หักช่องไฟ gap-4 (1rem) ของฟอร์มทิ้ง ไม่งั้นตอนพับจะเหลือช่องว่าง
+   16px ลอยอยู่ต่อหนึ่งบล็อก ---- */
+.collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-bottom: -1rem;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.22, 0.7, 0.2, 1),
+    opacity 0.28s ease,
+    margin-bottom 0.28s cubic-bezier(0.22, 0.7, 0.2, 1);
+}
+.collapsible.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-bottom: 0;
+}
+/* ตัวครอบด้านในต้องซ่อนส่วนเกินและยอมให้สูงต่ำกว่าเนื้อหา ไม่งั้น grid ไม่ยอมย่อลงเหลือ 0 */
+.collapsible > * {
+  overflow: hidden;
+  min-height: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapsible {
+    transition: none;
+  }
+}
+
+/* ---- หน้าจอ "ส่งคำขอเรียบร้อยแล้ว": การ์ดจางเข้า + เครื่องหมายถูกวาดตัวเอง
+   ค่า stroke-dasharray = ความยาวเส้นจริงของแต่ละรูป (วงกลม r=23 → 2πr ≈ 145, ขีดถูก ≈ 32)
+   วาดวงกลมก่อนแล้วค่อยลากขีดถูก จึงหน่วง 0.4s ให้พอดีกับตอนวงกลมใกล้ปิด ---- */
+@keyframes success-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes draw-stroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.success-card {
+  opacity: 0;
+  animation: success-rise 0.5s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+.success-circle {
+  stroke-dasharray: 145;
+  stroke-dashoffset: 145;
+  animation: draw-stroke 0.55s ease-out 0.15s both;
+}
+.success-mark {
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: draw-stroke 0.35s ease-out 0.55s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .success-card {
+    opacity: 1;
+    animation: none;
+  }
+  .success-circle,
+  .success-mark {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+}
+
+/* ---- หน้าเข้าสู่ระบบ/สมัครสมาชิก ----
+   ต่างจากฝั่งพนักงานตรงที่การ์ดนี้เป็น "สองคอลัมน์" (แผงบอกประโยชน์ + ฟอร์ม) จึงไล่ทีละชิ้นที่
+   ลูกของ .auth-form ไม่ใช่ลูกของการ์ด — ถ้าไล่ที่การ์ดจะได้บล็อกใหญ่จางเข้าสองก้อน ไม่ใช่ช่องกรอก.
+   แผงประโยชน์เป็นข้อความอ่านประกอบ ไม่ใช่สิ่งที่ต้องกด จึงจางเข้าทีหลังเป็นก้อนเดียว ---- */
+@keyframes auth-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/* ลูกในฟอร์มใช้ opacity อย่างเดียว กันชนกับ transform ของการ์ดที่ยังวิ่งอยู่ */
+@keyframes auth-item-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.auth-card {
+  animation: auth-card-in 0.55s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+.auth-form > * {
+  animation: auth-item-in 0.45s ease-out both;
+}
+.auth-form > *:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.auth-form > *:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.auth-form > *:nth-child(3) {
+  animation-delay: 0.22s;
+}
+.auth-form > *:nth-child(4) {
+  animation-delay: 0.28s;
+}
+.auth-form > *:nth-child(5) {
+  animation-delay: 0.34s;
+}
+.auth-form > *:nth-child(6) {
+  animation-delay: 0.4s;
+}
+.auth-form > *:nth-child(7) {
+  animation-delay: 0.46s;
+}
+.auth-form > *:nth-child(8) {
+  animation-delay: 0.52s;
+}
+.auth-aside {
+  animation: auth-item-in 0.5s ease-out 0.3s both;
+}
+/* เครื่องหมายถูกเด้งเข้าตอนเข้าสู่ระบบสำเร็จ (ชุดเดียวกับฝั่งพนักงาน — เป็นจังหวะเดียวกันของระบบ) */
+@keyframes check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.check-pop {
+  animation: check-pop 0.4s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-card,
+  .auth-form > *,
+  .auth-aside,
+  .check-pop {
+    animation: none;
+  }
+}
+
+/* ---- รายการในพื้นที่ลูกค้า (คำขอ/ใบเสนอราคา/สัญญา): การ์ดไล่โผล่ทีละใบตอนข้อมูลมาถึง
+   เดิมการ์ดทั้งชุดโผล่พรึ่บพร้อมกัน ไม่มีอะไรบอกว่ามีกี่รายการจนกว่าจะกวาดตาอ่าน.
+   ระยะสั้นกว่า .hero-item (10px/0.45s เทียบกับ 20px/0.7s) เพราะเป็นแถวรายการ ไม่ใช่พาดหัว —
+   ไล่ช้ากว่านี้จะรู้สึกว่าหน้าโหลดช้า ทั้งที่ API ตอบใน 1-17ms. หน่วงต่อใบคุมด้วย inline animationDelay ---- */
+@keyframes portal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.portal-item {
+  opacity: 0;
+  animation: portal-rise 0.45s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .portal-item {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* ---- สลับรูปในแกลเลอรี: รูปใหม่ค่อย ๆ จางเข้าแทนการกระพริบเปลี่ยนทันที
+   (คู่กับ key={url} ที่ <img> เพื่อให้ React สร้าง node ใหม่ อนิเมชั่นจึงเล่นซ้ำทุกครั้งที่กดสลับรูป) ---- */
+@keyframes img-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.img-swap {
+  animation: img-fade-in 0.35s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .img-swap {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* ลิ้นชักเมนูมือถือ: แผงเลื่อนเข้าจากขวา + ฉากหลังค่อย ๆ มืดลง */
+@keyframes nav-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+.nav-drawer-panel {
+  animation: nav-drawer-in 0.28s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+@keyframes nav-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.nav-drawer-backdrop {
+  animation: nav-backdrop-in 0.28s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-drawer-panel,
+  .nav-drawer-backdrop {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * เงาตอนคลิกช่องกรอก (ฟอร์มติดต่อ)
+ *
+ * เดิมช่องกรอกไม่มีเงาเลยทั้งตอนปกติและตอนโฟกัส มีแค่กรอบ 1px + วงแหวนทึบ 1px
+ * รวมเป็นขอบหนา 2px เฉย ๆ — อันนี้เพิ่ม "วงแหวนนาวีจาง แผ่ออกรอบช่อง + เงาเทาตกด้านล่าง"
+ * ให้ช่องที่กำลังกรอกเด่นขึ้นกว่าช่องอื่นชัดเจน
+ *
+ * ใช้ box-shadow ล้วน ไม่แตะ border/padding จึง **ไม่ทำให้ช่องอื่นในฟอร์มขยับ** ตอนคลิก
+ * (ตรวจแล้ว: ช่องถัดไปอยู่ที่ 418px เท่าเดิมทั้งก่อนและหลังโฟกัส)
+ *
+ * เขียนเป็นคลาสเดียวแทนที่จะใส่ arbitrary class ซ้ำ 8 ที่ เพราะต้องซ้อนเงา 3 ชั้นในบรรทัดเดียว
+ * และเวลาอยากปรับความเข้ม จะได้แก้ที่เดียว. ต้องถอด focus:ring-* ของ Tailwind ออกจากช่องด้วย
+ * ไม่งั้นวงแหวนสองชุดจะทับกัน
+ * ค่าสีวงแหวน = --color-brand (#1a237e) ที่ความทึบ 12%
+ */
+.field-glow {
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+.field-glow:focus {
+  box-shadow:
+    0 0 0 1px var(--color-brand),
+    0 0 0 5px rgba(26, 35, 126, 0.12),
+    0 4px 12px rgba(15, 23, 42, 0.1);
+}
+/* ช่องที่กรอกผิด: วงแหวนเป็นสีแดงแทน จะได้ไม่ขัดกับกรอบแดงที่ขึ้นอยู่แล้ว */
+.field-glow--error:focus {
+  box-shadow:
+    0 0 0 1px #f87171,
+    0 0 0 5px rgba(248, 113, 113, 0.16),
+    0 4px 12px rgba(15, 23, 42, 0.1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .field-glow {
+    transition: none;
+  }
+}

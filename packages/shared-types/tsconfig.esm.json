@@ -1,0 +1,14 @@
+{
+  // Second output target: real ES modules for bundlers (Vite). The CommonJS build in
+  // tsconfig.json stays as-is for Node consumers (server, jest). Shipping genuine ESM is
+  // what lets the Vite apps resolve named exports natively — no optimizeDeps pre-bundling,
+  // so no dep-cache hash churn that used to blank pages after a rebuild.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "outDir": "dist/esm",
+    "declaration": false
+  },
+  "include": ["src"]
+}

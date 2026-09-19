@@ -1,0 +1,805 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Role {
+  OWNER
+  ADMIN
+  CUSTOMER
+}
+
+// ผู้ว่าจ้างเป็นใครในทางกฎหมาย — ตัดสินทั้งชื่อที่พิมพ์บนเอกสารและการหักภาษี ณ ที่จ่าย
+enum CustomerType {
+  INDIVIDUAL // บุคคลธรรมดา
+  COMPANY // นิติบุคคล (บริษัท / ห้างหุ้นส่วน / ราชการ)
+}
+
+enum WorkCategoryLevel {
+  CATEGORY // หมวดงาน
+  SUBGROUP // กลุ่มงานย่อย
+  ITEM // รายการ
+}
+
+enum ProjectStatus {
+  DRAFT
+  QUOTED
+  // ลูกค้าปฏิเสธใบเสนอราคา — ยังไม่ปิดตาย ออกฉบับใหม่แล้วส่งจะกลับไปเป็น QUOTED เอง
+  REJECTED
+  APPROVED
+  COMPLETED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  REVISED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUOTED
+  CLOSED
+  REJECTED
+}
+
+enum PortfolioType {
+  DESIGN
+  CONSTRUCTION
+}
+
+// ESTIMATE = ราคาประเมินอัตโนมัติจาก BOQ (แบบบ้านในระบบ) — ค่าเริ่มต้น
+// CUSTOM   = โครงการออกแบบใหม่/กำหนดเอง: ข้ามตัวประเมิน BOQ พนักงานกรอกราคาเอง + แนบไฟล์จริง
+enum ProjectType {
+  ESTIMATE
+  CUSTOM
+}
+
+// ชนิดไฟล์แนบที่พนักงานอัปเข้ากับใบเสนอราคา
+enum AttachmentKind {
+  DESIGN // แบบ
+  QUOTE // ใบเสนอราคา
+  OTHER // อื่นๆ
+}
+
+// ป้ายการมองเห็นของไฟล์แนบ -- คุมว่าไฟล์ไหนถึงมือลูกค้าได้ INTERNAL (เช่น Excel ที่โชว์กำไร)
+// จะไม่มีวันถูกเสิร์ฟผ่าน endpoint ฝั่งลูกค้า
+enum AttachmentVisibility {
+  INTERNAL // ภายใน (พนักงานเท่านั้น)
+  CUSTOMER // ให้ลูกค้าเห็น/ดาวน์โหลดได้
+}
+
+// ช่องทางที่ได้รับเงินงวด — เก็บไว้เพื่อกระทบยอดกับสเตทเมนต์/สมุดบัญชีได้
+enum PaymentMethod {
+  TRANSFER // โอนเงิน
+  CASH // เงินสด
+  CHEQUE // เช็ค
+  OTHER // อื่นๆ
+}
+
+// ---------- Core / Auth ----------
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  fullName       String
+  role           Role
+  active         Boolean   @default(true)
+  sessionVersion Int       @default(1)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  // การยืนยันตัวตน 2 ชั้น (2FA/TOTP) — เปิดเองรายคน (optional)
+  // totpSecret เก็บ base32 secret ที่แชร์กับแอป Authenticator (ตั้งตอน setup, ยังไม่เปิดจนกว่า
+  // totpEnabled = true); twoFactorBackupCodes เก็บ "แฮช" ของรหัสสำรอง (ตัวจริงโชว์ครั้งเดียว)
+  /// เข้าสู่ระบบสำเร็จครั้งล่าสุด — เก็บเป็นคอลัมน์เพราะ AuditLog ถูกไล่ลบทุก 1 ปี
+  /// (ค่านี้ต้องอยู่ได้นานกว่านั้น) และเพราะรายชื่อลูกค้าต้องเรียงตามช่องนี้ในฐานข้อมูลได้
+  lastLoginAt    DateTime?
+  totpSecret            String?
+  totpEnabled           Boolean  @default(false)
+  twoFactorBackupCodes  String[] @default([])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  customerProfile CustomerProfile?
+  sessions        Session[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+
+  createdProjects       Project[]      @relation("ProjectCreatedBy")
+  customerProjects       Project[]      @relation("ProjectCustomer")
+  createdProjectVersions ProjectVersion[] @relation("ProjectVersionCreatedBy")
+  createdHouseDesigns    HouseDesign[]  @relation("HouseDesignCreatedBy")
+  createdPortfolios      Portfolio[]    @relation("PortfolioCreatedBy")
+  createdContractTemplates ContractTemplate[] @relation("ContractTemplateCreatedBy")
+  leads                  Lead[]         @relation("LeadCustomer")
+  updatedSettings        Setting[]      @relation("SettingUpdatedBy")
+  uploadedAttachments    QuoteAttachment[] @relation("AttachmentUploadedBy")
+  accessTokens           AccountAccessToken[] @relation("AccessTokenUser")
+  createdAccessTokens    AccountAccessToken[] @relation("AccessTokenCreatedBy")
+  customerNotes          CustomerNote[]   @relation("CustomerNoteCustomer")
+  authoredCustomerNotes  CustomerNote[]   @relation("CustomerNoteAuthor")
+  recordedPayments       InstallmentPayment[] @relation("InstallmentPaymentRecordedBy")
+
+  @@index([role])
+  // รายชื่อลูกค้าอ่านเป็น "เฉพาะ role CUSTOMER แล้วเรียงตามคอลัมน์ใดคอลัมน์หนึ่ง" เสมอ
+  @@index([role, fullName])
+  @@index([role, createdAt])
+  @@index([role, lastLoginAt])
+}
+
+/// บันทึกการติดต่อลูกค้า — โทรไปคุยอะไร นัดวันไหน ติดเรื่องอะไร
+///
+/// สิ่งเดียวในแฟ้มลูกค้าที่ "คนพิมพ์เอง" ทั้งหมด ที่เหลืออ่านจากสิ่งที่ระบบบันทึกไว้อยู่แล้ว
+/// จึงแยกตารางออกมา ไม่ยัดลง AuditLog ซึ่งเป็น append-only แก้ไม่ได้และเก็บแค่ 1 ปี
+model CustomerNote {
+  id          String   @id @default(cuid())
+  customerId  String
+  body        String
+  /// null = บัญชีพนักงานที่เขียนถูกลบไปแล้ว บันทึกยังอยู่แต่ไม่รู้ว่าใครเขียน
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer  User  @relation("CustomerNoteCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("CustomerNoteAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([customerId, createdAt])
+}
+
+model CustomerProfile {
+  userId  String @id
+  phone   String?
+  address String?
+
+  // ---------- ผู้ว่าจ้างที่เป็นนิติบุคคล ----------
+  //
+  // ชื่อบนเอกสารต้องเป็นชื่อ "คู่สัญญา" ไม่ใช่ชื่อคนที่มาสมัครเว็บ — ถ้าผู้ว่าจ้างเป็นบริษัท ใบเสนอราคา
+  // และสัญญาต้องออกในนามบริษัทพร้อมเลขประจำตัวผู้เสียภาษี ไม่งั้นฝ่ายบัญชีของลูกค้าตั้งเบิกไม่ได้
+  customerType  CustomerType @default(INDIVIDUAL)
+  companyName   String?
+  /// เลขประจำตัวผู้เสียภาษี 13 หลักของลูกค้า (คนละตัวกับ companyTaxId ในหน้าตั้งค่า ซึ่งเป็นของบริษัทเรา)
+  taxId         String?
+  /// "สำนักงานใหญ่" หรือ "สาขา 00001" — ใบกำกับภาษีต้องระบุ
+  branch        String?
+  /// ผู้ประสานงานฝั่งลูกค้า — ว่างไว้แปลว่าใช้ชื่อเจ้าของบัญชี
+  contactPerson String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id             String   @id @default(cuid())
+  userId         String
+  sessionVersion Int
+  expiresAt      DateTime
+  userAgent      String?
+  ip             String?
+  // session ครึ่งทาง: ผ่านรหัสผ่านแล้วแต่ยังรอกรอกรหัส 2FA อยู่ — resolveSession จะถือว่ายัง
+  // "ไม่ล็อกอิน" จนกว่าจะยืนยันรหัส 2FA สำเร็จ (แล้ว flag นี้ถูกปลดเป็น false + ต่ออายุ session)
+  pendingTwoFactor Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// In-app notifications only (no email/SMS provider configured) — role-agnostic, works the
+// same for staff and customer accounts since it's keyed purely on userId.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  message   String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+}
+
+// ลิงก์เข้าใช้ครั้งเดียวสำหรับลูกค้าที่ทีมงานสร้างบัญชีให้ (แทนการตั้ง/บอกรหัสผ่านผ่านแชต): พนักงาน
+// ออกลิงก์ → ลูกค้าเปิดลิงก์ตั้งรหัสผ่านของตัวเอง → เข้าดูใบเสนอราคาได้ทันที เก็บเฉพาะ "แฮช" ของ
+// token (ตัวจริงอยู่ในลิงก์เท่านั้น จึงหลุดจาก DB ไม่ได้) ใช้ครั้งเดียว (usedAt) + มีวันหมดอายุ
+model AccountAccessToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  user      User @relation("AccessTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User @relation("AccessTokenCreatedBy", fields: [createdById], references: [id])
+
+  @@index([userId])
+}
+
+// ---------- Work categories / materials ----------
+
+model WorkCategory {
+  id        String            @id @default(cuid())
+  parentId  String?
+  level     WorkCategoryLevel
+  // Human-readable BOQ work code: "B" / "B-02" / "B-02-01". Auto-assigned from the
+  // parent's code on create; unique so it can be printed on quotes as the item number.
+  code      String?           @unique
+  name      String
+  // คำอธิบายหมวด (ว่างได้)
+  description String?
+  sortOrder Int               @default(0)
+  // เปิด/ปิดใช้งาน — หมวดที่ปิดจะถูกซ่อนจากตัวเลือกวัสดุ/BOQ แต่ยังเก็บไว้เพื่อความถูกต้องของ
+  // BOQ เก่าที่อ้างอิงอยู่ (แทนการลบที่ทำไม่ได้เมื่อมีการอ้างอิง)
+  active    Boolean           @default(true)
+
+  parent   WorkCategory?  @relation("WorkCategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children WorkCategory[] @relation("WorkCategoryTree")
+
+  materials Material[]
+  boqItems  BoqItem[]
+
+  @@index([parentId])
+}
+
+// A priced catalog entry under a WorkCategory (ITEM level). Carries both a material
+// rate and a labor rate per unit together — matching the Unit Cost Method BOQs
+// actually use (one line = material cost + labor cost for that item), not two
+// separate catalog rows per material/labor.
+model Material {
+  id                String   @id @default(cuid())
+  categoryId        String?
+  // Catalog code shown to staff and printed on documents, e.g. "MAT-0042".
+  code              String?  @unique
+  name              String
+  // สเปก/ยี่ห้อ/รายละเอียด แยกของที่ชื่อเหมือนกันแต่คนละเกรด (เช่น "ปูน ประเภท 1" vs "ประเภท 5")
+  spec              String?
+  unit              String
+  // ผู้จำหน่าย/แหล่งซื้อ — ช่วยงานจัดซื้อ (ว่างได้)
+  supplier          String?
+  materialUnitPrice Decimal  @db.Decimal(14, 2)
+  laborUnitPrice    Decimal  @db.Decimal(14, 2) @default(0)
+  // ตัวคูณเผื่อเสีย (%) เก็บไว้ใช้ตอนคำนวณปริมาณสั่งซื้อ เช่น 5.00 = เผื่อ 5% (ว่างได้)
+  wasteFactorPct    Decimal? @db.Decimal(5, 2)
+  active            Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+  // เวลาที่ราคาวัสดุ/ค่าแรงเปลี่ยนจริงครั้งล่าสุด — updatedAt ใช้แทนไม่ได้เพราะขยับตอนแก้ชื่อ/สเปกด้วย
+  // (ใช้เตือนว่า BOQ ของโครงการใช้ราคาเก่า ดู boq-review.service.ts) · แถวเก่าเติมจาก updatedAt
+  priceChangedAt    DateTime @default(now())
+  createdAt         DateTime @default(now())
+  // ถังขยะ: soft-delete — ตั้ง deletedAt เมื่อย้ายเข้าถังขยะ (ทุก read กรอง deletedAt:null ออก),
+  // deletedById = ผู้ลบ; ล้างจริงเมื่อกดลบถาวร (OWNER) หรือ auto-purge เกิน 30 วัน
+  deletedAt         DateTime?
+  deletedById       String?
+
+  category WorkCategory? @relation(fields: [categoryId], references: [id])
+  boqItems BoqItem[]
+  // สูตรวัสดุย่อยของรายการนี้ (bill of materials) — ว่างได้ (วัสดุก้อนเดียวแบบเดิม); ถ้ามี
+  // materialUnitPrice ด้านบนจะถือเป็นค่าที่คิดจากผลรวมของวัสดุย่อยแทนการกรอกเอง ดู MaterialComponent
+  components MaterialComponent[] @relation("MaterialRecipe")
+  // ความสัมพันธ์ย้อนกลับ: Material ตัวนี้ถูกใช้เป็น "วัสดุดิบ" ในสูตรของรายการอื่น (อ้างผ่าน componentMaterialId)
+  usedInComponents    MaterialComponent[] @relation("ComponentSource")
+  // และถูกอ้างเป็นวัสดุดิบใน snapshot ของบรรทัด BOQ (ใช้จับกลุ่มในรายงานสรุปวัสดุ)
+  usedInBoqComponents BoqItemComponent[]  @relation("BoqComponentSource")
+
+  @@index([categoryId])
+  @@index([deletedAt])
+}
+
+// วัสดุย่อยหนึ่งบรรทัดในสูตร (recipe) ของ Material แม่ — เช่น "งานเทคอนกรีต 1 ม³" ประกอบด้วย
+// ปูน 7 ถุง + ทราย 0.45 ม³ + หิน 0.9 ม³ ต่อ 1 หน่วยของรายการแม่. อ้างวัสดุดิบจากแคตตาล็อกได้
+// (componentMaterialId) หรือกรอกเอง. ค่าเหล่านี้ถูก snapshot ลง BoqItemComponent ตอนเพิ่มลง BOQ
+model MaterialComponent {
+  id                  String   @id @default(cuid())
+  materialId          String
+  // วัสดุดิบที่อ้างจากแคตตาล็อก (ว่างได้ = กรอกชื่อ/หน่วย/ราคาเอง) — ใช้จับกลุ่มในรายงานสรุปวัสดุ
+  componentMaterialId String?
+  name                String
+  unit                String
+  // ปริมาณวัสดุย่อยต่อ 1 หน่วยของรายการแม่ (เช่น ปูน 7 ถุง ต่อคอนกรีต 1 ม³)
+  qtyPerUnit          Decimal  @db.Decimal(12, 4)
+  // ตัวคูณเผื่อเสีย (%) เฉพาะวัสดุย่อยตัวนี้ (ว่างได้)
+  wasteFactorPct      Decimal? @db.Decimal(5, 2)
+  unitPrice           Decimal  @db.Decimal(14, 2)
+  sortOrder           Int      @default(0)
+
+  material          Material  @relation("MaterialRecipe", fields: [materialId], references: [id], onDelete: Cascade)
+  componentMaterial Material? @relation("ComponentSource", fields: [componentMaterialId], references: [id])
+
+  @@index([materialId])
+}
+
+// ---------- House designs / portfolio ----------
+
+model HouseDesign {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  area        Decimal? @db.Decimal(10, 2)
+  // ค่าวัดถอดปริมาณของแบบบ้าน (ว่างได้ — แบบเก่าไม่มีค่า) ใช้เป็นฐานคิดปริมาณ take-off:
+  // ตอนสร้างโครงการจากแบบ ระบบ prefill ค่าเหล่านี้ลงโครงการ (สเกลตามสัดส่วนพื้นที่) เพื่อให้
+  // บรรทัด BOQ ที่ผูกผนัง/รอบรูป/ปริมาตร คิดปริมาณได้ครบ ไม่ใช่แค่บรรทัดที่ผูกพื้นที่พื้น
+  wallAreaSqm      Decimal? @db.Decimal(12, 2)
+  perimeterM       Decimal? @db.Decimal(10, 2)
+  concreteVolumeM3 Decimal? @db.Decimal(12, 3)
+  // พื้นที่ตั้งอาคาร/ปกคลุมดิน (ตร.ม.) — ตัวขับของงานหลังคา/ฐานราก ต่างจากพื้นที่ใช้สอยรวมทุกชั้น
+  // (บ้าน 2 ชั้น footprint ≈ ครึ่งพื้นที่ใช้สอย) จึงไม่ over-scale เวลาบ้านหลายชั้น
+  footprintSqm     Decimal? @db.Decimal(12, 2)
+  // สเปกบ้านสำหรับโชว์เป็นชิปไอคอนฝั่งลูกค้า (ว่างได้ทั้งหมด — แบบเก่าไม่มีค่า)
+  floors      Int?
+  bedrooms    Int?
+  bathrooms   Int?
+  exteriorImages Json?
+  interiorImages Json?
+  plans       Json?
+  published   Boolean  @default(false)
+  // แสดงในโซน "แบบบ้านแนะนำ" ของหน้าแรกหรือไม่ + ลำดับการแสดง (น้อยไปมาก)
+  featured      Boolean  @default(false)
+  featuredOrder Int      @default(0)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  // ถังขยะ (soft-delete) — ดู Material
+  deletedAt   DateTime?
+  deletedById String?
+
+  createdBy User      @relation("HouseDesignCreatedBy", fields: [createdById], references: [id])
+  projects  Project[]
+  templates Template[]
+  leads     Lead[]
+
+  @@index([published])
+  @@index([featured, featuredOrder])
+  @@index([deletedAt])
+}
+
+model Portfolio {
+  id          String        @id @default(cuid())
+  title       String
+  type        PortfolioType
+  images      Json?
+  description String?
+  published   Boolean       @default(false)
+  publishedAt DateTime?
+  // แสดงในโซน "สำรวจผลงาน" ของหน้าบริการหรือไม่ + ลำดับการแสดง (น้อยไปมาก)
+  featured      Boolean  @default(false)
+  featuredOrder Int      @default(0)
+  createdById String
+  createdAt   DateTime      @default(now())
+  // ถังขยะ (soft-delete) — ดู Material
+  deletedAt   DateTime?
+  deletedById String?
+
+  createdBy User @relation("PortfolioCreatedBy", fields: [createdById], references: [id])
+
+  @@index([type, published])
+  @@index([featured, featuredOrder])
+  @@index([deletedAt])
+}
+
+// ---------- Projects / BOQ ----------
+
+model Project {
+  id            String        @id @default(cuid())
+  projectNo     String        @unique
+  name          String
+  // รายละเอียด/หมายเหตุขอบเขตงาน (ว่างได้)
+  description   String?
+  // สถานที่ก่อสร้าง/ที่อยู่หน้างาน — มักคนละที่กับที่อยู่ลูกค้า พิมพ์ลงใบเสนอราคา/สัญญา (ว่างได้)
+  siteAddress   String?
+  // พื้นที่โครงการ (ตร.ม.) ใช้คิดราคา/ตร.ม. โดยเฉพาะโครงการกำหนดเองที่ไม่มีแบบบ้าน (ว่างได้)
+  areaSqm       Decimal?      @db.Decimal(10, 2)
+  // ค่าวัดสำหรับถอดปริมาณ (quantity take-off) — ตัวขับของบรรทัด BOQ ที่ผูกกับผนัง/รอบรูป/ปริมาตร
+  // (ว่างได้ทั้งหมด; บรรทัดที่อ้างค่าที่ยังว่างจะยังไม่คิดปริมาณจนกว่าจะกรอก) ดู boq.service.ts
+  wallAreaSqm      Decimal? @db.Decimal(12, 2)
+  perimeterM       Decimal? @db.Decimal(10, 2)
+  concreteVolumeM3 Decimal? @db.Decimal(12, 3)
+  // พื้นที่ตั้งอาคาร/ปกคลุมดิน (ตร.ม.) — ตัวขับของงานหลังคา/ฐานราก (PER_FOOTPRINT) แยกจากพื้นที่
+  // ใช้สอยรวมทุกชั้น เพื่อไม่ให้บ้านหลายชั้น over-scale งานหลังคา; prefill จากแบบบ้านตอนสร้างโครงการ
+  footprintSqm     Decimal? @db.Decimal(12, 2)
+  // ตัวขับแบบ "นับ" ของ take-off: บรรทัดที่ผูก PER_BATHROOM/PER_FLOOR คิดปริมาณตามค่าเหล่านี้
+  // (เช่น สุขภัณฑ์ตามจำนวนห้องน้ำ, บันไดตามจำนวนชั้น) — prefill จากแบบบ้านตอนสร้างโครงการ
+  bathrooms        Int?
+  floors           Int?
+  // ช่วงเวลาก่อสร้าง — โผล่ในสัญญาเป็น "ระยะเวลาก่อสร้าง" (ว่างได้)
+  startDate     DateTime?     @db.Date
+  targetEndDate DateTime?     @db.Date
+  type          ProjectType   @default(ESTIMATE)
+  customerId    String?
+  houseDesignId String?
+  // Set when this project originated from a Lead (via "create project from lead") so Lead
+  // status can auto-follow the project/quote lifecycle -- see leads.service.ts.
+  leadId        String?       @unique
+  status        ProjectStatus @default(DRAFT)
+  createdById   String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  // ถังขยะ (soft-delete) — ดู Material
+  deletedAt     DateTime?
+  deletedById   String?
+
+  customer    User?            @relation("ProjectCustomer", fields: [customerId], references: [id])
+  houseDesign HouseDesign?     @relation(fields: [houseDesignId], references: [id])
+  lead        Lead?            @relation(fields: [leadId], references: [id])
+  createdBy   User             @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  versions    ProjectVersion[]
+  quotes      Quote[]
+  contracts   Contract[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([deletedAt])
+}
+
+model ProjectVersion {
+  id                String   @id @default(cuid())
+  projectId         String
+  versionNo         Int
+  directCost        Decimal  @db.Decimal(14, 2)
+  /// อัตรารวมที่บวกเข้ากับต้นทุนตรง — **ตัวนี้คุมราคาทั้งหมด** ทุกยอดเงินคิดจากตัวนี้ตัวเดียว
+  overheadProfitPct Decimal  @db.Decimal(5, 2)
+  /// ส่วนที่เป็น "ค่าดำเนินการ" ภายในอัตรารวมข้างบน — กำไรคือส่วนที่เหลือ (รวม − ค่าดำเนินการ)
+  /// null = เวอร์ชันที่ยังไม่ได้ระบุว่าแบ่งยังไง (ของเก่าทั้งหมด) ไม่ใช่ "ค่าดำเนินการเป็นศูนย์"
+  overheadPct       Decimal? @db.Decimal(5, 2)
+  overheadProfitAmt Decimal  @db.Decimal(14, 2)
+  // ส่วนลดหักหลังค่าดำเนินการ+กำไร และ "ก่อน" คำนวณ VAT ตามหลักภาษีไทย
+  // discountPct = null คือลดเป็นจำนวนเงินคงที่ (หรือไม่ลด) — discountAmt คือยอดที่ถูกหักจริงเสมอ
+  discountPct       Decimal? @db.Decimal(5, 2)
+  discountAmt       Decimal  @default(0) @db.Decimal(14, 2)
+  discountNote      String?
+  vatPct            Decimal  @db.Decimal(5, 2)
+  vatAmt            Decimal  @db.Decimal(14, 2)
+  netPrice          Decimal  @db.Decimal(14, 2)
+  pricePerSqm       Decimal? @db.Decimal(14, 2)
+  createdById       String
+  createdAt         DateTime @default(now())
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("ProjectVersionCreatedBy", fields: [createdById], references: [id])
+  boqItems  BoqItem[]
+  quotes    Quote[]
+
+  @@unique([projectId, versionNo])
+  @@index([projectId])
+}
+
+// Line values are snapshotted at creation time (name/rates), independent of the
+// Material catalog row they were copied from — so a version stays accurate even
+// if catalog prices change later, and materialId may be null for one-off/ad-hoc
+// lines (e.g. "อื่นๆ (ระบุ)" rows seen in real BOQs) that aren't in the catalog.
+model BoqItem {
+  id                String  @id @default(cuid())
+  projectVersionId  String
+  categoryId        String
+  materialId        String?
+  name              String
+  quantity          Decimal @db.Decimal(12, 3)
+  // การถอดปริมาณ (quantity take-off): MANUAL = ปริมาณกรอกเอง (พฤติกรรมเดิม), PER_AREA = คิดจาก
+  // พื้นที่พื้นของโครงการ (project.areaSqm) → quantity = areaSqm × qtyCoefficient × (1+เผื่อเสีย)
+  // ค่า quantity ด้านบนเก็บ "ผลลัพธ์ที่คิดแล้ว" เสมอ เพื่อให้ราคา/ใบเสนอราคา/PDF อ่านค่าเดียวกัน
+  qtyBasis          String   @default("MANUAL")
+  qtyCoefficient    Decimal? @db.Decimal(12, 4)
+  wasteFactorPct    Decimal? @db.Decimal(5, 2)
+  unit              String
+  materialUnitPrice Decimal @db.Decimal(14, 2)
+  materialTotal     Decimal @db.Decimal(14, 2)
+  laborUnitPrice    Decimal @db.Decimal(14, 2)
+  laborTotal        Decimal @db.Decimal(14, 2)
+  lineTotal         Decimal @db.Decimal(14, 2)
+  sortOrder         Int     @default(0)
+  note              String?
+  // เวลาที่ราคาต่อหน่วยของบรรทัดนี้ถูกตั้ง/ยืนยันล่าสุด (เพิ่ม · แก้ราคา · อัปเดตจากคลัง · กด "คงราคาเดิม")
+  // ใช้ตัดสินว่าราคาในคลังที่ต่างอยู่ "เปลี่ยนหลังจากนั้น" หรือพนักงานตั้งใจตั้งราคาเองตั้งแต่แรก
+  // null = บรรทัดก่อนมีคอลัมน์นี้ → ไม่รู้ จึงถือว่าต่างจากคลังเมื่อไรก็เตือน
+  pricedAt          DateTime?
+  // บรรทัดในเวอร์ชันก่อนหน้าที่บรรทัดนี้ถูกคัดลอกมาตอนแตกเวอร์ชัน (BR-07) — ใช้เทียบเวอร์ชันแบบ
+  // ตรงตัว (แก้ชื่อก็ยังจับคู่ได้) · ไม่ผูก FK: เป็นแค่ร่องรอย ไม่ใช่ความสัมพันธ์ที่ต้องบังคับ
+  // null = บรรทัดที่เพิ่มใหม่ในเวอร์ชันนี้ หรือถูกคัดลอกก่อนมีคอลัมน์นี้
+  sourceItemId      String?
+
+  projectVersion ProjectVersion @relation(fields: [projectVersionId], references: [id], onDelete: Cascade)
+  category       WorkCategory   @relation(fields: [categoryId], references: [id])
+  material       Material?      @relation(fields: [materialId], references: [id])
+  // สแนปช็อตสูตรวัสดุย่อยของบรรทัดนี้ (ถอดปริมาณวัสดุ) — freeze ไว้กับเวอร์ชันเหมือนราคา/ชื่อ ว่างได้
+  components     BoqItemComponent[]
+
+  @@index([projectVersionId])
+}
+
+// สแนปช็อตวัสดุย่อยหนึ่งบรรทัดของ BoqItem — freeze ค่า "ต่อ 1 หน่วยของบรรทัดแม่" ไว้กับเวอร์ชัน
+// (ปริมาณรวมของบรรทัด = boqItem.quantity × qtyPerUnit × (1+เผื่อเสีย) คิดสดตอนอ่าน/รายงาน).
+// materialId ของบรรทัดแม่ยัง snapshot ราคา/ชื่ออิสระจากแคตตาล็อกเหมือนเดิม; componentMaterialId
+// เก็บไว้เพื่อจับกลุ่มวัสดุเดียวกันข้ามบรรทัดในรายงานสรุปวัสดุ (ว่างได้สำหรับวัสดุย่อยที่กรอกเอง)
+model BoqItemComponent {
+  id                  String   @id @default(cuid())
+  boqItemId           String
+  componentMaterialId String?
+  name                String
+  unit                String
+  qtyPerUnit          Decimal  @db.Decimal(12, 4)
+  wasteFactorPct      Decimal? @db.Decimal(5, 2)
+  unitPrice           Decimal  @db.Decimal(14, 2)
+  sortOrder           Int      @default(0)
+
+  boqItem           BoqItem   @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
+  componentMaterial Material? @relation("BoqComponentSource", fields: [componentMaterialId], references: [id])
+
+  @@index([boqItemId])
+}
+
+model Template {
+  id            String   @id @default(cuid())
+  name          String
+  // คำอธิบายสั้น ๆ ว่าแม่แบบนี้ใช้กับงานแบบไหน (ว่างได้ — แม่แบบเก่าไม่มีค่า)
+  description   String?
+  houseDesignId String?
+  structure     Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  // ถังขยะ (soft-delete) — ดู Material
+  deletedAt     DateTime?
+  deletedById   String?
+
+  houseDesign HouseDesign? @relation(fields: [houseDesignId], references: [id])
+
+  @@index([deletedAt])
+}
+
+// ---------- Quotes / contracts ----------
+
+model Quote {
+  id               String      @id @default(cuid())
+  projectId        String
+  projectVersionId String
+  quoteNo          String      @unique
+  // Sequential per project (1, 2, 3, ...), distinct from quoteNo's global yearly sequence —
+  // lets staff/customers tell "which attempt is this" apart when a project has several quotes.
+  revisionNo       Int
+  pdfUrl           String?
+  status           QuoteStatus @default(DRAFT)
+  sentAt           DateTime?
+  respondedAt      DateTime?
+  // Free-text detail the customer left when responding (required for REQUEST_REVISION so
+  // staff know what to change — see myQuotes.service.ts respondToQuote).
+  customerNote     String?
+  createdAt        DateTime    @default(now())
+
+  // ยืนราคา + เงื่อนไขท้ายใบ — ตรึงจากหน้าตั้งค่าตอนกดส่ง (ไม่ใช่ตอนสร้างร่าง เพราะร่างอาจค้างหลายวัน
+  // ลูกค้าจะได้เวลาไม่ครบ) แก้หน้าตั้งค่าทีหลังต้องไม่ทำให้ใบที่ลูกค้าถืออยู่เปลี่ยนเงื่อนไขเงียบ ๆ
+  // null ทั้งคู่ = ส่งก่อนมีฟีเจอร์นี้ หรือบริษัทยังไม่ได้ตั้ง — ไม่มีวันหมดอายุ ไม่เติมย้อนหลัง
+  /// วันสุดท้ายที่ยืนราคา (รวมวันนั้น) ตามเวลาไทย — พ้นแล้วลูกค้ากดยอมรับเองไม่ได้ พนักงานขยายได้
+  validUntil       DateTime?   @db.Date
+  /// เงื่อนไขท้ายใบ บรรทัดละข้อ
+  terms            String?
+
+  // "ลูกค้าเปิดดูใบเสนอราคาหรือยัง" -- เก็บเป็นคอลัมน์บนใบเสนอราคา ไม่ได้อ่านจาก AuditLog เพราะ
+  // AuditLog ถูกล้างทิ้งเมื่อครบ 1 ปี ใบที่ลูกค้าเปิดดูจริงจะกลายเป็น "ยังไม่เปิด" เงียบ ๆ เมื่อพ้นปีนั้น
+  // นับเฉพาะการเปิดผ่านช่องทางของลูกค้าเอง (GET /api/my/quotes/:id และ PDF ของลูกค้า) พนักงาน
+  // เปิดดูไม่นับ -- ดู recordQuoteView ใน myQuotes.service.ts
+  firstViewedAt    DateTime?
+  lastViewedAt     DateTime?
+  /// จำนวน "ครั้งที่เปิด" แบบรวบช่วงสั้น ๆ เป็นครั้งเดียว (ดู VIEW_SESSION_GAP_MS)
+  viewCount        Int         @default(0)
+
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectVersion ProjectVersion @relation(fields: [projectVersionId], references: [id])
+  attachments    QuoteAttachment[]
+
+  @@index([projectId])
+}
+
+// ไฟล์จริงที่พนักงานอัปเข้ากับใบเสนอราคา (BOQ ที่ทำจาก Excel/PDF, แบบก่อสร้าง ฯลฯ)
+// เก็บไฟล์บนดิสก์ด้วยชื่อสุ่ม (storedName) แล้วเสิร์ฟผ่าน route ที่ตรวจสิทธิ์ ไม่ใช่ static
+// สาธารณะ -- ดู attachments module ป้าย visibility คุมว่าไฟล์ถึงมือลูกค้าได้ไหม
+model QuoteAttachment {
+  id           String               @id @default(cuid())
+  quoteId      String
+  fileName     String // ชื่อไฟล์ต้นฉบับที่แสดงให้ผู้ใช้เห็น/ตั้งตอนดาวน์โหลด
+  storedName   String // ชื่อไฟล์บนดิสก์ (สุ่ม) สำหรับเสิร์ฟแบบตรวจสิทธิ์
+  mimeType     String
+  sizeBytes    Int
+  kind         AttachmentKind       @default(OTHER)
+  visibility   AttachmentVisibility @default(INTERNAL)
+  uploadedById String
+  createdAt    DateTime             @default(now())
+
+  quote      Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  uploadedBy User  @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([quoteId])
+}
+
+model Contract {
+  id         String    @id @default(cuid())
+  projectId  String
+  contractNo String    @unique
+  pdfUrl     String?
+  signedAt   DateTime?
+  createdAt  DateTime  @default(now())
+
+  // เนื้อสัญญาที่แช่แข็งไว้ตอนออกฉบับนี้ — แทนค่าตัวแปรจากแม่แบบเรียบร้อยแล้ว
+  // ห้ามอ่านถ้อยคำจากแม่แบบตอนพิมพ์ PDF ไม่งั้นสัญญาที่เซ็นไปแล้วจะเปลี่ยนตามการแก้แม่แบบ
+  templateId   String?
+  templateName String?
+  docTitle     String?
+  bodyJson     Json?
+  /// มูลค่าสัญญาที่ตรึงไว้ตอนออกฉบับนี้ — ยอดที่งวดเงินต้องรวมให้ได้
+  /// (ห้ามอ่านจากเวอร์ชันล่าสุดของโครงการ ซึ่งขยับได้ถ้ามีการสร้างเวอร์ชันใหม่ทีหลัง)
+  amount       Decimal? @db.Decimal(14, 2)
+  /// ส่วนที่เป็นภาษีมูลค่าเพิ่มใน amount — ตรึงไว้พร้อมกัน เพื่อให้คำนวณ "มูลค่างานก่อน VAT"
+  /// ซึ่งเป็นฐานของภาษีหัก ณ ที่จ่าย 3% ได้โดยไม่ต้องย้อนไปอ่านเวอร์ชันที่อาจเปลี่ยนไปแล้ว
+  /// null = สัญญาที่ออกก่อนมีช่องนี้ และหาเวอร์ชันที่ยอดตรงกันแบบไม่ต้องเดาไม่ได้
+  vatAmount    Decimal? @db.Decimal(14, 2)
+  /// ผู้มีอำนาจลงนามฝั่งบริษัทที่ตรึงไว้ตอนออกฉบับนี้ — พิมพ์ใต้เส้นเซ็น "ผู้รับจ้าง"
+  /// ห้ามอ่านจากหน้าตั้งค่าตอนพิมพ์: เปลี่ยนกรรมการแล้วสัญญาที่เซ็นไปแล้วจะพิมพ์ชื่อคนใหม่ใต้ลายเซ็นคนเก่า
+  /// null = ฉบับที่ออกก่อนมีช่องนี้ หรือตอนออกยังไม่ได้ตั้งผู้ลงนาม → พิมพ์ชื่อบริษัทแบบเดิม
+  signatoryName  String?
+  signatoryTitle String?
+
+  project      Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  template     ContractTemplate?     @relation(fields: [templateId], references: [id])
+  installments ContractInstallment[]
+
+  @@index([projectId])
+  @@index([templateId])
+}
+
+/// งวดการชำระเงินของสัญญาหนึ่งฉบับ (ข้อ 7) — ระบบบังคับให้ยอดรวมเท่ามูลค่าสัญญาพอดี
+model ContractInstallment {
+  id         String   @id @default(cuid())
+  contractId String
+  /// ลำดับงวด 1..n
+  seq        Int
+  /// เงื่อนไขที่ต้องทำเสร็จก่อนเบิกงวดนี้
+  milestone  String
+  amount     Decimal  @db.Decimal(14, 2)
+  /// วันที่ถึงกำหนดชำระ — พนักงานกดเองเมื่องานถึงงวดแล้ว/วางบิลแล้ว ระบบไม่เดาให้
+  /// null = ยังไม่ถึงงวด · ห้ามคำนวณย้อนหลังจากวันเซ็นสัญญา ดูเหตุผลใน migration
+  dueOn      DateTime? @db.Date
+  createdAt  DateTime @default(now())
+
+  contract Contract             @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  payments InstallmentPayment[]
+
+  @@unique([contractId, seq])
+  @@index([contractId])
+  @@index([dueOn])
+}
+
+/// รายการรับเงินของงวดหนึ่ง — หนึ่งงวดมีได้หลายรายการ (มัดจำ ทยอยโอน จ่ายไม่ครบ)
+///
+/// สถานะของงวด ("รับครบแล้ว/รับบางส่วน/เกินกำหนด") คำนวณจากผลรวมของตารางนี้เสมอ ไม่เก็บซ้ำ —
+/// เก็บสถานะซ้ำเมื่อไรคือเปิดช่องให้มันขัดกับยอดจริงเมื่อนั้น ดู installmentStatus() ใน shared-types
+model InstallmentPayment {
+  id            String        @id @default(cuid())
+  installmentId String
+  /// วันที่ได้รับเงินจริง ไม่ใช่วันที่นั่งบันทึก (เทียบกับ createdAt เพื่อดูว่าบันทึกย้อนหลังแค่ไหน)
+  paidOn        DateTime      @db.Date
+  /// ยอดที่ถือว่าชำระหนี้งวดนี้แล้ว = ยอดก่อนหักภาษี ณ ที่จ่าย
+  amount        Decimal       @db.Decimal(14, 2)
+  /// ภาษีหัก ณ ที่จ่ายที่ผู้ว่าจ้างหักไว้ (0 = ไม่ได้หัก) · เงินเข้าบัญชีจริง = amount − ช่องนี้
+  /// ถ้าเก็บแค่ยอดที่โอนเข้ามา งวดของลูกค้านิติบุคคลจะค้างอีก 3% ตลอดกาลทั้งที่จ่ายครบแล้ว
+  withholdingAmount Decimal   @default(0) @db.Decimal(14, 2)
+  method        PaymentMethod @default(TRANSFER)
+  /// เลขที่เช็ค/เลขอ้างอิงการโอน — ทางเดียวที่จะกระทบยอดกับสเตทเมนต์ธนาคารได้
+  reference     String?
+  note          String?
+  /// null = บัญชีพนักงานที่บันทึกถูกลบไปแล้ว รายการยังอยู่ (ห้าม CASCADE)
+  recordedById  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  installment ContractInstallment @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+  recordedBy  User?               @relation("InstallmentPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([installmentId, paidOn])
+}
+
+/// แม่แบบสัญญา — ถ้อยคำกลางที่พนักงานแก้เองได้ ใช้ตัวแปร {{...}} เติมค่าจากโครงการตอนออกสัญญา
+model ContractTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  /// หัวเรื่องบนหน้าปก เช่น "สัญญาเหมาทำการก่อสร้าง"
+  docTitle    String
+  /// { preamble, clauses: [{ heading, body }], closing } — แพตเทิร์นเดียวกับ Template.structure
+  structure   Json
+  /// แม่แบบตั้งต้นเมื่อออกสัญญาโดยไม่ระบุ — ฐานข้อมูลบังคับให้มีได้ตัวเดียว (partial unique index)
+  isDefault   Boolean  @default(false)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  // ถังขยะ (soft-delete) — ดู Material
+  deletedAt   DateTime?
+  deletedById String?
+
+  createdBy User       @relation("ContractTemplateCreatedBy", fields: [createdById], references: [id])
+  contracts Contract[]
+
+  @@index([deletedAt])
+}
+
+// ---------- Leads ----------
+
+model Lead {
+  id            String     @id @default(cuid())
+  customerId    String?
+  name          String
+  phone         String
+  email         String?
+  serviceType   String
+  houseDesignId String?
+  message       String?
+  // ข้อมูลโครงการเบื้องต้นจากลูกค้า (ทุกช่อง optional) — ใช้เติมให้ Project อัตโนมัติตอน "สร้าง
+  // โครงการจากคำขอ" เพื่อลดการพิมพ์ซ้ำ; พนักงานยืนยัน/แก้ไขต่อได้ (ดู createProjectFromLead)
+  siteAddress      String?
+  areaSqm          Decimal?  @db.Decimal(10, 2)
+  desiredStartDate DateTime? @db.Date
+  attachments   Json?
+  status        LeadStatus @default(NEW)
+  reply         String?
+  repliedAt     DateTime?
+  // ถังขยะ (soft-delete): ลบคำขอสแปม/ขยะไปพักในถังขยะก่อน กู้คืนได้ ลบถาวรอัตโนมัติหลัง 30 วัน
+  deletedAt     DateTime?
+  deletedById   String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  project Project?
+
+  customer    User?        @relation("LeadCustomer", fields: [customerId], references: [id])
+  houseDesign HouseDesign? @relation(fields: [houseDesignId], references: [id])
+
+  @@index([status])
+  @@index([deletedAt])
+}
+
+// ---------- Audit / settings ----------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  // ไทม์ไลน์ของลูกค้ารายคนอ่านเป็น "ของผู้ใช้คนนี้ เรียงใหม่สุดก่อน" เสมอ
+  @@index([userId, createdAt])
+}
+
+model Setting {
+  key         String   @id
+  value       String
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation("SettingUpdatedBy", fields: [updatedById], references: [id])
+}
+
+// Backs document numbering (projectNo/quoteNo/contractNo). id is e.g. "PRJ-2026".
+// Atomic `value = value + 1` via upsert takes a row lock, so concurrent requests
+// never race for the same sequence number (unlike a "count existing rows" approach).
+model DocumentCounter {
+  id    String @id
+  value Int    @default(0)
+}
