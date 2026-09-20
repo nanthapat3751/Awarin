@@ -21,7 +21,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import type {
@@ -2661,24 +2661,31 @@ function RatesPanel({ vm }: Readonly<{ vm: ProjectVM }>) {
 /** ฟอร์มเพิ่มบรรทัด BOQ (เลือกวัสดุ/หมวดงาน/ฐานคำนวณปริมาณ/ราคา + พรีวิวยอด) */
 function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
   const { showAddForm, setShowAddForm, submitAdd, materialOptions, addForm, selectMaterial, categoryOptions, setAddForm, unitsInUse, addHasRecipe, addDerivedPrice, driverValueOf, rebarOpen, setRebarOpen, rebarDia, setRebarDia, rebarLen, setRebarLen, addComponents, setAddComponents, materialById, editingItem, previewLineTotal, showNetPreview, previewNet } = vm;
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Esc ปิดฟอร์ม — ฟังที่ document แทนการดักคีย์บนกล่อง (กล่องเปล่าไม่ใช่ตัวรับคีย์) แต่จำกัด
+  // เฉพาะตอนโฟกัสอยู่ในฟอร์ม เท่ากับตอนที่ยังดักบนกล่อง · dropdown ค้นหาหยุด Esc ของมันเองไว้แล้ว
+  useEffect(() => {
+    if (!showAddForm) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && formRef.current?.contains(e.target as Node)) setShowAddForm(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [showAddForm, setShowAddForm]);
+
   return (
     <>
       {showAddForm && (
-        <div
-          className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 border border-dashed border-slate-300 rounded-md p-3 bg-white items-end"
-          onKeyDown={(e) => {
-            // Enter บนช่องกรอก = บันทึก (dropdown ค้นหาดัก Enter ไว้เองแล้ว), Esc = ปิดฟอร์ม
-            if (e.key === "Escape") {
-              setShowAddForm(false);
-            } else if (
-              e.key === "Enter" &&
-              !e.defaultPrevented &&
-              (e.target as HTMLElement).tagName === "INPUT"
-            ) {
-              e.preventDefault();
-              submitAdd();
-            }
+        // ฟอร์มจริง: Enter ในช่องกรอก = บันทึก ตามพฤติกรรมมาตรฐานของเบราว์เซอร์
+        // (dropdown ค้นหากัน Enter ของมันเองไว้แล้ว) · ปุ่มข้างในทุกตัวเป็น type="button" จึงไม่ยิงบันทึก
+        <form
+          ref={formRef}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitAdd();
           }}
+          className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 border border-dashed border-slate-300 rounded-md p-3 bg-white items-end"
         >
           <label className="flex flex-col gap-1 text-xs text-slate-700 col-span-2">
             ค้นหาวัสดุ (เลือกแล้วเติมหมวดงาน/ราคาให้)
@@ -2875,7 +2882,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
           </div>
 
           <div className="col-span-2 sm:col-span-4 flex flex-wrap items-center gap-3">
-            <Button size="sm" onClick={submitAdd}>
+            <Button size="sm" type="submit">
               <Check size={14} /> บันทึก
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)}>
@@ -2895,7 +2902,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
               </span>
             )}
           </div>
-        </div>
+        </form>
       )}
     </>
   );
@@ -2903,7 +2910,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
 
 /** ตาราง BOQ ของหมวดที่เปิด (หรือหน้าสรุปทุกหมวด) + แถวแก้ไขในที่ */
 function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { items, missingDriverLabels, openEditInfo, scrollToSection, boqGroups, activeBoqGroup, foldableSubs, toggleAllSubs, allSubsCollapsed, driftItemIds, openBoqGroup, currentVersion, boqRenderRows, toggleSub, editingId, setEditingId, submitEdit, categoryById, materialOptions, editMaterialId, selectEditMaterial, editName, editUnit, editHasRecipe, editDerivedPrice, editMaterialPrice, setEditMaterialPrice, editLaborPrice, setEditLaborPrice, editBasis, editCoefficient, setEditCoefficient, editWaste, setEditWaste, driverValueOf, editQuantity, setEditQuantity, editRebarOpen, setEditRebarOpen, editRebarDia, setEditRebarDia, editRebarLen, setEditRebarLen, editComponents, setEditComponents, materialById, previewLineTotal, positionInGroup, reordering, moveItem, startEdit, handleDelete, activeBoqIndex } = vm;
+  const { items, missingDriverLabels, openEditInfo, scrollToSection, boqGroups, activeBoqGroup, foldableSubs, toggleAllSubs, allSubsCollapsed, driftItemIds, openBoqGroup, currentVersion, boqRenderRows, toggleSub, editingId, categoryById, driverValueOf, positionInGroup, reordering, moveItem, startEdit, handleDelete, activeBoqIndex } = vm;
   return (
     <>
       {items.length > 0 && (
@@ -3127,199 +3134,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
               }
               const item = row.item;
               return editingId === item.id ? (
-                <tr
-                  key={item.id}
-                  className="border-t border-brand/40 bg-brand/5"
-                  onKeyDown={(e) => {
-                    // Enter บนช่องกรอก = บันทึก, Esc = ยกเลิกการแก้ (dropdown ค้นหาดักคีย์ของตัวเองไว้แล้ว)
-                    if (e.key === "Escape") {
-                      setEditingId(null);
-                    } else if (
-                      e.key === "Enter" &&
-                      !e.defaultPrevented &&
-                      (e.target as HTMLElement).tagName === "INPUT"
-                    ) {
-                      e.preventDefault();
-                      submitEdit(item.id);
-                    }
-                  }}
-                >
-                  {/* แก้ไขแบบแผงขยายเต็มความกว้าง (Inline expand) — ใช้เลย์เอาต์การ์ดเหมือนฟอร์มเพิ่มรายการ
-                      แทนการยัดช่องกรอกลงในแต่ละคอลัมน์ (เดิมทำ dropdown ล้น/หมวดงานตัดบรรทัด/ปุ่มตกขอบ) */}
-                  <td colSpan={8} className="p-3">
-                    <div className="rounded-lg border border-brand/30 bg-white p-4 shadow-sm">
-                      {/* หัวการ์ด: รหัส + เส้นทางหมวดงาน (แนวนอน ไม่ตัดเป็นแนวตั้งแบบเดิม) */}
-                      <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="rounded-md bg-brand/10 px-2 py-0.5 font-mono text-xs font-medium text-brand">
-                          {categoryById.get(item.categoryId)?.code ?? "—"}
-                        </span>
-                        <span className="text-sm font-medium text-slate-700">แก้ไขรายการ</span>
-                        <span className="text-xs text-slate-500">
-                          {buildCategoryPath(item.categoryId, categoryById)}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-start">
-                        <label className="col-span-2 sm:col-span-4 flex flex-col gap-1 text-xs text-slate-700">
-                          วัสดุ <span className="text-slate-400">(เลือกเพื่อสลับ — เว้นไว้เพื่อคงชื่อเดิม)</span>
-                          <SearchableSelect
-                            options={materialOptions}
-                            value={editMaterialId}
-                            onChange={selectEditMaterial}
-                            placeholder={editName || "เลือกวัสดุเพื่อสลับ"}
-                            clearable
-                          />
-                          {editName && (
-                            <span className="text-xs text-slate-500">
-                              {editName}
-                              {!editMaterialId && " (กรอกเอง)"} · หน่วย {editUnit || "—"}
-                            </span>
-                          )}
-                        </label>
-
-                        <label className="col-span-1 flex flex-col gap-1 text-xs text-slate-700">
-                          ราคาวัสดุ/หน่วย
-                          {editHasRecipe ? (
-                            <input
-                              type="text"
-                              readOnly
-                              value={money(editDerivedPrice)}
-                              title="คิดจากสูตรวัสดุย่อยด้านล่าง"
-                              className="border border-slate-200 bg-slate-100 text-slate-500 rounded-md px-2 py-1 text-sm text-right"
-                            />
-                          ) : (
-                            <input
-                              type="number"
-                              value={editMaterialPrice}
-                              onChange={(e) => setEditMaterialPrice(e.target.value)}
-                              className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
-                            />
-                          )}
-                        </label>
-
-                        <label className="col-span-1 flex flex-col gap-1 text-xs text-slate-700">
-                          <span>ค่าแรง/หน่วย</span>
-                          <input
-                            type="number"
-                            value={editLaborPrice}
-                            onChange={(e) => setEditLaborPrice(e.target.value)}
-                            className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
-                          />
-                        </label>
-                      </div>
-
-                      {/* บล็อกปริมาณ — ตามฐานคำนวณเดิมของบรรทัด (MANUAL = จำนวน + เครื่องมือเหล็ก;
-                          อื่น ๆ = สัมประสิทธิ์ + เผื่อเสีย + พรีวิวปริมาณสด) */}
-                      <div className="mt-3 rounded-lg bg-slate-50 p-3">
-                        {editBasis !== "MANUAL" ? (
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-end">
-                            <label className="flex flex-col gap-1 text-xs text-slate-700">
-                              {basisConfig(editBasis).perLabel}
-                              <input
-                                type="number"
-                                step="0.0001"
-                                value={editCoefficient}
-                                onChange={(e) => setEditCoefficient(e.target.value)}
-                                className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1 text-xs text-slate-700">
-                              <span>เผื่อเสีย (%)</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={editWaste}
-                                onChange={(e) => setEditWaste(e.target.value)}
-                                className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
-                              />
-                            </label>
-                            <div className="col-span-2 flex flex-col gap-1 text-xs">
-                              <span className="text-slate-500">ปริมาณที่คิดได้</span>
-                              {(() => {
-                                const dv = driverValueOf(editBasis);
-                                if (dv == null) {
-                                  return (
-                                    <span className="text-amber-600">
-                                      ตั้ง “{basisConfig(editBasis).measureLabel}” ในรายละเอียดโครงการก่อน
-                                    </span>
-                                  );
-                                }
-                                const q = previewTakeoffQty(Number(editCoefficient), Number(editWaste), dv);
-                                return q == null ? (
-                                  <span className="text-slate-400">—</span>
-                                ) : (
-                                  <span className="font-medium text-slate-800">
-                                    {dv} × {editCoefficient || 0} × (1+{editWaste || 0}%) ={" "}
-                                    {q.toLocaleString("th-TH")} {editUnit}
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        ) : (
-                          // วางเรียงลงมาเป็นแถว ไม่ใช่วางข้าง ๆ กัน — กล่องเครื่องมือกว้างกว่าช่องจำนวนมาก
-                          // ถ้าวางข้างกันช่องจำนวนจะลอยอยู่ซ้ายห่างจากกล่อง จนดูเหมือนคนละเรื่อง
-                          <div className="flex flex-col items-start gap-2">
-                            <label className="flex flex-col gap-1 text-xs text-slate-700">
-                              <span>จำนวน</span>
-                              <input
-                                type="number"
-                                value={editQuantity}
-                                onChange={(e) => setEditQuantity(e.target.value)}
-                                className="w-32 border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
-                              />
-                            </label>
-                            {/* เครื่องมือเดียวกับฟอร์มเพิ่มบรรทัด (components/RebarCalculator)
-                                แผงแก้ไขไม่มีช่องหน่วยนับให้แก้ จึงไม่ส่ง onUnitChange — ได้แค่เตือน */}
-                            <RebarCalculator
-                              open={editRebarOpen}
-                              onToggle={() => setEditRebarOpen((v) => !v)}
-                              diameterMm={editRebarDia}
-                              onDiameterChange={setEditRebarDia}
-                              lengthM={editRebarLen}
-                              onLengthChange={setEditRebarLen}
-                              unit={editUnit}
-                              onInsert={(kg) => {
-                                setEditQuantity(String(kg));
-                                setEditRebarOpen(false);
-                              }}
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* สูตรวัสดุย่อย (ถอดปริมาณวัสดุ) */}
-                      <div className="mt-3 border-t border-slate-200 pt-3">
-                        <MaterialComponentsEditor
-                          rows={editComponents}
-                          onChange={setEditComponents}
-                          materialOptions={materialOptions}
-                          materialById={materialById}
-                          unitLabel={editUnit}
-                          unitDatalistId="boq-units"
-                        />
-                      </div>
-
-                      {/* แถบล่าง: ยอดรวมสด + ปุ่มบันทึก/ยกเลิก (ชิดขวา) */}
-                      <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-3">
-                        <span className="text-sm text-slate-500">
-                          รวมบรรทัด:{" "}
-                          <span className="font-semibold text-brand" title="ยอดสด (ยังไม่บันทึก)">
-                            {money(previewLineTotal ?? item.lineTotal)}
-                          </span>
-                        </span>
-                        <div className="ml-auto flex items-center gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>
-                            <X size={14} /> ยกเลิก
-                          </Button>
-                          <Button size="sm" onClick={() => submitEdit(item.id)}>
-                            <Check size={14} /> บันทึก
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
+                <BoqEditRow key={item.id} vm={vm} item={item} />
               ) : (
                 <tr key={item.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
@@ -4265,6 +4080,215 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
         )}
       </div>
     </>
+  );
+}
+
+/** แถวแก้ไขบรรทัด BOQ ในที่ — Enter ในช่องกรอก = บันทึก, Esc = ยกเลิก
+    ฟังคีย์ที่ document แทนการดักบนแถวตาราง (แถวไม่ใช่ตัวรับคีย์) แต่จำกัดเฉพาะคีย์ที่เกิดในแถวนี้
+    เท่ากับตอนที่ยังดักบนแถว · dropdown ค้นหาหยุดคีย์ของมันเองไว้แล้วจึงไม่รั่วมาถึงตรงนี้ */
+function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>) {
+  const { setEditingId, submitEdit, categoryById, materialOptions, editMaterialId, selectEditMaterial, editName, editUnit, editHasRecipe, editDerivedPrice, editMaterialPrice, setEditMaterialPrice, editLaborPrice, setEditLaborPrice, editBasis, editCoefficient, setEditCoefficient, editWaste, setEditWaste, driverValueOf, editQuantity, setEditQuantity, editRebarOpen, setEditRebarOpen, editRebarDia, setEditRebarDia, editRebarLen, setEditRebarLen, editComponents, setEditComponents, materialById, previewLineTotal } = vm;
+  const rowRef = useRef<HTMLTableRowElement>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!rowRef.current?.contains(e.target as Node)) return;
+      if (e.key === "Escape") {
+        setEditingId(null);
+      } else if (
+        e.key === "Enter" &&
+        !e.defaultPrevented &&
+        (e.target as HTMLElement).tagName === "INPUT"
+      ) {
+        e.preventDefault();
+        submitEdit(item.id);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [item.id, setEditingId, submitEdit]);
+
+  return (
+    <tr
+      ref={rowRef}
+      className="border-t border-brand/40 bg-brand/5"
+    >
+      {/* แก้ไขแบบแผงขยายเต็มความกว้าง (Inline expand) — ใช้เลย์เอาต์การ์ดเหมือนฟอร์มเพิ่มรายการ
+          แทนการยัดช่องกรอกลงในแต่ละคอลัมน์ (เดิมทำ dropdown ล้น/หมวดงานตัดบรรทัด/ปุ่มตกขอบ) */}
+      <td colSpan={8} className="p-3">
+        <div className="rounded-lg border border-brand/30 bg-white p-4 shadow-sm">
+          {/* หัวการ์ด: รหัส + เส้นทางหมวดงาน (แนวนอน ไม่ตัดเป็นแนวตั้งแบบเดิม) */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="rounded-md bg-brand/10 px-2 py-0.5 font-mono text-xs font-medium text-brand">
+              {categoryById.get(item.categoryId)?.code ?? "—"}
+            </span>
+            <span className="text-sm font-medium text-slate-700">แก้ไขรายการ</span>
+            <span className="text-xs text-slate-500">
+              {buildCategoryPath(item.categoryId, categoryById)}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-start">
+            <label className="col-span-2 sm:col-span-4 flex flex-col gap-1 text-xs text-slate-700">
+              วัสดุ <span className="text-slate-400">(เลือกเพื่อสลับ — เว้นไว้เพื่อคงชื่อเดิม)</span>
+              <SearchableSelect
+                options={materialOptions}
+                value={editMaterialId}
+                onChange={selectEditMaterial}
+                placeholder={editName || "เลือกวัสดุเพื่อสลับ"}
+                clearable
+              />
+              {editName && (
+                <span className="text-xs text-slate-500">
+                  {editName}
+                  {!editMaterialId && " (กรอกเอง)"} · หน่วย {editUnit || "—"}
+                </span>
+              )}
+            </label>
+
+            <label className="col-span-1 flex flex-col gap-1 text-xs text-slate-700">
+              ราคาวัสดุ/หน่วย
+              {editHasRecipe ? (
+                <input
+                  type="text"
+                  readOnly
+                  value={money(editDerivedPrice)}
+                  title="คิดจากสูตรวัสดุย่อยด้านล่าง"
+                  className="border border-slate-200 bg-slate-100 text-slate-500 rounded-md px-2 py-1 text-sm text-right"
+                />
+              ) : (
+                <input
+                  type="number"
+                  value={editMaterialPrice}
+                  onChange={(e) => setEditMaterialPrice(e.target.value)}
+                  className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+                />
+              )}
+            </label>
+
+            <label className="col-span-1 flex flex-col gap-1 text-xs text-slate-700">
+              <span>ค่าแรง/หน่วย</span>
+              <input
+                type="number"
+                value={editLaborPrice}
+                onChange={(e) => setEditLaborPrice(e.target.value)}
+                className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+              />
+            </label>
+          </div>
+
+          {/* บล็อกปริมาณ — ตามฐานคำนวณเดิมของบรรทัด (MANUAL = จำนวน + เครื่องมือเหล็ก;
+              อื่น ๆ = สัมประสิทธิ์ + เผื่อเสีย + พรีวิวปริมาณสด) */}
+          <div className="mt-3 rounded-lg bg-slate-50 p-3">
+            {editBasis !== "MANUAL" ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-end">
+                <label className="flex flex-col gap-1 text-xs text-slate-700">
+                  {basisConfig(editBasis).perLabel}
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={editCoefficient}
+                    onChange={(e) => setEditCoefficient(e.target.value)}
+                    className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-slate-700">
+                  <span>เผื่อเสีย (%)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editWaste}
+                    onChange={(e) => setEditWaste(e.target.value)}
+                    className="border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+                  />
+                </label>
+                <div className="col-span-2 flex flex-col gap-1 text-xs">
+                  <span className="text-slate-500">ปริมาณที่คิดได้</span>
+                  {(() => {
+                    const dv = driverValueOf(editBasis);
+                    if (dv == null) {
+                      return (
+                        <span className="text-amber-600">
+                          ตั้ง “{basisConfig(editBasis).measureLabel}” ในรายละเอียดโครงการก่อน
+                        </span>
+                      );
+                    }
+                    const q = previewTakeoffQty(Number(editCoefficient), Number(editWaste), dv);
+                    return q == null ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <span className="font-medium text-slate-800">
+                        {dv} × {editCoefficient || 0} × (1+{editWaste || 0}%) ={" "}
+                        {q.toLocaleString("th-TH")} {editUnit}
+                      </span>
+                    );
+                  })()}
+                </div>
+              </div>
+            ) : (
+              // วางเรียงลงมาเป็นแถว ไม่ใช่วางข้าง ๆ กัน — กล่องเครื่องมือกว้างกว่าช่องจำนวนมาก
+              // ถ้าวางข้างกันช่องจำนวนจะลอยอยู่ซ้ายห่างจากกล่อง จนดูเหมือนคนละเรื่อง
+              <div className="flex flex-col items-start gap-2">
+                <label className="flex flex-col gap-1 text-xs text-slate-700">
+                  <span>จำนวน</span>
+                  <input
+                    type="number"
+                    value={editQuantity}
+                    onChange={(e) => setEditQuantity(e.target.value)}
+                    className="w-32 border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+                  />
+                </label>
+                {/* เครื่องมือเดียวกับฟอร์มเพิ่มบรรทัด (components/RebarCalculator)
+                    แผงแก้ไขไม่มีช่องหน่วยนับให้แก้ จึงไม่ส่ง onUnitChange — ได้แค่เตือน */}
+                <RebarCalculator
+                  open={editRebarOpen}
+                  onToggle={() => setEditRebarOpen((v) => !v)}
+                  diameterMm={editRebarDia}
+                  onDiameterChange={setEditRebarDia}
+                  lengthM={editRebarLen}
+                  onLengthChange={setEditRebarLen}
+                  unit={editUnit}
+                  onInsert={(kg) => {
+                    setEditQuantity(String(kg));
+                    setEditRebarOpen(false);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* สูตรวัสดุย่อย (ถอดปริมาณวัสดุ) */}
+          <div className="mt-3 border-t border-slate-200 pt-3">
+            <MaterialComponentsEditor
+              rows={editComponents}
+              onChange={setEditComponents}
+              materialOptions={materialOptions}
+              materialById={materialById}
+              unitLabel={editUnit}
+              unitDatalistId="boq-units"
+            />
+          </div>
+
+          {/* แถบล่าง: ยอดรวมสด + ปุ่มบันทึก/ยกเลิก (ชิดขวา) */}
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-3">
+            <span className="text-sm text-slate-500">
+              รวมบรรทัด:{" "}
+              <span className="font-semibold text-brand" title="ยอดสด (ยังไม่บันทึก)">
+                {money(previewLineTotal ?? item.lineTotal)}
+              </span>
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>
+                <X size={14} /> ยกเลิก
+              </Button>
+              <Button size="sm" onClick={() => submitEdit(item.id)}>
+                <Check size={14} /> บันทึก
+              </Button>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
   );
 }
 
