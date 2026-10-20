@@ -11,6 +11,7 @@ import { useAuth } from "../lib/auth-context";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import { listTrash, purgeTrashItem, restoreTrashItem } from "../lib/trash-api";
+import { TableSkeleton } from "../components/Skeleton";
 
 // สีป้ายชนิด (เขียนคลาสเต็มเพราะ Tailwind JIT อ่านเฉพาะ literal)
 const TYPE_BADGE: Record<TrashItemType, string> = {
@@ -119,7 +120,7 @@ export function TrashPage() {
         }
       />
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && <TableSkeleton rows={6} cols={5} />}
       {error && <p className="text-red-600">{error}</p>}
 
       {!loading && !error && items.length === 0 && (
@@ -133,7 +134,8 @@ export function TrashPage() {
       {!loading && !error && items.length > 0 && (
         <>
           <p className="mb-2 text-xs text-slate-500">มีในถังขยะ {items.length} รายการ</p>
-          <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
             <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
               <tr>
                 <th className="px-3 py-2">ประเภท</th>
@@ -198,6 +200,7 @@ export function TrashPage() {
               })}
             </tbody>
           </table>
+          </div>
         </>
       )}
 

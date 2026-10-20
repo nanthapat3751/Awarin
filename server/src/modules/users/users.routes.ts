@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 
+import { passwordIssueMessage } from "../../lib/password-field";
 import { requireAuth } from "../../middleware/auth";
 import { requireRole } from "../../middleware/rbac";
 import {
@@ -11,7 +12,10 @@ import {
   UserError,
   createStaff,
   listStaff,
+  listStaffSessions,
   resetStaffPassword,
+  revokeAllStaffSessions,
+  revokeStaffSession,
   setStaffActive,
 } from "./users.service";
 
@@ -32,7 +36,10 @@ usersRouter.get("/", async (_req, res) => {
 usersRouter.post("/", async (req, res) => {
   const parsed = createStaffSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง", details: parsed.error.flatten() });
+    res.status(400).json({
+      error: passwordIssueMessage(parsed.error) ?? "ข้อมูลไม่ถูกต้อง",
+      details: parsed.error.flatten(),
+    });
     return;
   }
 
@@ -51,12 +58,15 @@ usersRouter.post("/", async (req, res) => {
 usersRouter.post("/:id/reset-password", async (req, res) => {
   const parsed = resetStaffPasswordSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง", details: parsed.error.flatten() });
+    res.status(400).json({
+      error: passwordIssueMessage(parsed.error) ?? "ข้อมูลไม่ถูกต้อง",
+      details: parsed.error.flatten(),
+    });
     return;
   }
 
   try {
-    await resetStaffPassword(req.params.id, parsed.data.newPassword, req.user!.id, meta(req));
+    await resetStaffPassword(req.params.id, parsed.data.newPassword, req.user!.id, meta(req), { disableTwoFactor: parsed.data.disableTwoFactor });
     res.status(204).end();
   } catch (err) {
     if (err instanceof UserError) {
@@ -70,7 +80,10 @@ usersRouter.post("/:id/reset-password", async (req, res) => {
 usersRouter.post("/:id/active", async (req, res) => {
   const parsed = setStaffActiveSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง", details: parsed.error.flatten() });
+    res.status(400).json({
+      error: passwordIssueMessage(parsed.error) ?? "ข้อมูลไม่ถูกต้อง",
+      details: parsed.error.flatten(),
+    });
     return;
   }
 
@@ -85,3 +98,37 @@ usersRouter.post("/:id/active", async (req, res) => {
     throw err;
   }
 });
+
+// ─────────────────────────── เครื่องที่พนักงานเข้าสู่ระบบอยู่ ───────────────────────────
+
+async function respondUserError(res: import("express").Response, run: () => Promise<void>) {
+  try {
+    await run();
+  } catch (err) {
+    if (err instanceof UserError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+usersRouter.get("/:id/sessions", (req: Request<{ id: string }>, res) =>
+  respondUserError(res, async () => {
+    res.json({ sessions: await listStaffSessions(req.params.id, req.user!.id) });
+  }),
+);
+
+// ต้องอยู่ก่อน /:id/sessions/:handle ไม่งั้น "revoke-all" ถูกตีความเป็น handle
+usersRouter.post("/:id/sessions/revoke-all", (req: Request<{ id: string }>, res) =>
+  respondUserError(res, async () => {
+    res.json({ count: await revokeAllStaffSessions(req.params.id, req.user!.id, meta(req)) });
+  }),
+);
+
+usersRouter.delete("/:id/sessions/:handle", (req: Request<{ id: string; handle: string }>, res) =>
+  respondUserError(res, async () => {
+    await revokeStaffSession(req.params.id, req.params.handle, req.user!.id, meta(req));
+    res.status(204).end();
+  }),
+);

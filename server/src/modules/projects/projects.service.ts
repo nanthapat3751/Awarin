@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { Role } from "@prisma/client";
+import { Prisma, type Role } from "@prisma/client";
 
 import { BOQ_ITEM_ORDER } from "../../lib/boq-order";
 import { issueAccessTokenFor } from "../../lib/access-token";
@@ -8,6 +8,7 @@ import { writeAuditLog } from "../../lib/audit-log";
 import { createNotification } from "../../lib/notifications";
 import { hashPassword } from "../../lib/password";
 import {
+  applyNetRounding,
   calculatePricing,
   type DiscountInput,
   discountOf,
@@ -20,10 +21,13 @@ import {
   type ProjectStatus,
 } from "../../lib/project-state-machine";
 import { generateProjectNo } from "../../lib/project-number";
+import { toCustomerDto } from "../../lib/customer-dto";
 import { prisma } from "../../lib/prisma";
+import { clampPage, LIST_PAGE_SIZE } from "../../lib/list-query";
 import { getDefaultRates } from "../../lib/settings";
-import { getOrCreateEditableVersion, recalculateLatestVersionPricing } from "../boq/boq.service";
+import { ITEM_INCLUDE, getOrCreateEditableVersion, recalculateLatestVersionPricing } from "../boq/boq.service";
 import { applyTemplateToProject, findStandardTemplateForDesign } from "../templates/templates.service";
+import type { ProjectListPageDto } from "@systemboq/shared-types";
 import type {
   CreateProjectInput,
   IssueAccessLinkInput,
@@ -65,12 +69,75 @@ export async function listProjects(filter: { status?: string; customerId?: strin
   return projects.map(({ _count, ...p }) => ({ ...p, quoteCount: _count.quotes }));
 }
 
+const PROJECT_STATUSES: ProjectStatus[] = ["DRAFT", "QUOTED", "REJECTED", "APPROVED", "COMPLETED", "CANCELLED"];
+const LIST_INCLUDE = {
+  customer: { select: { id: true, email: true, fullName: true } },
+  _count: { select: { quotes: true } },
+} as const;
+
+/**
+ * หน้ารายการโครงการแบบแบ่งหน้าที่เซิร์ฟเวอร์ (หน้าละ 15) — ค้นหา/สถานะ/ช่วงวันที่สร้าง
+ * ไม่เลือกสถานะ = ซ่อนโครงการที่ยกเลิก (เหมือนหน้าเดิม) · counts นับใต้คำค้น+ช่วงเวลาเดียวกัน
+ */
+export async function listProjectsPage(query: {
+  q?: string;
+  status?: string;
+  period: { gte: Date; lt: Date } | null;
+  page: unknown;
+}): Promise<ProjectListPageDto> {
+  const status = PROJECT_STATUSES.includes(query.status as ProjectStatus) ? (query.status as ProjectStatus) : null;
+  const base: Prisma.ProjectWhereInput = {
+    deletedAt: null,
+    ...(query.period ? { createdAt: query.period } : {}),
+    ...(query.q
+      ? {
+          OR: [
+            { name: { contains: query.q, mode: "insensitive" } },
+            { projectNo: { contains: query.q, mode: "insensitive" } },
+            { customer: { fullName: { contains: query.q, mode: "insensitive" } } },
+          ],
+        }
+      : {}),
+  };
+  const where: Prisma.ProjectWhereInput = { ...base, status: status ?? { not: "CANCELLED" } };
+
+  const [total, grouped] = await Promise.all([
+    prisma.project.count({ where }),
+    prisma.project.groupBy({ by: ["status"], where: base, _count: { _all: true } }),
+  ]);
+  const counts = Object.fromEntries([["ALL", 0], ...PROJECT_STATUSES.map((s) => [s, 0])]) as ProjectListPageDto["counts"];
+  for (const g of grouped) {
+    counts[g.status] = g._count._all;
+    if (g.status !== "CANCELLED") counts.ALL += g._count._all;
+  }
+
+  const page = clampPage(query.page, total);
+  const rows = await prisma.project.findMany({
+    where,
+    include: LIST_INCLUDE,
+    // id ต่อท้าย — โครงการที่สร้างเวลาเดียวกันต้องไม่สลับที่ข้ามหน้า
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: (page - 1) * LIST_PAGE_SIZE,
+    take: LIST_PAGE_SIZE,
+  });
+  const projects = rows.map(({ _count, ...p }) => ({ ...p, quoteCount: _count.quotes }));
+  return {
+    projects: projects as unknown as ProjectListPageDto["projects"],
+    page,
+    pageSize: LIST_PAGE_SIZE,
+    total,
+    counts,
+  };
+}
+
 export async function getProjectDetail(id: string) {
   // ถังขยะ: โครงการที่ถูกลบถือว่า "ไม่พบ" (findFirst เพราะ where มี deletedAt ที่ไม่ unique)
   const project = await prisma.project.findFirst({
     where: { id, deletedAt: null },
     include: {
-      customer: { select: { id: true, email: true, fullName: true } },
+      customer: {
+        select: { id: true, email: true, fullName: true, avatarUrl: true, customerProfile: { select: { phone: true } } },
+      },
       lead: { include: { houseDesign: { select: { name: true } } } },
     },
   });
@@ -87,14 +154,27 @@ export async function getProjectDetail(id: string) {
   const items = await prisma.boqItem.findMany({
     where: { projectVersionId: currentVersion.id },
     orderBy: BOQ_ITEM_ORDER,
-    include: { components: { orderBy: { sortOrder: "asc" } } },
+    include: ITEM_INCLUDE,
   });
 
   const sentQuote = await prisma.quote.findFirst({
     where: { projectVersionId: currentVersion.id, status: { not: "DRAFT" } },
   });
 
-  const { lead, ...projectFields } = project;
+  const { lead, customer, ...rest } = project;
+  // การ์ดลูกค้าในหัวโครงการ: เบอร์มาจากโปรไฟล์ลูกค้า (เดิมโชว์ได้แค่เบอร์จากคำขอ)
+  const projectFields = {
+    ...rest,
+    customer: customer
+      ? {
+          id: customer.id,
+          email: customer.email,
+          fullName: customer.fullName,
+          avatarUrl: customer.avatarUrl,
+          phone: customer.customerProfile?.phone ?? null,
+        }
+      : null,
+  };
   const leadInfo = lead
     ? {
         id: lead.id,
@@ -308,7 +388,25 @@ const MEASUREMENT_FIELDS = [
   "footprintSqm",
   "bathrooms",
   "floors",
+  "openings",
 ] as const satisfies readonly (keyof UpdateProjectInput)[];
+
+/**
+ * รายการช่องเปิด → ค่าที่บันทึก (รายการ + ยอดรวม ตร.ม.) · undefined = ไม่แก้ · ว่าง = ไม่หัก
+ * ยอดรวมต้องน้อยกว่าพื้นที่ผนังที่ใช้คิดจริง ไม่งั้นงานผนังทั้งหมดกลายเป็นศูนย์
+ */
+function openingsData(
+  input: UpdateProjectInput,
+  wallArea: number | null,
+): { openings: Prisma.InputJsonValue | typeof Prisma.DbNull; openingAreaSqm: number | null } | null {
+  if (input.openings === undefined) return null;
+  if (!input.openings?.length) return { openings: Prisma.DbNull, openingAreaSqm: null };
+  const total = round2(input.openings.reduce((sum, o) => sum + o.count * o.width * o.height, 0));
+  if (wallArea != null && total >= wallArea) {
+    throw new ProjectError(`ช่องเปิดรวม ${total} ตร.ม. ต้องน้อยกว่าพื้นที่ผนัง ${wallArea} ตร.ม.`);
+  }
+  return { openings: input.openings, openingAreaSqm: total };
+}
 
 /** โครงการ CUSTOM ราคากรอกเอง — พื้นที่เปลี่ยนจึงปรับแค่ราคาต่อ ตร.ม. ของเวอร์ชันล่าสุด */
 async function updateCustomPricePerSqm(projectId: string, areaSqm: number | null): Promise<void> {
@@ -324,10 +422,17 @@ async function updateCustomPricePerSqm(projectId: string, areaSqm: number | null
 
 export async function updateProject(id: string, input: UpdateProjectInput, actorId: string) {
   // ถังขยะ: โครงการที่ถูกลบแก้ไขไม่ได้ (findFirst เพราะ where มี deletedAt ที่ไม่ unique)
-  const existing = await prisma.project.findFirst({ where: { id, deletedAt: null } });
+  const existing = await prisma.project.findFirst({
+    where: { id, deletedAt: null },
+    include: { houseDesign: { select: { wallAreaSqm: true } } },
+  });
   if (!existing) {
     throw new ProjectError("ไม่พบโครงการที่ระบุ", 404);
   }
+  // พื้นที่ผนังที่ใช้คิดจริงหลังแก้ (ค่าของโครงการ ไม่งั้นของแบบบ้าน) — ใช้ตรวจช่องเปิด
+  const nextWall = input.wallAreaSqm === undefined ? existing.wallAreaSqm : input.wallAreaSqm;
+  const wallArea = nextWall ?? existing.houseDesign?.wallAreaSqm ?? null;
+  const openings = openingsData(input, wallArea == null ? null : Number(wallArea));
 
   const project = await prisma.project.update({
     where: { id },
@@ -342,6 +447,7 @@ export async function updateProject(id: string, input: UpdateProjectInput, actor
       footprintSqm: input.footprintSqm,
       bathrooms: input.bathrooms,
       floors: input.floors,
+      ...openings,
       startDate: input.startDate,
       targetEndDate: input.targetEndDate,
       customerId: input.customerId === undefined ? undefined : input.customerId,
@@ -396,28 +502,31 @@ export async function issueCustomerAccessLink(
     throw new ProjectError("ไม่พบโครงการที่ระบุ", 404);
   }
 
-  let customer: { id: string; email: string; fullName: string };
+  let customer: { id: string; email: string | null; fullName: string };
   let created = false;
 
   if (project.customerId && project.customer) {
     customer = project.customer;
   } else {
-    if (!project.leadId || !project.lead) {
-      throw new ProjectError("โครงการนี้ไม่ได้สร้างจากคำขอ จึงไม่มีข้อมูลผู้ติดต่อให้สร้างบัญชี", 409);
-    }
-    const email = (input.email ?? project.lead.email ?? "").trim().toLowerCase();
+    // ไม่มีคำขอ = ลูกค้าที่โทรมา/เดินเข้ามาเอง — พนักงานต้องกรอกชื่อกับอีเมลเองทั้งหมด
+    // (เดิมโครงการแบบนี้สร้างบัญชีจากหน้าโครงการไม่ได้เลย ต้องรอให้ลูกค้าไปสมัครเอง)
+    const lead = project.lead;
+    const email = (input.email ?? lead?.email ?? "").trim().toLowerCase();
     if (!email) {
       throw new ProjectError("ต้องมีอีเมลของลูกค้าเพื่อสร้างบัญชีและออกลิงก์เข้าใช้", 409);
     }
-    const fullName = (input.fullName ?? project.lead.name).trim();
-    const phone = input.phone ?? project.lead.phone;
+    const fullName = (input.fullName ?? lead?.name ?? "").trim();
+    if (!fullName) {
+      throw new ProjectError("กรุณากรอกชื่อ-นามสกุลของลูกค้า", 400);
+    }
+    const phone = input.phone ?? lead?.phone ?? null;
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       if (existing.role !== "CUSTOMER") {
         throw new ProjectError("อีเมลนี้ถูกใช้โดยบัญชีพนักงานอยู่แล้ว", 409);
       }
-      customer = { id: existing.id, email: existing.email, fullName: existing.fullName };
+      customer = { id: existing.id, email, fullName: existing.fullName };
     } else {
       // รหัสผ่านสุ่มที่ล็อกอินไม่ได้ — ทางเข้าเดียวคือลิงก์ตั้งรหัส จนกว่าลูกค้าจะตั้งเอง
       const passwordHash = await hashPassword(crypto.randomBytes(32).toString("hex"));
@@ -427,14 +536,18 @@ export async function issueCustomerAccessLink(
           passwordHash,
           fullName,
           role: "CUSTOMER",
+          // ถือว่ายืนยันอีเมลแล้ว — พนักงานคุยกับลูกค้าจริงก่อนพิมพ์อีเมลนี้ และลิงก์เข้าใช้
+          // ถูกส่งทาง LINE/โทรศัพท์ ไม่ได้ส่งทางเมล ถ้าบังคับยืนยันจะกลายเป็นลูกค้าตั้งรหัสเสร็จ
+          // แล้วโดนถามหารหัสจากเมลที่ไม่เคยเปิด (ดู email-verification.service.ts)
+          emailVerifiedAt: new Date(),
           customerProfile: { create: { phone, address: null } },
         },
       });
-      customer = { id: user.id, email: user.email, fullName: user.fullName };
+      customer = { id: user.id, email, fullName: user.fullName };
       created = true;
       await writeAuditLog({
         userId: actorId,
-        action: "CREATE_CUSTOMER_FROM_LEAD",
+        action: lead ? "CREATE_CUSTOMER_FROM_LEAD" : "CREATE_CUSTOMER_FOR_PROJECT",
         entityType: "User",
         entityId: user.id,
         details: { email, leadId: project.leadId, projectId },
@@ -461,7 +574,7 @@ export async function issueCustomerAccessLink(
     details: { projectId, created },
   });
 
-  return { url, expiresAt, customer, created };
+  return { url, expiresAt, customer: toCustomerDto(customer)!, created };
 }
 
 /**
@@ -603,14 +716,15 @@ function customPriceAmounts(
   vatPct: number,
   areaSqm: number | null,
   discount?: DiscountInput,
+  roundingUnit?: number | null,
 ) {
   const directCost = round2(enteredBeforeVat);
-  // ลำดับเดียวกับ calculatePricing เป๊ะ ๆ: ยอดที่กรอก → หักส่วนลด → +VAT
+  // ลำดับเดียวกับ calculatePricing เป๊ะ ๆ: ยอดที่กรอก → หักส่วนลด → ปัดยอด → +VAT
   // (CUSTOM ไม่มีค่าดำเนินการ+กำไรแยก ฐานส่วนลดจึงเป็นยอดที่กรอกมาตรง ๆ)
   const resolved = resolveDiscountAmount(directCost, discount);
-  const subtotalBeforeVat = round2(directCost - resolved.amount);
-  const vatAmt = round2(subtotalBeforeVat * (vatPct / 100));
-  const netPrice = round2(subtotalBeforeVat + vatAmt);
+  const rounded = applyNetRounding(round2(directCost - resolved.amount), vatPct, roundingUnit);
+  const vatAmt = rounded.vatAmount;
+  const netPrice = rounded.netPrice;
   return {
     directCost,
     overheadProfitPct: 0,
@@ -618,6 +732,7 @@ function customPriceAmounts(
     overheadPct: null,
     overheadProfitAmt: 0,
     discountAmt: resolved.amount,
+    roundingAmt: rounded.roundingAmount,
     vatAmt,
     netPrice,
     // โครงการกำหนดเองไม่มี BOQ/แบบบ้าน — ถ้าพนักงานกรอกพื้นที่โครงการไว้ ก็คิดราคา/ตร.ม. ให้ได้
@@ -649,7 +764,13 @@ export async function setCustomProjectPrice(
 
   const updated = await prisma.projectVersion.update({
     where: { id: version.id },
-    data: customPriceAmounts(subtotalBeforeVat, Number(version.vatPct), projectArea(project)),
+    data: customPriceAmounts(
+      subtotalBeforeVat,
+      Number(version.vatPct),
+      projectArea(project),
+      discountOf(version),
+      version.roundingUnit,
+    ),
   });
 
   await writeAuditLog({
@@ -699,6 +820,11 @@ function assertCustomRatesEditable(input: UpdateVersionRatesInput): void {
       409,
     );
   }
+  // ค่าเผื่อเหลือเผื่อขาดคิดจาก "ค่างานต้นทุน" ที่ถอดจาก BOQ ซึ่งโครงการกำหนดเองไม่มี
+  // ยอดที่พนักงานกรอกเป็นราคาขายอยู่แล้ว เผื่อทับอีกชั้นคือบวกซ้ำ
+  if (input.contingencyPercent != null) {
+    throw new ProjectError("โครงการกำหนดเองกรอกราคาเองอยู่แล้ว จึงใช้ค่าเผื่อเหลือเผื่อขาดไม่ได้", 409);
+  }
 }
 
 /** อัตรากำไร/การแบ่งค่าดำเนินการ แก้ได้เฉพาะ OWNER — VAT และส่วนลด ADMIN ยังแก้ได้ตามเดิม */
@@ -706,14 +832,22 @@ async function assertNoOwnerOnlyRateChange(projectId: string, input: UpdateVersi
   const latest = await prisma.projectVersion.findFirst({
     where: { projectId },
     orderBy: { versionNo: "desc" },
-    select: { overheadProfitPct: true, overheadPct: true },
+    select: {
+      overheadProfitPct: true,
+      overheadPct: true,
+      contingencyPct: true,
+    },
   });
   const currentOverhead = decimalOrNull(latest?.overheadPct ?? null);
   const changesTotal =
     input.overheadProfitPercent != null &&
     input.overheadProfitPercent !== Number(latest?.overheadProfitPct);
   const changesSplit = input.overheadPercent !== undefined && input.overheadPercent !== currentOverhead;
-  if (changesTotal || changesSplit) {
+  // ค่าเผื่อเหลือเผื่อขาดคุมราคาที่ยื่นจริงพอ ๆ กับอัตรากำไร จึงอยู่ชั้นเดียวกัน
+  // — ADMIN แก้ VAT/ส่วนลดได้ แต่ไม่ได้เปลี่ยนวิธีตั้งราคาของบริษัท
+  const changesContingency =
+    input.contingencyPercent != null && input.contingencyPercent !== Number(latest?.contingencyPct);
+  if (changesTotal || changesSplit || changesContingency) {
     throw new ProjectError(OWNER_ONLY_RATE_MESSAGE, 403);
   }
 }
@@ -740,6 +874,8 @@ export async function updateVersionRates(
     vatPct: Number(version.vatPct),
     discountPct: decimalOrNull(version.discountPct),
     discountAmt: Number(version.discountAmt),
+    contingencyPct: Number(version.contingencyPct),
+    roundingUnit: version.roundingUnit,
   };
   const discountFields = resolveDiscountFields(input.discount, version);
   const after = {
@@ -747,6 +883,8 @@ export async function updateVersionRates(
     overheadPct: input.overheadPercent === undefined ? before.overheadPct : input.overheadPercent,
     vatPct: input.vatPercent ?? before.vatPct,
     ...discountFields,
+    contingencyPct: input.contingencyPercent ?? before.contingencyPct,
+    roundingUnit: input.roundingUnit === undefined ? before.roundingUnit : input.roundingUnit,
   };
 
   // ตรวจสถานะปลายทาง ไม่ใช่เฉพาะช่องที่ส่งมา — ลดอัตรารวมลงโดยไม่แตะค่าดำเนินการ ก็ทำให้
@@ -766,7 +904,13 @@ export async function updateVersionRates(
     // CUSTOM ไม่ผ่านตัวคิดราคาของ BOQ (ไม่มีบรรทัดให้รวม) — คิดจากยอดก่อน VAT ที่เก็บไว้เดิม
     await prisma.projectVersion.update({
       where: { id: version.id },
-      data: customPriceAmounts(Number(version.directCost), after.vatPct, projectArea(project), discountOf(after)),
+      data: customPriceAmounts(
+        Number(version.directCost),
+        after.vatPct,
+        projectArea(project),
+        discountOf(after),
+        after.roundingUnit,
+      ),
     });
   } else {
     // ตัวนี้คืน void และทำงานกับ "เวอร์ชันล่าสุด" ซึ่งคือ version ตัวเดียวกับที่เพิ่งเขียนอัตราลงไป
@@ -789,6 +933,9 @@ export async function updateVersionRates(
         vatPct: after.vatPct,
         discountPct: decimalOrNull(updated.discountPct),
         discountAmt: Number(updated.discountAmt),
+        contingencyPct: Number(updated.contingencyPct),
+        roundingUnit: updated.roundingUnit,
+        roundingAmt: Number(updated.roundingAmt),
       },
       netPrice: Number(updated.netPrice),
     },
@@ -829,7 +976,11 @@ export async function transitionProject(id: string, toStatus: ProjectStatus, act
     throw err;
   }
 
-  const updated = await prisma.project.update({ where: { id }, data: { status: toStatus } });
+  const updated = await prisma.project.update({
+    where: { id },
+    // COMPLETED เป็นสถานะปลายทาง (ออกไม่ได้) จึงตั้งครั้งเดียวไม่ต้องล้าง
+    data: { status: toStatus, ...(toStatus === "COMPLETED" ? { completedAt: new Date() } : {}) },
+  });
 
   await writeAuditLog({
     userId: actorId,

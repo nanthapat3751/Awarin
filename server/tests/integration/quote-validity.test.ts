@@ -7,6 +7,7 @@ import {
   createAndLoginOwner,
   createCustomerDirect,
 } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // เหตุผลเดียวกับ myQuotes.test.ts: entry แบบ ESM ของ Puppeteer โหลดใต้ ts-jest ไม่ได้
 // — จับอาร์กิวเมนต์ที่ส่งเข้าตัวสร้าง PDF แทน (หน้าตากล่องเงื่อนไขทดสอบใน tests/lib/quote-terms)
@@ -109,9 +110,7 @@ describe("quote validity + terms", () => {
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     const quoteId = quote.body.quote.id as string;
     if (send) {
-      const sent = await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-        .send({ toStatus: "SENT" });
+      const sent = await sendQuote(owner.agent, projectId, quoteId);
       expect(sent.status).toBe(200);
     }
     return { projectId, quoteId };
@@ -173,9 +172,7 @@ describe("quote validity + terms", () => {
       const row = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId } });
       expect(row.validUntil).toBeNull();
       expect(row.terms).toBeNull();
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quoteId);
       const sent = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId } });
       expect(sent.validUntil?.toISOString().slice(0, 10)).toBe(addDaysIso(todayIso(), 30));
     });

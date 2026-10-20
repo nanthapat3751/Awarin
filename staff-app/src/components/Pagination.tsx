@@ -2,6 +2,8 @@ interface PaginationProps {
   page: number;
   pageCount: number;
   onChange: (page: number) => void;
+  /** ทับคลาสของ <nav> — ใช้ตอนวางแถบนี้เป็นแถวในการ์ด ที่ระยะห่างด้านบนต้องมาจากเส้นคั่นแทน mt-4 */
+  className?: string;
 }
 
 /**
@@ -33,14 +35,19 @@ function pageNumbers(page: number, pageCount: number): PageEntry[] {
   return out;
 }
 
-export function Pagination({ page, pageCount, onChange }: Readonly<PaginationProps>) {
+export function Pagination({
+  page,
+  pageCount,
+  onChange,
+  className = "mt-4",
+}: Readonly<PaginationProps>) {
   if (pageCount <= 1) return null;
 
   const arrowClass =
     "px-2 py-1 text-slate-700 rounded-md hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent";
 
   return (
-    <nav className="flex items-center justify-center gap-1 mt-4" aria-label="แบ่งหน้า">
+    <nav className={`flex items-center justify-center gap-1 ${className}`} aria-label="แบ่งหน้า">
       <button
         type="button"
         onClick={() => onChange(page - 1)}

@@ -4,9 +4,10 @@ import { groupBoqItemsByTopCategory } from "../../lib/boq-grouping";
 import { notifyStaff } from "../../lib/notifications";
 import type { CustomerQuotePdfCategoryGroup } from "../../lib/pdf/customer-quote-pdf";
 import { renderCustomerQuotePdf } from "../../lib/pdf/customer-quote-pdf";
-import { round2 } from "../../lib/pricing";
+import { customerLineMultiplier, round2 } from "../../lib/pricing";
 import { applyQuoteOutcomeToProject } from "../../lib/project-auto-status";
 import { prisma } from "../../lib/prisma";
+import { loadQuotePdfSigners } from "../../lib/quote-signers";
 import {
   assertValidQuoteTransition,
   InvalidQuoteTransitionError,
@@ -67,6 +68,9 @@ function toCustomerQuoteSummary(quote: {
     // ตัดสินที่เซิร์ฟเวอร์ ไม่ใช่นาฬิกาเครื่องลูกค้า — ตัวเดียวกับที่ใช้กันปุ่มยอมรับใน respondToQuote
     // มีความหมายเฉพาะใบที่ยังรอคำตอบ ใบที่ตอบไปแล้วไม่ถือว่า "หมดอายุ"
     expired: quote.status === "SENT" && isQuoteExpired(quote.validUntil),
+    // หน้ารายการและหน้ารายละเอียดฝั่งลูกค้าอ่าน quote.project.name ตรง ๆ — ขาดช่องนี้ = จอขาวทั้งหน้า
+    // (เคยหลุดไปแล้ว เพราะฟังก์ชันนี้ไม่มี return type ให้ TypeScript ตรวจเทียบกับ DTO)
+    project: { projectNo: quote.project.projectNo, name: quote.project.name },
   };
 }
 
@@ -251,7 +255,7 @@ export async function getMyQuote(customerId: string, quoteId: string) {
   // เป็นรายการแบนยาวรายการเดียว รหัสงานเป็นเลขอ้างอิงเอกสาร ไม่ใช่ข้อมูลต้นทุน — แสดงได้ตาม
   // BR-09 และช่วยให้บรรทัดตรงกับ PDF ที่ลูกค้าได้รับ
   const grouped = await groupBoqItemsByTopCategory(quote.projectVersionId);
-  const markup = 1 + Number(version.overheadProfitPct) / 100;
+  const markup = customerLineMultiplier(version);
 
   const groups = grouped.map((group) => {
     // ราคาต่อบรรทัดคำนวณแบบเดียวกับ buildCustomerQuotePdfGroups เป๊ะ ๆ เพื่อให้ตัวเลขบนหน้าเว็บ
@@ -295,6 +299,7 @@ export async function getMyQuote(customerId: string, quoteId: string) {
     discountPct: version.discountPct != null ? version.discountPct.toString() : null,
     discountAmt: version.discountAmt.toString(),
     discountNote: version.discountNote,
+    roundingAmt: version.roundingAmt.toString(),
     groups,
     isCustom: quote.project.type === "CUSTOM",
     attachments: attachments.map(toCustomerAttachmentDto),
@@ -377,14 +382,27 @@ export async function respondToQuote(
   return toCustomerQuoteSummary({ ...updated, project: quote.project });
 }
 
+/**
+ * ยอดก่อนหักส่วนลดที่ลูกค้าเห็น = ผลบวกราคาทุกบรรทัดในตาราง
+ *
+ * ต้องบวกทุกชั้นที่อยู่เหนือต้นทุนตรง: เผื่อเหลือเผื่อขาด + (ค่าดำเนินการ/กำไร หรือ ส่วนของ Factor F)
+ * ชั้นไหนไม่ได้ใช้ในโหมดนั้นจะเป็นศูนย์อยู่แล้ว จึงบวกรวมได้ทีเดียวทั้งสองโหมด
+ */
+export function customerBeforeDiscount(version: {
+  directCost: unknown;
+  contingencyAmt: unknown;
+  overheadProfitAmt: unknown;
+}): number {
+  return round2(Number(version.directCost) + Number(version.contingencyAmt) + Number(version.overheadProfitAmt));
+}
+
 // BR-09: สร้างแถวรายการฝั่งลูกค้าโดยพับอัตราค่าดำเนินการ/กำไรเข้าไปในราคาต่อหน่วยแต่ละบรรทัด
 // เรียบร้อยแล้ว เพื่อให้เอกสารไม่ต้องเปิดเผยต้นทุนหรือ margin เป็นตัวเลขแยก — ดู customer-quote-pdf.ts
-async function buildCustomerQuotePdfGroups(
+export async function buildCustomerQuotePdfGroups(
   projectVersionId: string,
-  overheadProfitPct: number,
+  markup: number,
 ): Promise<CustomerQuotePdfCategoryGroup[]> {
   const groups = await groupBoqItemsByTopCategory(projectVersionId);
-  const markup = 1 + overheadProfitPct / 100;
 
   return groups.map((group) => {
     const items = group.items.map((item) => {
@@ -392,6 +410,7 @@ async function buildCustomerQuotePdfGroups(
       const unitPrice = round2(costUnitPrice * markup);
       const lineTotal = round2(Number(item.quantity) * unitPrice);
       return {
+        subgroup: item.subgroup ? { code: item.subgroup.code, name: item.subgroup.name } : null,
         code: item.categoryCode,
         name: item.name,
         quantity: item.quantity.toString(),
@@ -424,7 +443,7 @@ export async function generateMyQuotePdf(customerId: string, quoteId: string): P
   const version = await prisma.projectVersion.findUniqueOrThrow({
     where: { id: quote.projectVersionId },
   });
-  const groups = await buildCustomerQuotePdfGroups(version.id, Number(version.overheadProfitPct));
+  const groups = await buildCustomerQuotePdfGroups(version.id, customerLineMultiplier(version));
   const company = await loadCompanyProfile();
   const party = billingPartyOf(project.customer, project.customer?.customerProfile);
 
@@ -437,6 +456,7 @@ export async function generateMyQuotePdf(customerId: string, quoteId: string): P
     logo: company.logo,
     logoSmall: company.logoSmall,
     signatory: company.signatory,
+    signers: await loadQuotePdfSigners(quote.id),
     // ใบนี้คือใบที่ลูกค้าได้รับจริง — ตกลงราคาแล้วต้องรู้ว่าจะโอนไปที่ไหน
     paymentAccount: company.paymentAccount,
     quoteNo: quote.quoteNo,
@@ -456,12 +476,13 @@ export async function generateMyQuotePdf(customerId: string, quoteId: string): P
     groups,
     // ยอดก่อนลด = ต้นทุน+กำไร ซึ่งเท่ากับผลบวกราคาทุกบรรทัดที่ลูกค้าเห็น (BR-09 พับ markup ไว้ในบรรทัดแล้ว)
     // ยอดหลังลดคือฐาน VAT จริงที่เก็บไว้ในเวอร์ชัน — ไม่คิดซ้ำที่นี่เพื่อไม่ให้เพี้ยนจากยอดในระบบ
-    beforeDiscount: round2(Number(version.directCost) + Number(version.overheadProfitAmt)),
+    beforeDiscount: customerBeforeDiscount(version),
     discountPct: version.discountPct != null ? Number(version.discountPct) : null,
     discountAmt: Number(version.discountAmt),
     discountNote: version.discountNote,
+    roundingAmt: Number(version.roundingAmt),
     subtotalBeforeVat: round2(
-      Number(version.directCost) + Number(version.overheadProfitAmt) - Number(version.discountAmt),
+      customerBeforeDiscount(version) - Number(version.discountAmt) - Number(version.roundingAmt),
     ),
     vatPct: Number(version.vatPct),
     vatAmt: Number(version.vatAmt),

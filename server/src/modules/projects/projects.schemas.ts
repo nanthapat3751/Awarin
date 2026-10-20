@@ -1,3 +1,5 @@
+import { newAccountEmailSchema } from "../auth/auth.schemas";
+
 import { z } from "zod";
 
 // วันที่ (รับ "YYYY-MM-DD" หรือ ISO) → Date; null = ล้างค่า, undefined = ไม่แก้
@@ -9,6 +11,14 @@ const areaField = z.number().min(0).max(1_000_000).nullable().optional();
 const measureField = z.number().min(0).max(10_000_000).nullable().optional();
 // ตัวขับแบบนับ (จำนวนห้องน้ำ/ชั้น) — จำนวนเต็ม ≥ 0
 const countField = z.number().int().min(0).max(1000).nullable().optional();
+
+// ช่องเปิดประตู/หน้าต่างหนึ่งแบบ (กว้าง × สูง เป็นเมตร) — ยอดรวมหักออกจากพื้นที่ผนัง
+export const projectOpeningSchema = z.object({
+  label: z.string().trim().min(1, "ระบุชื่อช่องเปิด เช่น D1, W2").max(80),
+  count: z.number().int().min(1).max(10_000),
+  width: z.number().positive().max(100),
+  height: z.number().positive().max(100),
+});
 
 export const createProjectSchema = z.object({
   name: z.string().min(1, "กรุณากรอกชื่อโครงการ"),
@@ -46,6 +56,8 @@ export const updateProjectSchema = z.object({
   footprintSqm: measureField,
   bathrooms: countField,
   floors: countField,
+  // รายการช่องเปิด — ส่งมา = แทนทั้งชุดแล้วคิดยอดรวมใหม่ · [] หรือ null = ไม่หักช่องเปิด
+  openings: z.array(projectOpeningSchema).max(200).nullable().optional(),
   startDate: dateField,
   targetEndDate: dateField,
   customerId: z.string().min(1).nullable().optional(),
@@ -68,7 +80,8 @@ export const transitionProjectSchema = z.object({
 // ข้อมูลจาก lead ต้นทาง; พนักงานกรอกทับได้ (lead อาจไม่มีอีเมล หรือพิมพ์ผิด) — ไม่มีรหัสผ่าน
 // เพราะลูกค้าจะตั้งเองผ่านลิงก์ ถ้าโปรเจกต์มีลูกค้าผูกอยู่แล้วจะไม่ใช้ฟิลด์เหล่านี้ (แค่ออกลิงก์ใหม่)
 export const issueAccessLinkSchema = z.object({
-  email: z.string().email("กรุณากรอกอีเมลให้ถูกต้อง").optional(),
+  // บัญชีใหม่เหมือนกับหน้าสมัคร — ใช้กฎชุดเดียวกัน ไม่งั้นพนักงานพิมพ์ @gmial.com ให้ลูกค้าได้
+  email: newAccountEmailSchema.optional(),
   fullName: z.string().min(1, "กรุณากรอกชื่อ-นามสกุล").optional(),
   phone: z.string().min(6, "กรุณากรอกเบอร์โทรศัพท์ให้ถูกต้อง").optional(),
 });
@@ -125,13 +138,19 @@ export const updateVersionRatesSchema = z
     overheadPercent: z.number().min(0).max(100).nullable().optional(),
     vatPercent: z.number().min(0).max(100).optional(),
     discount: discountPatchSchema.optional(),
+    /** ค่าเผื่อเหลือเผื่อขาด % ของต้นทุนตรง — 0 คือไม่เผื่อ */
+    contingencyPercent: z.number().min(0).max(100).optional(),
+    /** ปัดยอดสุทธิ (รวม VAT) ลงเป็นทวีคูณของหน่วยนี้ (บาท) — null = เลิกปัด */
+    roundingUnit: z.union([z.literal(1), z.literal(100), z.literal(1000), z.literal(10000)]).nullable().optional(),
   })
   .refine(
     (v) =>
       v.overheadProfitPercent != null ||
       v.overheadPercent !== undefined ||
       v.vatPercent != null ||
-      v.discount != null,
+      v.discount != null ||
+      v.contingencyPercent != null ||
+      v.roundingUnit !== undefined,
     { message: "ต้องระบุอัตราหรือส่วนลดอย่างน้อยหนึ่งค่า" },
   );
 

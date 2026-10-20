@@ -11,7 +11,9 @@ import { ApiError } from "../lib/api";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import { deletePortfolioItem, getPortfolioItem, updatePortfolioItem } from "../lib/portfolio-api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { publishedBadgeClass } from "../lib/status-badge";
+import { DetailSkeleton } from "../components/Skeleton";
 
 const TYPE_LABEL: Record<PortfolioType, string> = {
   DESIGN: "งานออกแบบ",
@@ -102,11 +104,15 @@ export function PortfolioDetailPage() {
 
   async function handleDelete() {
     if (!id) return;
-    if (!(await confirm("ย้ายผลงานนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ย้ายไปถังขยะ" })))
+    if (!(await confirm("ย้ายผลงานนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ลบ" })))
       return;
     try {
       await deletePortfolioItem(id);
-      toast.success("ย้ายไปถังขยะแล้ว — กู้คืนได้ที่เมนูถังขยะ");
+      // กดเลิกทำแล้วพากลับมาหน้าเดิมของผลงานนั้น ไม่ใช่ทิ้งไว้ที่หน้ารายการ
+      toast.undo("ย้ายผลงานไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("portfolio", id);
+        navigate(`/portfolio/${id}`);
+      });
       navigate("/portfolio");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ย้ายไปถังขยะไม่สำเร็จ");
@@ -116,7 +122,7 @@ export function PortfolioDetailPage() {
   if (loading || !form) {
     return (
       <Layout>
-        <p className="text-slate-500">กำลังโหลด...</p>
+        <DetailSkeleton stats={0} />
       </Layout>
     );
   }
@@ -144,13 +150,13 @@ export function PortfolioDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button
-            variant={item.published ? "ghost" : "primary"}
+            variant={item.published ? "dangerQuiet" : "brand"}
             size="sm"
             onClick={handleTogglePublish}
           >
             {item.published ? "ยกเลิกเผยแพร่" : "เผยแพร่"}
           </Button>
-          <Button variant="danger" size="sm" onClick={handleDelete}>
+          <Button variant="dangerQuiet" size="sm" onClick={handleDelete}>
             <Trash2 size={14} /> ลบ
           </Button>
         </div>
@@ -208,6 +214,7 @@ export function PortfolioDetailPage() {
           <div className="col-span-2">
             <ImageUploadField
               label="รูปภาพ"
+              cover
               value={form.images}
               onChange={(v) => setForm((f) => f && { ...f, images: v })}
             />

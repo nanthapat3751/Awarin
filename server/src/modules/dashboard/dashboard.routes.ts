@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import { requireAuth } from "../../middleware/auth";
 import { requireRole } from "../../middleware/rbac";
-import { getDashboardSummary, getPendingWork } from "./dashboard.service";
+import { getContractCash, getDashboardSummary, getPendingWork, getPipeline } from "./dashboard.service";
 
 export const dashboardRouter = Router();
 
@@ -16,4 +16,14 @@ dashboardRouter.get("/summary", async (_req, res) => {
 dashboardRouter.get("/pending-work", async (_req, res) => {
   const pendingWork = await getPendingWork();
   res.json({ pendingWork });
+});
+
+dashboardRouter.get("/pipeline", async (_req, res) => {
+  const pipeline = await getPipeline();
+  res.json({ pipeline });
+});
+
+dashboardRouter.get("/contract-cash", async (_req, res) => {
+  const cash = await getContractCash();
+  res.json({ cash });
 });

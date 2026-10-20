@@ -107,12 +107,47 @@ npm run dev:client   # http://localhost:5174
 | `BACKUP_MIRROR_DIR` | สำเนานอกเครื่อง ใส่ได้หลายที่คั่นด้วย `;` เช่น `G:\My Drive\systemboq-backups;E:\systemboq-backups` (Google Drive + USB) — **ต้องสร้างโฟลเดอร์ไว้เองก่อน** ระบบไม่สร้างให้ (กันไดรฟ์ไม่ได้เสียบแล้วไปเขียนลงดิสก์เครื่องเดิมแทน) · ที่ไม่ได้ต่ออยู่จะถูกข้าม แล้วคัดลอกชุดที่ขาดให้ครบเมื่อต่อกลับมา · **ควรตั้งก่อนใช้งานจริง** | ว่าง |
 | `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | สำรองอัตโนมัติทุกวันกี่โมง (เวลาไทย) / เก็บย้อนหลังกี่วัน (เหลืออย่างน้อย 3 ชุดล่าสุดเสมอ) | `2` / `14` |
 | `BACKUP_ENABLED` | `false` = ปิดการสำรองอัตโนมัติ (ยังกดสำรองเองได้) | เปิด |
+| `TRUST_PROXY` | จำนวน hop ของ reverse proxy/load balancer ข้างหน้า (เช่น `1`) — **ต้องตั้งเมื่ออยู่หลัง LB** ไม่งั้นทุกคำขอได้ไอพีของ LB แล้วทุกคนแชร์เพดาน rate limit เดียว · ห้ามตั้งถ้าไม่มี proxy (client ปลอมไอพีได้) · หลังขึ้นระบบให้ OWNER เปิด **ตั้งค่า > การรับ IP** จากเน็ตมือถือเพื่อยืนยันว่าได้ไอพีจริง | ไม่ตั้ง |
+| `GEOIP_AUTO_UPDATE` | ดาวน์โหลด/อัปเดตฐานข้อมูลประเทศ+ผู้ให้บริการของไอพี (DB-IP Lite, CC BY 4.0) เองหลังเปิดเซิร์ฟเวอร์และทุกเดือน — ค้นในเครื่องเอง ไม่ส่งไอพีลูกค้าออกไป · เครื่องที่ออกเน็ตไม่ได้ตั้ง `false` แล้วรัน `npm run geoip:update -w server` | `true` |
+| `GEOIP_HOME_COUNTRY` | ประเทศหลักของบริษัท ไอพีนอกประเทศนี้ได้ป้าย "ต่างประเทศ" ในแฟ้มลูกค้า | `TH` |
+| `INSTANCE_ID` | ชื่อของ API ตัวนี้ — ตั้งแล้วทุกคำตอบมี header `X-Served-By` ไว้ดูว่า LB กระจายงานจริง | `hostname:pid` (ไม่ส่ง header) |
+| `RATE_LIMIT_STORE` | `db` = นับในตาราง `RateLimitBucket` ร่วมกันทุกตัว · `memory` = นับในหน่วยความจำ (เทสต์ใช้ ห้ามใช้ตอนมีหลายตัว) | `db` |
+| `SHUTDOWN_DRAIN_MS` / `SHUTDOWN_TIMEOUT_MS` | ตอนปิด: รอให้ LB เห็นว่า `/api/health/ready` เป็น 503 ก่อนหยุดรับงาน / เวลาสูงสุดที่รอคำขอค้างจบ | `0` / `30000` |
+| `KEEP_ALIVE_TIMEOUT_MS` | ต้องนานกว่า idle timeout ของ LB (nginx 60 วิ) ไม่งั้นได้ 502 แบบสุ่ม | `65000` |
+| `DATABASE_POOL_SIZE` | จำนวนการเชื่อมต่อ DB ต่อ API หนึ่งตัว — ตั้งให้ (จำนวนตัว × ค่านี้) + สำรองข้อมูล/pgAdmin ไม่เกิน `max_connections` (100) · บูตแล้วพิมพ์ยอดที่ใช้อยู่ และเตือนถ้าจะเกิน 80% · ใส่ `connection_limit` ใน URL เองก็ได้ (ค่าใน URL ชนะ) | ค่าเริ่มต้นของ Prisma (CPU × 2 + 1) |
 
 ### `staff-app/.env` และ `client-app/.env` (ทั้งคู่ optional)
 
 | ตัวแปร | คำอธิบาย | ค่าเริ่มต้นถ้าไม่ตั้ง |
 |---|---|---|
 | `VITE_API_BASE_URL` | URL ของ `server` API | `http://localhost:4000` |
+| `VITE_SITE_URL` | **client-app เท่านั้น** — โดเมนจริงของเว็บลูกค้า ใช้ตอน build ใส่ในการ์ดแชร์ลิงก์ (`og:image` ต้องเป็น URL เต็ม) · `robots.txt` ชี้ sitemap ที่ `VITE_API_BASE_URL/api/public/sitemap.xml` (URL ข้างในใช้ `CLIENT_BASE_URL` ของ server) | `http://localhost:5174` |
+
+## รันหลายตัวหลัง load balancer
+
+```bash
+npm run dev:lb    # API 2 ตัว (4001, 4002) + nginx ที่ http://localhost:8080 + สองแอปที่ชี้ไปหา nginx
+```
+
+ต้องเปิด Docker ไว้ก่อน (nginx อยู่ใน `docker-compose.yml` profile `lb` — `docker compose up` ปกติไม่ขึ้น)
+ปิดด้วย Ctrl+C แล้ว `docker compose stop lb` · ค่าของ nginx และเหตุผลอยู่ใน `docker/nginx/lb.conf`
+
+API ทุกตัวไม่ถือสถานะของตัวเอง จึงไม่ต้องมี sticky session:
+
+| สิ่งที่ต้องใช้ร่วมกัน | อยู่ที่ |
+|---|---|
+| session ล็อกอิน | ตาราง `Session` |
+| ตัวนับ rate limit (กันเดารหัสผ่าน) | ตาราง `RateLimitBucket` — upsert คำสั่งเดียว ยิงพร้อมกันหลายเครื่องก็นับครบ |
+| งานรายวัน (ล้างถังขยะ/AuditLog, สำรองข้อมูล) | ทุกตัวตั้งเวลา แต่ตัวที่จองรอบใน `ScheduledRun` ได้เท่านั้นที่ทำ |
+| เลขเอกสาร | ตาราง `DocumentCounter` (row lock) |
+
+`/api/health` = process ยังอยู่ · `/api/health/ready` = ส่งงานมาได้ (เช็ค DB, ตอบ 503 ตอนกำลังปิด)
+
+**ไล่ปัญหาข้ามเครื่อง:** ทุกคำตอบมี header `X-Request-Id` · error 500 ผู้ใช้เห็น "รหัสอ้างอิง" (8 ตัวแรกของเลข) — ค้นเลขนี้ใน
+`docker compose logs lb` จะเห็น `upstream=` ว่าไปตกตัวไหน แล้วค้น `[<เลข>]` ใน log ของ API ตัวนั้น
+
+**ตอน deploy จริงหลายเครื่อง** ต้องให้ทุกตัวเห็นโฟลเดอร์เดียวกัน (volume/ดิสก์ร่วม): `UPLOADS_DIR`,
+`PRIVATE_UPLOADS_DIR`, `BACKUP_DIR` — ไม่งั้นรูป/ไฟล์แนบที่อัปขึ้นเครื่องหนึ่งจะเปิดจากอีกเครื่องไม่ได้
 
 ## ทดสอบ
 
@@ -172,6 +207,18 @@ npm run backup:restore -w server -- systemboq-2026-09-18_020000 --into systemboq
 `--with-files` ย้ายโฟลเดอร์รูป/ไฟล์แนบเดิมไปพักไว้เป็น `*.before-restore-<เวลา>` (ไม่ลบ) แล้วคัดลอกของจากชุดสำรองเข้าไปแทน
 
 หมายเหตุ Windows: ห้ามใช้ `fs.cpSync` กับโฟลเดอร์โปรเจกต์นี้ — Node 22 ล้มทั้งโปรเซสเงียบ ๆ เมื่อ path มีอักษรไทย (ระบบสำรองจึงคัดลอกทีละไฟล์ ดู `copyDir` ใน `src/lib/backup/backup.ts`)
+
+## วัดความแม่นยำตัวคิดโครงสร้าง
+
+เทียบผลของหน้าต่าง "คำนวณโครงสร้าง" กับ BOQ ที่วิศวกรถอดจากแบบจริง:
+
+```bash
+cp server/scripts/structural-benchmark.template.json my-house.json   # กรอกชิ้นส่วนทุกตัว + ยอดของวิศวกร
+npm run structural:benchmark -w server -- ../my-house.json --md ../my-house-report.md
+```
+
+ได้ตารางคอนกรีต · ไม้แบบ · เหล็กแยกขนาด พร้อม % ที่ต่างกัน และจำนวนรายการที่อยู่ในเกณฑ์ ±2%
+ช่องของวิศวกรที่เป็น `null` จะไม่ถูกคิด % (ไม่เดาตัวเลขแทน) · ถ้า BOQ วิศวกรรวมเผื่อเสียไว้แล้ว ใส่ `engineerWastePct` เพื่อถอดออกก่อนเทียบ
 
 ## สรุปมาตรการความปลอดภัย (ตาม checklist §10 ของ MASTER_PROMPT.md)
 

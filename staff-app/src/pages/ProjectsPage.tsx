@@ -1,21 +1,26 @@
 import { Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
-import type { ProjectDto, ProjectStatus, ProjectType } from "@systemboq/shared-types";
+import type { ProjectListPageDto, ProjectStatus, ProjectType } from "@systemboq/shared-types";
 
 import { Button } from "../components/Button";
 import { Layout } from "../components/Layout";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
+import { PeriodPicker } from "../components/PeriodPicker";
+import { StatusChips } from "../components/StatusChips";
 import { SearchInput } from "../components/SearchInput";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth-context";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
-import { createProject, deleteProject, listProjects } from "../lib/projects-api";
+import { createProject, deleteProject, listProjectsPage } from "../lib/projects-api";
+import { useListParams } from "../lib/use-list-params";
+import { restoreTrashItem } from "../lib/trash-api";
 import { rowNavClass, stopRowNav, useRowNav } from "../lib/row-nav";
 import { badgeClass, type BadgeColor } from "../lib/status-badge";
+import { TableSkeleton } from "../components/Skeleton";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   DRAFT: "ร่าง",
@@ -26,8 +31,6 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   CANCELLED: "ยกเลิก",
 };
 
-const PAGE_SIZE = 15;
-
 const STATUS_COLOR: Record<ProjectStatus, BadgeColor> = {
   DRAFT: "slate",
   QUOTED: "amber",
@@ -37,10 +40,17 @@ const STATUS_COLOR: Record<ProjectStatus, BadgeColor> = {
   CANCELLED: "red",
 };
 
-/** ข้อความตอนตารางว่าง: ค้นหาแล้วไม่เจอ · มีแต่โครงการที่ยกเลิก (ถูกซ่อน) · ยังไม่มีเลย */
-function emptyListMessage(filtering: boolean, hasHidden: boolean): string {
-  if (filtering) return "ไม่พบโครงการที่ค้นหา";
-  if (hasHidden) return 'ไม่มีโครงการที่แสดง — ลองติ๊ก "แสดงโครงการที่ยกเลิกแล้ว"';
+const STATUSES = Object.keys(STATUS_LABEL) as ProjectStatus[];
+
+/**
+ * ข้อความตอนตารางว่าง — มีแต่โครงการที่ยกเลิก (ถูกซ่อนตอนไม่เลือกสถานะ) ต้องบอกว่ามีอยู่
+ * ไม่งั้นคนเข้าใจว่าช่วงนั้นไม่มีงานเลย · กรองแล้วไม่เจอ · ยังไม่มีเลย
+ */
+function emptyListMessage(filtering: boolean, statusChosen: boolean, cancelledCount: number): string {
+  if (!statusChosen && cancelledCount > 0) {
+    return `ไม่มีโครงการที่ดำเนินการอยู่ — มีโครงการที่ยกเลิกแล้ว ${cancelledCount} รายการ ดูได้ที่ปุ่ม "ยกเลิก"`;
+  }
+  if (filtering) return "ไม่พบโครงการที่ตรงกับตัวกรอง";
   return "ยังไม่มีโครงการ — เริ่มสร้างโครงการใหม่ด้านบน";
 }
 
@@ -49,24 +59,13 @@ export function ProjectsPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const rowNav = useRowNav();
-  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [data, setData] = useState<ProjectListPageDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [searchParams] = useSearchParams();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ProjectStatus | "">("");
-
-  // มาจากกล่องสถานะบนแดชบอร์ด (/projects?status=QUOTED) -- ตรวจว่าเป็นสถานะที่รู้จักจริงก่อนใช้
-  // กันค่ามั่วจาก URL ที่แก้เอง; ตัวกรองในหน้านี้ยังเปลี่ยนเองได้ตามปกติหลังเข้ามาแล้ว
-  useEffect(() => {
-    const fromUrl = searchParams.get("status");
-    if (fromUrl && fromUrl in STATUS_LABEL) {
-      setStatusFilter(fromUrl as ProjectStatus);
-    }
-  }, [searchParams]);
-  const [showCancelled, setShowCancelled] = useState(false);
-  const [page, setPage] = useState(1);
+  // ตัวกรองอยู่ใน URL — ลิงก์จากกล่องสถานะบนแดชบอร์ด (/projects?status=QUOTED) ใช้ได้ทันที
+  const list = useListParams(STATUSES);
+  const { query } = list;
 
   const [showCreateChoice, setShowCreateChoice] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -78,12 +77,15 @@ export function ProjectsPage() {
   const canSetRate = user?.role === "OWNER";
   const [creating, setCreating] = useState(false);
 
-  async function refresh(q: string, status: ProjectStatus | "") {
+  // โหลดหน้าที่ URL บอก — ครั้งแรกโชว์โครงกระดูก ครั้งถัดไปจางตารางเดิมไว้จนข้อมูลใหม่มา (หน้าไม่กระโดด)
+  async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      const res = await listProjects({ q: q || undefined, status: status || undefined });
-      setProjects(res.projects);
+      const res = await listProjectsPage(query);
+      setData(res);
+      // ขอหน้าเกินมา (เช่น ลบแถวสุดท้ายของหน้าท้าย) เซิร์ฟเวอร์ให้หน้าสุดท้าย — ให้ URL ตามด้วย
+      if (res.page !== query.page) list.setPage(res.page);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "โหลดข้อมูลไม่สำเร็จ");
     } finally {
@@ -92,13 +94,16 @@ export function ProjectsPage() {
   }
 
   useEffect(() => {
-    const timer = setTimeout(() => refresh(search, statusFilter), 300);
-    return () => clearTimeout(timer);
+    void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter]);
+  }, [query]);
 
   async function submitCreate() {
-    if (!newName.trim()) return;
+    // เดิม return เงียบ ๆ — กดแล้วไม่เกิดอะไรขึ้น ผู้ใช้ไม่รู้ว่าขาดอะไร (BUG-002)
+    if (!newName.trim()) {
+      toast.error("กรอกชื่อโครงการก่อน");
+      return;
+    }
     setCreating(true);
     try {
       await createProject({
@@ -113,7 +118,7 @@ export function ProjectsPage() {
       setNewName("");
       setNewOverheadProfitPercent("");
       setShowAddForm(false);
-      await refresh(search, statusFilter);
+      await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "สร้างโครงการไม่สำเร็จ");
     } finally {
@@ -124,40 +129,30 @@ export function ProjectsPage() {
   async function handleDelete(id: string) {
     if (
       !(await confirm("ย้ายโครงการนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", {
-        confirmLabel: "ย้ายไปถังขยะ",
+        confirmLabel: "ลบ",
       }))
     )
       return;
     try {
       await deleteProject(id);
-      toast.success("ย้ายไปถังขยะแล้ว — กู้คืนได้ที่เมนูถังขยะ");
-      await refresh(search, statusFilter);
+      toast.undo("ย้ายโครงการไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("project", id);
+        await refresh();
+      });
+      await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ย้ายไปถังขยะไม่สำเร็จ");
     }
   }
 
-  // โปรเจกต์ที่ยกเลิกทำให้มุมมองเริ่มต้นรก แต่ไม่ควรหายไปเลย (ไม่มีการลบถาวรสำหรับอะไรที่เคย
-  // ออกใบเสนอราคาแล้ว) -- ซ่อนไว้เว้นแต่จะขอดู ยกเว้นตอนที่ตัวกรองสถานะเลือก "ยกเลิก" อยู่แล้ว
-  const visibleProjects = projects.filter(
-    (p) => statusFilter !== "" || showCancelled || p.status !== "CANCELLED",
-  );
-
-  // จำนวนหน้าวิ่งตามข้อมูล จึงเพิ่มและลดเองโดยอัตโนมัติ
-  const pageCount = Math.max(1, Math.ceil(visibleProjects.length / PAGE_SIZE));
-  // ให้มุมมองอยู่ในช่วงที่ถูกต้อง หลังการลบหรือตัวกรองที่แคบลงทำให้เหลือหน้าน้อยลง
-  const safePage = Math.min(page, pageCount);
-  const pageStart = (safePage - 1) * PAGE_SIZE;
-  const pageProjects = visibleProjects.slice(pageStart, pageStart + PAGE_SIZE);
-
-  useEffect(() => {
-    if (page !== safePage) setPage(safePage);
-  }, [page, safePage]);
-
-  // Any change of filter is a new result set — start reading it from the top.
-  useEffect(() => {
-    setPage(1);
-  }, [search, statusFilter, showCancelled]);
+  // เซิร์ฟเวอร์แบ่งหน้าละ 15 มาแล้ว · ไม่เลือกสถานะ = ซ่อนโครงการที่ยกเลิก (กดปุ่ม "ยกเลิก" เพื่อดู)
+  const projects = data?.projects ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 15;
+  const page = data?.page ?? 1;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const pageStart = (page - 1) * pageSize;
+  const filtering = Boolean(list.q || list.status || list.period);
 
   return (
     <Layout>
@@ -224,34 +219,23 @@ export function ProjectsPage() {
         </div>
       )}
 
-      <div className="flex gap-2 mb-4">
+      <div className="mb-3 flex flex-wrap gap-2">
         <SearchInput
-          value={search}
-          onChange={setSearch}
+          value={list.searchInput}
+          onChange={list.setSearchInput}
           placeholder="ค้นหาจากชื่อโครงการ, เลขที่โครงการ หรือชื่อลูกค้า"
-          className="flex-1"
+          className="min-w-60 flex-1"
         />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ProjectStatus | "")}
-          className="border border-slate-300 rounded-md px-2 py-1.5 text-sm"
-        >
-          <option value="">ทุกสถานะ</option>
-          {Object.entries(STATUS_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-1.5 text-sm text-slate-700 whitespace-nowrap">
-          <input
-            type="checkbox"
-            checked={showCancelled}
-            onChange={(e) => setShowCancelled(e.target.checked)}
-          />
-          <span>แสดงโครงการที่ยกเลิกแล้ว</span>
-        </label>
+        <PeriodPicker value={list.period} onChange={list.setPeriod} noun="โครงการ" />
       </div>
+      <StatusChips
+        statuses={STATUSES}
+        labels={STATUS_LABEL}
+        counts={data?.counts}
+        value={list.status}
+        onChange={list.setStatus}
+        allTitle="ทุกสถานะ ยกเว้นโครงการที่ยกเลิก"
+      />
 
       {showAddForm && (
         <div className="mb-4 border border-dashed border-slate-300 rounded-md p-3 bg-white">
@@ -290,22 +274,24 @@ export function ProjectsPage() {
         </div>
       )}
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && !data && <TableSkeleton rows={8} cols={4} />}
       {error && <p className="text-red-600">{error}</p>}
-      {!loading && !error && visibleProjects.length === 0 && (
-        <p className="text-slate-500">
-          {emptyListMessage(Boolean(search || statusFilter), projects.length > 0)}
-        </p>
+      {data && !error && projects.length === 0 && (
+        <p className="text-slate-500">{emptyListMessage(filtering, list.status != null, data.counts.CANCELLED)}</p>
       )}
 
-      {visibleProjects.length > 0 && (
+      {projects.length > 0 && (
         <p className="text-xs text-slate-500 mb-2">
-          แสดง {pageStart + 1}-{pageStart + pageProjects.length} จาก {visibleProjects.length} โครงการ
+          แสดง {pageStart + 1}-{pageStart + projects.length} จาก {total} โครงการ
         </p>
       )}
 
-      {visibleProjects.length > 0 && (
-        <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
+      {projects.length > 0 && (
+        <div
+          className={`overflow-x-auto rounded-lg border border-slate-200 bg-white transition-opacity ${loading ? "opacity-60" : ""}`}
+          aria-busy={loading}
+        >
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
             <tr>
               <th className="px-3 py-2">เลขที่โครงการ</th>
@@ -315,13 +301,13 @@ export function ProjectsPage() {
             </tr>
           </thead>
           <tbody>
-            {pageProjects.map((p) => (
+            {projects.map((p) => (
               <tr
                 key={p.id}
                 {...rowNav(`/projects/${p.id}`)}
                 className={`border-t border-slate-100 ${rowNavClass}`}
               >
-                <td className="px-3 py-2 text-slate-700">{p.projectNo}</td>
+                <td className="px-3 py-2 whitespace-nowrap tabular-nums text-slate-700">{p.projectNo}</td>
                 <td className="px-3 py-2">
                   <Link
                     to={`/projects/${p.id}`}
@@ -347,9 +333,10 @@ export function ProjectsPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
-      <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
+      <Pagination page={page} pageCount={pageCount} onChange={list.setPage} />
     </Layout>
   );
 }

@@ -33,6 +33,12 @@ export function notificationVisual(
   if (msg.includes("ถูกยกเลิก")) {
     return { icon: "x", chip: "bg-rose-100 text-rose-600" };
   }
+  // เรื่องเงิน (ใบแจ้งหนี้/ใบเสร็จ/ผลการแจ้งโอน) — ตรวจไม่พบเงินเข้าเป็นเรื่องที่ต้องทำต่อ ใช้สีเตือน
+  if (link.startsWith("/my/payments")) {
+    return msg.includes("ตรวจไม่พบ")
+      ? { icon: "x", chip: "bg-rose-100 text-rose-600" }
+      : { icon: "contract", chip: "bg-emerald-100 text-emerald-600" };
+  }
   if (link === "/my/contracts" || msg.startsWith("สัญญาเลขที่")) {
     return { icon: "contract", chip: "bg-emerald-100 text-emerald-600" };
   }
@@ -45,7 +51,7 @@ export function notificationVisual(
   if (msg.includes("ใบเสนอราคา") || link.includes("/my/quotes")) {
     return { icon: "file", chip: "bg-indigo-100 text-indigo-600" };
   }
-  if (msg.includes("คำขอ") || link === "/my/requests") {
+  if (msg.includes("คำขอ") || link.startsWith("/my/requests")) {
     return { icon: "phone", chip: "bg-blue-100 text-blue-600" };
   }
   return { icon: "bell", chip: "bg-slate-100 text-slate-600" };

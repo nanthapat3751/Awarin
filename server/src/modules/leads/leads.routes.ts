@@ -1,5 +1,6 @@
 import { Router } from "express";
 
+import { createdPeriod, searchText } from "../../lib/list-query";
 import { createRateLimiter } from "../../lib/rate-limit";
 import { verifyTurnstile } from "../../lib/turnstile";
 import { requireAuth } from "../../middleware/auth";
@@ -11,7 +12,9 @@ import {
   createLead,
   createProjectFromLead,
   deleteLead,
+  getMyLead,
   listLeads,
+  listLeadsPage,
   listMyLeads,
   replyToLead,
   updateLeadStatus,
@@ -21,7 +24,20 @@ export const leadsRouter = Router();
 
 leadsRouter.use(requireAuth, requireRole("OWNER", "ADMIN"));
 
+// ?page= มา = หน้ารายการแบบแบ่งหน้าที่เซิร์ฟเวอร์ (?q=&status=&year=&month=&page=)
+// ไม่มี page = รายการเต็มแบบเดิม (หน้าโครงการใช้เลือกคำขอมาผูก)
 leadsRouter.get("/", async (req, res) => {
+  if (req.query.page !== undefined) {
+    res.json(
+      await listLeadsPage({
+        q: searchText(req.query.q),
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        period: createdPeriod(req.query.year, req.query.month),
+        page: req.query.page,
+      }),
+    );
+    return;
+  }
   const status = updateLeadStatusSchema.shape.status.safeParse(req.query.status);
   const leads = await listLeads(status.success ? status.data : undefined);
   res.json({ leads });
@@ -93,7 +109,7 @@ leadsRouter.patch("/:id/reply", async (req, res) => {
 // ฟอร์มคำขอสาธารณะ (ไม่ต้องล็อกอิน) — จำกัดอัตราเพื่อกันบอท/สแปมถล่มกล่องคำขอของพนักงาน + อัด
 // ขยะลง DB (การสมัครสมาชิกมีลิมิตอยู่แล้ว ฟอร์มนี้ที่เปิดกว้างกว่าจึงต้องมีด้วย) ตั้ง max ผ่าน env
 // ได้ เพื่อให้เทสต์ (ที่ยิงหลายครั้งในไฟล์เดียว) ไม่ชนลิมิต — ค่าเริ่มต้น 5 ครั้ง/15 นาที/IP
-const createLeadLimiter = createRateLimiter({
+const createLeadLimiter = createRateLimiter({ name: "create-lead",
   windowMs: 15 * 60_000,
   max: Number(process.env.PUBLIC_LEAD_RATELIMIT_MAX ?? 5),
 });
@@ -127,4 +143,17 @@ myLeadsRouter.use(requireAuth, requireRole("CUSTOMER"));
 myLeadsRouter.get("/", async (req, res) => {
   const leads = await listMyLeads(req.user!.id);
   res.json({ leads });
+});
+
+myLeadsRouter.get("/:id", async (req, res) => {
+  try {
+    const lead = await getMyLead(req.user!.id, req.params.id);
+    res.json({ lead });
+  } catch (err) {
+    if (err instanceof LeadError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });

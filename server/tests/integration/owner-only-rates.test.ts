@@ -1,5 +1,6 @@
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginAdmin, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 /**
  * อัตราค่าดำเนินการ+กำไร แก้ได้เฉพาะ OWNER — ทั้ง 3 ทางเข้า:
@@ -175,9 +176,7 @@ describe("owner-only profit rate", () => {
       });
       // ส่งใบเสนอราคาแล้ว = แก้อัตราครั้งถัดไปจะโคลนเวอร์ชันใหม่ ใช้ดูว่าคำขอที่ถูกปฏิเสธไม่ทิ้งเวอร์ชันขยะ
       const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quote.body.quote.id);
       return projectId;
     }
 

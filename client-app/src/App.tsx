@@ -1,28 +1,51 @@
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Route, Routes, useLocation, useMatch } from "react-router-dom";
 
 import { Footer } from "./components/Footer";
 import { NavBar } from "./components/NavBar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { ActivatePage } from "./pages/ActivatePage";
-import { ContactPage } from "./pages/ContactPage";
-import { DocumentPdfPage } from "./pages/DocumentPdfPage";
+import {
+  AboutPageSkeleton,
+  AccountPageSkeleton,
+  CardListPageSkeleton,
+  HouseDesignDetailSkeleton,
+  PdfPaperSkeleton,
+  PortalPageSkeleton,
+  PortfolioDetailSkeleton,
+  ServicesPageSkeleton,
+  ContactPageSkeleton,
+  RouteSkeleton,
+} from "./components/Skeleton";
+import { lazyPage } from "./lib/lazy-page";
 import { HomePage } from "./pages/HomePage";
-import { HouseDesignDetailPage } from "./pages/HouseDesignDetailPage";
-import { HouseDesignsPage } from "./pages/HouseDesignsPage";
-import { LoginPage } from "./pages/LoginPage";
-import { MyAccountPage } from "./pages/MyAccountPage";
-import { MyContractsPage } from "./pages/MyContractsPage";
-import { MyNotificationsPage } from "./pages/MyNotificationsPage";
-import { MyQuoteDetailPage } from "./pages/MyQuoteDetailPage";
-import { MyQuotesPage } from "./pages/MyQuotesPage";
-import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
-import { PortfolioDetailPage } from "./pages/PortfolioDetailPage";
-import { PortfolioPage } from "./pages/PortfolioPage";
-import { PrivacyPage } from "./pages/PrivacyPage";
-import { RegisterPage } from "./pages/RegisterPage";
-import { ServicesPage } from "./pages/ServicesPage";
+
+// หน้าแรก (คนเข้ามากสุด) กับหน้า 404 (เล็กมาก) โหลดมาพร้อมกัน — หน้าอื่นโหลดโค้ดของตัวเองตอนเข้าไปใช้
+// คนเปิดหน้าแรกจึงไม่ต้องโหลดโค้ดพอร์ทัล / หน้า PDF / ฟอร์มสมัครไปด้วย (ดู lib/lazy-page.ts)
+const AboutPage = lazyPage(() => import("./pages/AboutPage"), "AboutPage");
+const ActivatePage = lazyPage(() => import("./pages/ActivatePage"), "ActivatePage");
+const ContactPage = lazyPage(() => import("./pages/ContactPage"), "ContactPage");
+const DocumentPdfPage = lazyPage(() => import("./pages/DocumentPdfPage"), "DocumentPdfPage");
+const HouseDesignDetailPage = lazyPage(() => import("./pages/HouseDesignDetailPage"), "HouseDesignDetailPage");
+const HouseDesignsPage = lazyPage(() => import("./pages/HouseDesignsPage"), "HouseDesignsPage");
+const AuthDuoPage = lazyPage(() => import("./pages/AuthDuoPage"), "AuthDuoPage");
+const ForgotPasswordPage = lazyPage(() => import("./pages/ForgotPasswordPage"), "ForgotPasswordPage");
+const ResetPasswordPage = lazyPage(() => import("./pages/ResetPasswordPage"), "ResetPasswordPage");
+const MyAccountPage = lazyPage(() => import("./pages/MyAccountPage"), "MyAccountPage");
+const MyContractsPage = lazyPage(() => import("./pages/MyContractsPage"), "MyContractsPage");
+const MyNotificationsPage = lazyPage(() => import("./pages/MyNotificationsPage"), "MyNotificationsPage");
+const MyPaymentDetailPage = lazyPage(() => import("./pages/MyPaymentDetailPage"), "MyPaymentDetailPage");
+const MyPaymentsPage = lazyPage(() => import("./pages/MyPaymentsPage"), "MyPaymentsPage");
+const MyQuoteDetailPage = lazyPage(() => import("./pages/MyQuoteDetailPage"), "MyQuoteDetailPage");
+const MyQuotesPage = lazyPage(() => import("./pages/MyQuotesPage"), "MyQuotesPage");
+const MyRequestDetailPage = lazyPage(() => import("./pages/MyRequestDetailPage"), "MyRequestDetailPage");
+const MyRequestsPage = lazyPage(() => import("./pages/MyRequestsPage"), "MyRequestsPage");
+const PortfolioDetailPage = lazyPage(() => import("./pages/PortfolioDetailPage"), "PortfolioDetailPage");
+const PortfolioPage = lazyPage(() => import("./pages/PortfolioPage"), "PortfolioPage");
+const PrivacyPage = lazyPage(() => import("./pages/PrivacyPage"), "PrivacyPage");
+const VerifyEmailPage = lazyPage(() => import("./pages/VerifyEmailPage"), "VerifyEmailPage");
+const ServicesPage = lazyPage(() => import("./pages/ServicesPage"), "ServicesPage");
 
 /**
  * จัดตำแหน่งการเลื่อนหน้าจอเมื่อเปลี่ยนเส้นทาง — react-router ไม่ทำให้ทั้งสองกรณี
@@ -80,7 +103,16 @@ function App() {
   // เปลี่ยนไปตามเส้นทาง แล้ว React จะพังตอนกด "ย้อนกลับ" ออกจากหน้าดูเอกสาร
   const quoteDocView = useMatch("/my/quotes/:docId/pdf");
   const contractDocView = useMatch("/my/contracts/:docId/pdf");
-  const isDocumentView = Boolean(quoteDocView ?? contractDocView);
+  const billingDocView = useMatch("/my/contracts/:contractId/documents/:docId/pdf");
+  const changeOrderDocView = useMatch("/my/contracts/:contractId/change-orders/:docId/pdf");
+  const isDocumentView = Boolean(quoteDocView ?? contractDocView ?? billingDocView ?? changeOrderDocView);
+  const aboutView = useMatch("/about");
+  const houseListView = useMatch("/house-designs");
+  const houseDetailView = useMatch("/house-designs/:id");
+  const portfolioListView = useMatch("/portfolio");
+  const portfolioDetailView = useMatch("/portfolio/:id");
+  const servicesView = useMatch("/services");
+  const contactView = useMatch("/contact");
   const navPadding = overlayHero ? "" : "pt-[var(--nav-h)]";
 
   return (
@@ -88,13 +120,48 @@ function App() {
       <ScrollOnNavigate />
       {!isDocumentView && <NavBar overlayHero={overlayHero} />}
       <main className={isDocumentView ? "" : `flex-1 ${navPadding}`}>
+      <ErrorBoundary variant="page" resetKey={location.pathname}>
+      <Suspense
+        fallback={
+          isDocumentView ? (
+            <div className="h-screen bg-slate-100">
+              <PdfPaperSkeleton />
+            </div>
+          ) : aboutView ? (
+            <AboutPageSkeleton />
+          ) : houseListView ? (
+            <CardListPageSkeleton label="กำลังโหลดแบบบ้าน" />
+          ) : houseDetailView ? (
+            <HouseDesignDetailSkeleton />
+          ) : portfolioListView ? (
+            <CardListPageSkeleton label="กำลังโหลดผลงาน" filters={3} />
+          ) : portfolioDetailView ? (
+            <PortfolioDetailSkeleton />
+          ) : servicesView ? (
+            <ServicesPageSkeleton />
+          ) : contactView ? (
+            <ContactPageSkeleton />
+          ) : (
+            <RouteSkeleton />
+          )
+        }
+      >
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        {/* Route แม่ไม่มี path = React Router เก็บ AuthDuoPage ไว้ตัวเดิมตอนสลับ /login กับ
+            /register อนิเมชันใบมีดจึงเลื่อนข้ามได้จริง · ถ้าแยกเป็นสอง Route ระดับบนเหมือนเดิม
+            การ์ดจะถูกถอดทิ้งแล้วสร้างใหม่ ใบมีดจะไปโผล่อีกฝั่งทันทีโดยไม่มีการเลื่อน */}
+        <Route element={<AuthDuoPage />}>
+          <Route path="/login" element={null} />
+          <Route path="/register" element={null} />
+        </Route>
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         <Route path="/activate/:token" element={<ActivatePage />} />
         <Route path="/house-designs" element={<HouseDesignsPage />} />
         <Route path="/house-designs/:id" element={<HouseDesignDetailPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/portfolio/:id" element={<PortfolioDetailPage />} />
@@ -109,6 +176,14 @@ function App() {
           }
         />
         <Route
+          path="/my/requests/:id"
+          element={
+            <ProtectedRoute skeleton={<PortalPageSkeleton back body="request" />}>
+              <MyRequestDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/my/quotes"
           element={
             <ProtectedRoute>
@@ -119,7 +194,7 @@ function App() {
         <Route
           path="/my/quotes/:id"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute skeleton={<PortalPageSkeleton back wide body="document" />}>
               <MyQuoteDetailPage />
             </ProtectedRoute>
           }
@@ -133,9 +208,25 @@ function App() {
           }
         />
         <Route
+          path="/my/payments"
+          element={
+            <ProtectedRoute skeleton={<PortalPageSkeleton body="payments" />}>
+              <MyPaymentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/my/payments/:installmentId"
+          element={
+            <ProtectedRoute skeleton={<PortalPageSkeleton back wide body="payment" />}>
+              <MyPaymentDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/my/account"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute skeleton={<AccountPageSkeleton />}>
               <MyAccountPage />
             </ProtectedRoute>
           }
@@ -144,7 +235,7 @@ function App() {
         <Route
           path="/my/notifications"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute skeleton={<PortalPageSkeleton body="notifications" />}>
               <MyNotificationsPage />
             </ProtectedRoute>
           }
@@ -166,10 +257,28 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/my/contracts/:contractId/change-orders/:docId/pdf"
+          element={
+            <ProtectedRoute>
+              <DocumentPdfPage kind="changeOrder" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/my/contracts/:contractId/documents/:docId/pdf"
+          element={
+            <ProtectedRoute>
+              <DocumentPdfPage kind="billing" />
+            </ProtectedRoute>
+          }
+        />
         {/* ตัวรับท้าย — ต้องอยู่ล่างสุดเสมอ ไม่มีตัวนี้ URL ที่พิมพ์ผิดจะได้แถบเมนู + ฟุตเตอร์
             แต่ตรงกลางว่างเปล่า ดูเหมือนหน้าโหลดค้าง */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </Suspense>
+      </ErrorBoundary>
       </main>
       {!isDocumentView && <Footer />}
     </div>

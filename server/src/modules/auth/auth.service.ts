@@ -8,9 +8,19 @@ import { writeAuditLog } from "../../lib/audit-log";
 import { createNotification, notifyStaff } from "../../lib/notifications";
 import { hashPassword, verifyPassword } from "../../lib/password";
 import { prisma } from "../../lib/prisma";
+import { collectUploadFilenames, deleteUploadedFiles } from "../../lib/uploaded-files";
+import { isReplaceableSignup, newSignupTicket } from "../../lib/unverified-signups";
+
 import { AuthError } from "./auth.error";
 import type { RegisterCustomerInput, UpdateProfileInput } from "./auth.schemas";
-import { verifySecondFactor } from "./twofactor.service";
+import { newPasswordProblem } from "./new-password";
+import { alertTwoFactorLocked } from "./two-factor-lock-alert";
+import {
+  clearTwoFactorFailures,
+  reserveTwoFactorAttempt,
+  TWO_FACTOR_SESSION_MAX_ATTEMPTS,
+  verifySecondFactor,
+} from "./twofactor.service";
 
 // re-export เพื่อความเข้ากันได้กับที่อื่นที่ import { AuthError } from "./auth.service"
 export { AuthError };
@@ -44,10 +54,15 @@ function lockedError(lockedUntil: Date): AuthError {
 
 // แจ้งเตือนเมื่อบัญชีเพิ่งถูกล็อก เพื่อให้เจ้าตัวรู้ว่าอาจมีคนพยายามเดารหัส:
 // บัญชีพนักงาน → กระจายให้แอดมิน/เจ้าของทุกคน (รับรู้การโจมตีบัญชีภายใน) — บัญชีลูกค้า → แจ้งเจ้าของบัญชีเอง
-async function notifyAccountLocked(user: { id: string; email: string; role: string }): Promise<void> {
+async function notifyAccountLocked(user: {
+  id: string;
+  email: string | null;
+  username: string | null;
+  role: string;
+}): Promise<void> {
   if (user.role === "OWNER" || user.role === "ADMIN") {
     await notifyStaff(
-      `บัญชีพนักงาน ${user.email} ถูกล็อกชั่วคราว ${LOCK_DURATION_MINUTES} นาที เนื่องจากมีการพยายามเข้าสู่ระบบผิด ${MAX_FAILED_ATTEMPTS} ครั้งติดต่อกัน`,
+      `บัญชีพนักงาน ${user.username ?? user.email ?? user.id} ถูกล็อกชั่วคราว ${LOCK_DURATION_MINUTES} นาที เนื่องจากมีการพยายามเข้าสู่ระบบผิด ${MAX_FAILED_ATTEMPTS} ครั้งติดต่อกัน`,
     );
     return;
   }
@@ -57,66 +72,193 @@ async function notifyAccountLocked(user: { id: string; email: string; role: stri
   });
 }
 
-function toAuthenticatedUser(user: {
+export function toAuthenticatedUser(user: {
   id: string;
-  email: string;
+  email: string | null;
+  emailVerifiedAt: Date | null;
+  username: string | null;
   fullName: string;
   role: string;
   totpEnabled: boolean;
+  avatarUrl: string | null;
+  jobTitle: string | null;
+  workPhone: string | null;
+  mustChangePassword: boolean;
 }): AuthenticatedUser {
   return {
     id: user.id,
     email: user.email,
+    emailVerified: user.email != null && user.emailVerifiedAt != null,
+    username: user.username,
     fullName: user.fullName,
     role: user.role as Role,
     twoFactorEnabled: user.totpEnabled,
+    avatarUrl: user.avatarUrl,
+    jobTitle: user.jobTitle,
+    workPhone: user.workPhone,
+    mustChangePassword: user.mustChangePassword,
   };
 }
 
+/**
+ * สมัครสมาชิก — คืนตั๋วแก้อีเมล (signupTicket) ให้เบราว์เซอร์ที่สมัครเก็บไว้ด้วย
+ *
+ * **อีเมลที่สมัครค้างไว้แต่ไม่เคยยืนยัน ไม่ขวางเจ้าของตัวจริง:** ถ้ามีคนพิมพ์อีเมลของคนอื่นผิดไว้
+ * เดิมเจ้าของอีเมลจริงจะสมัครไม่ได้ตลอดไป ("อีเมลนี้ถูกใช้งานแล้ว") ตอนนี้สมัครทับได้ — บัญชีค้าง
+ * ถูกแทนที่ทั้งก้อน (ชื่อ รหัสผ่าน เบอร์ ล้างของค้างทุกอย่าง) และรหัสยืนยันไปที่อีเมลนั้นเสมอ
+ * คนที่พิมพ์ผิดจึงยึดบัญชีไม่ได้ · ทับได้เฉพาะบัญชีที่ไม่มีของที่พนักงานผูกไว้ (lib/unverified-signups.ts)
+ */
 export async function registerCustomer(
   input: RegisterCustomerInput,
-): Promise<AuthenticatedUser> {
+): Promise<{ user: AuthenticatedUser; signupTicket: string }> {
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
-  if (existing) {
+  if (existing && !(await isReplaceableSignup(existing.id))) {
     throw new AuthError("อีเมลนี้ถูกใช้งานแล้ว", 409);
   }
 
   const passwordHash = await hashPassword(input.password);
-  const user = await prisma.user.create({
-    data: {
-      email: input.email,
-      passwordHash,
-      fullName: input.fullName,
-      role: "CUSTOMER",
-      customerProfile: {
-        create: {
+  const ticket = newSignupTicket();
+  const now = new Date();
+
+  let user;
+  if (existing) {
+    user = await prisma.$transaction(async (tx) => {
+      // ของค้างทุกอย่างของคนก่อนหน้าต้องตาย — รหัสยืนยัน/ลิงก์ตั้งรหัสที่ส่งไปแล้ว ไม่ใช่ของคนใหม่
+      await tx.emailVerification.deleteMany({ where: { userId: existing.id } });
+      await tx.passwordResetToken.deleteMany({ where: { userId: existing.id } });
+      await tx.session.deleteMany({ where: { userId: existing.id } });
+      await tx.knownDevice.deleteMany({ where: { userId: existing.id } });
+      await tx.notification.deleteMany({ where: { userId: existing.id } });
+      await tx.customerProfile.upsert({
+        where: { userId: existing.id },
+        create: { userId: existing.id, phone: input.phone, address: input.address ?? null },
+        update: {
           phone: input.phone,
           address: input.address ?? null,
+          customerType: "INDIVIDUAL",
+          companyName: null,
+          taxId: null,
+          branch: null,
+          contactPerson: null,
+        },
+      });
+      return tx.user.update({
+        where: { id: existing.id },
+        data: {
+          passwordHash,
+          passwordChangedAt: now,
+          fullName: input.fullName,
+          avatarUrl: null,
+          failedAttempts: 0,
+          lockedUntil: null,
+          lastLoginAt: null,
+          sessionVersion: { increment: 1 },
+          signupTicketHash: ticket.hash,
+          signupEmailChanges: 0,
+          // นับวันสมัครใหม่ — กำหนดลบอัตโนมัติเริ่มนับจากการสมัครครั้งนี้
+          createdAt: now,
+        },
+      });
+    });
+  } else {
+    user = await prisma.user.create({
+      data: {
+        email: input.email,
+        passwordHash,
+        passwordChangedAt: now,
+        fullName: input.fullName,
+        role: "CUSTOMER",
+        signupTicketHash: ticket.hash,
+        customerProfile: {
+          create: {
+            phone: input.phone,
+            address: input.address ?? null,
+          },
         },
       },
-    },
-  });
+    });
+  }
 
   await writeAuditLog({
     userId: user.id,
-    action: "REGISTER",
+    action: existing ? "REGISTER_REPLACED_UNVERIFIED" : "REGISTER",
     entityType: "User",
     entityId: user.id,
   });
 
-  return toAuthenticatedUser(user);
+  return { user: toAuthenticatedUser(user), signupTicket: ticket.raw };
 }
 
+/**
+ * จองสิทธิ์ลองรหัสหนึ่งครั้งแบบ atomic — คืน null ถ้าบัญชีถูกล็อกอยู่ (หรือครั้งที่จองไว้ครบเพดานแล้ว)
+ *
+ * เดิมอ่านจำนวนครั้งที่ผิดมา +1 แล้วเขียนกลับหลังตรวจรหัส: คำขอที่ยิงพร้อมกัน (ง่ายมากเมื่อมี API
+ * หลายตัวหลัง load balancer) อ่านได้เลขเดียวกันแล้วเขียนทับกัน + ทุกคำขอผ่านด่านล็อกไปก่อน
+ * แล้วค่อยตรวจรหัส (argon2 ใช้เวลา ~100ms) — เดาได้เกิน 5 ครั้งก่อนโดนล็อก
+ *
+ * ตอนนี้ Postgres ล็อกแถวให้ คำสั่งเดียวทั้งเช็คและนับ: ครั้งที่ 5 ตั้ง lockedUntil ทันทีตั้งแต่ยังไม่รู้ผล
+ * (ถ้ารหัสถูก ขั้นสำเร็จจะล้างให้เอง) คำขอที่ 6 ที่วิ่งพร้อมกันจึงไม่ได้ลองเลย
+ *
+ * ล็อกที่หมดอายุแล้ว = เริ่มนับ 1 ใหม่ ไม่สะสมทบรอบเดิม (พิมพ์ผิดครั้งเดียวหลังหมดล็อกต้องไม่โดนล็อกซ้ำ)
+ * เวลาเทียบเป็น UTC เพราะคอลัมน์เป็น timestamp ไม่มีโซนเวลา — now() เฉย ๆ ขึ้นกับ TimeZone ของ DB
+ */
+async function reserveLoginAttempt(userId: string): Promise<{ lockedNow: boolean } | null> {
+  const rows = await prisma.$queryRaw<{ failedAttempts: number }[]>`
+    UPDATE "User" SET
+      "failedAttempts" = CASE WHEN "lockedUntil" IS NOT NULL THEN 1 ELSE "failedAttempts" + 1 END,
+      "lockedUntil" = CASE
+        WHEN (CASE WHEN "lockedUntil" IS NOT NULL THEN 1 ELSE "failedAttempts" + 1 END) >= ${MAX_FAILED_ATTEMPTS}
+          THEN (now() AT TIME ZONE 'UTC') + make_interval(mins => ${LOCK_DURATION_MINUTES}::int)
+        ELSE NULL
+      END
+    WHERE "id" = ${userId}
+      AND ("lockedUntil" IS NULL OR "lockedUntil" <= (now() AT TIME ZONE 'UTC'))
+      AND ("lockedUntil" IS NOT NULL OR "failedAttempts" < ${MAX_FAILED_ATTEMPTS})
+    RETURNING "failedAttempts"`;
+  if (rows.length === 0) return null;
+  return { lockedNow: Number(rows[0].failedAttempts) >= MAX_FAILED_ATTEMPTS };
+}
+
+async function blockedWhileLocked(userId: string, lockedUntil: Date, meta: RequestMeta): Promise<never> {
+  await writeAuditLog({
+    userId,
+    action: "LOGIN_BLOCKED_LOCKED",
+    entityType: "User",
+    entityId: userId,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+  throw lockedError(lockedUntil);
+}
+
+/**
+ * กุญแจที่ใช้ค้นหาบัญชี — พนักงานเป็น username ลูกค้าเป็น email
+ * แยกเป็นชนิดข้อมูลแทนที่จะรับสองช่องแล้วเช็คว่าอันไหนไม่ว่าง เพื่อให้ลืมส่งไม่ได้
+ */
+export type LoginCredential = { kind: "username"; value: string } | { kind: "email"; value: string };
+
 export async function login(
-  input: { email: string; password: string; allowedRoles: Role[] } & RequestMeta,
+  input: { credential: LoginCredential; password: string; allowedRoles: Role[] } & RequestMeta,
 ): Promise<{
   user: AuthenticatedUser;
   token: string;
   expiresAt: Date;
   twoFactorRequired: boolean;
 }> {
-  const genericError = new AuthError("อีเมลหรือรหัสผ่านไม่ถูกต้อง", 401);
-  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  // ข้อความต้องไม่บอกว่าผิดที่ช่องไหน (กันไล่เดาว่าบัญชีนี้มีอยู่จริงไหม) แต่ต้องเรียกชื่อช่อง
+  // ให้ตรงกับที่ผู้ใช้เพิ่งพิมพ์ ไม่งั้นพนักงานจะงงว่าอีเมลอะไรในเมื่อกรอกชื่อผู้ใช้
+  const genericError = new AuthError(
+    input.credential.kind === "username"
+      ? "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
+      : "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+    401,
+  );
+  const user = await prisma.user.findUnique({
+    where:
+      input.credential.kind === "username"
+        ? { username: input.credential.value }
+        : { email: input.credential.value },
+  });
 
   if (!user || !input.allowedRoles.includes(user.role as Role)) {
     await verifyPassword(DUMMY_HASH, input.password);
@@ -128,32 +270,23 @@ export async function login(
   }
 
   if (user.lockedUntil && user.lockedUntil > new Date()) {
-    await writeAuditLog({
-      userId: user.id,
-      action: "LOGIN_BLOCKED_LOCKED",
-      entityType: "User",
-      entityId: user.id,
-      ip: input.ip,
-      userAgent: input.userAgent,
-    });
-    throw lockedError(user.lockedUntil);
+    await blockedWhileLocked(user.id, user.lockedUntil, input);
+  }
+
+  // จองสิทธิ์ลองหนึ่งครั้ง **ก่อน** ตรวจรหัส (ดู reserveLoginAttempt) — ค่าที่อ่านไว้ข้างบนเก่าได้ทุกเมื่อ
+  // ถ้ามีคำขออื่นของบัญชีเดียวกันวิ่งอยู่บน API ตัวอื่น
+  const attempt = await reserveLoginAttempt(user.id);
+  if (!attempt) {
+    const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { lockedUntil: true } });
+    await blockedWhileLocked(
+      user.id,
+      fresh?.lockedUntil ?? new Date(Date.now() + LOCK_DURATION_MINUTES * 60_000),
+      input,
+    );
   }
 
   const passwordOk = await verifyPassword(user.passwordHash, input.password);
   if (!passwordOk) {
-    // ถ้าเพิ่งพ้นล็อกรอบก่อน (lockedUntil เป็นอดีต — เพราะถ้ายังไม่หมดจะถูกดักด้านบนไปแล้ว) ให้เริ่ม
-    // นับใหม่จาก 0 ไม่สะสมทบจากรอบเดิม มิฉะนั้นพิมพ์ผิดครั้งเดียวหลังหมดล็อกจะโดนล็อกซ้ำทันที
-    const failedAttempts = (user.lockedUntil ? 0 : user.failedAttempts) + 1;
-    const shouldLock = failedAttempts >= MAX_FAILED_ATTEMPTS;
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        failedAttempts,
-        lockedUntil: shouldLock
-          ? new Date(Date.now() + LOCK_DURATION_MINUTES * 60_000)
-          : null,
-      },
-    });
     await writeAuditLog({
       userId: user.id,
       action: "LOGIN_FAILED",
@@ -164,10 +297,32 @@ export async function login(
     });
     // เพิ่งถูกล็อกในครั้งนี้ → แจ้งเตือน. เป็นผลข้างเคียงแบบ best-effort: ถ้าล้มเหลวต้องไม่ทำให้
     // การล็อกอิน (ที่ต้องตอบ error รหัสผิดตามปกติ) กลายเป็น 500
-    if (shouldLock) {
+    if (attempt?.lockedNow) {
       await notifyAccountLocked(user).catch(() => undefined);
     }
     throw genericError;
+  }
+
+  // ลูกค้าที่สมัครเองแต่ยังไม่ยืนยันอีเมล เข้าระบบไม่ได้ — นี่คือจุดที่ทำให้ "เมลปลอมสมัครไม่ได้"
+  // เป็นจริง (สมัครได้ แต่บัญชีใช้ไม่ได้จนกว่าจะเปิดเมลนั้นได้จริง)
+  //
+  // เช็คหลังตรวจรหัสผ่านผ่านแล้วโดยตั้งใจ ถ้าเช็คก่อนจะกลายเป็นช่องให้คนนอกไล่ถามว่าอีเมลไหน
+  // มีบัญชีอยู่ในระบบ โดยไม่ต้องรู้รหัสผ่านเลย
+  //
+  // บัญชีที่ทีมงานสร้างให้มี emailVerifiedAt ตั้งแต่ต้น และพนักงานไม่เข้าเงื่อนไขนี้ (role ไม่ใช่
+  // CUSTOMER) — เงื่อนไข role จึงต้องมี ไม่งั้นพนักงานทุกคนจะล็อกอินไม่ได้
+  if (user.role === "CUSTOMER" && user.emailVerifiedAt === null) {
+    // รหัสถูกแล้ว ไม่ใช่การเดา — คืนครั้งที่จองไว้ ไม่งั้นลูกค้าที่ยังไม่ยืนยันอีเมลแต่ลองเข้า 5 ครั้งจะล็อกตัวเอง
+    await prisma.user.update({ where: { id: user.id }, data: { failedAttempts: 0, lockedUntil: null } });
+    await writeAuditLog({
+      userId: user.id,
+      action: "LOGIN_BLOCKED_UNVERIFIED",
+      entityType: "User",
+      entityId: user.id,
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
+    throw new AuthError("ยังไม่ได้ยืนยันอีเมล กรุณายืนยันอีเมลก่อนเข้าใช้งาน", 403);
   }
 
   await prisma.user.update({
@@ -232,6 +387,8 @@ async function createSession(
   return { token, expiresAt };
 }
 
+const LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
+
 export async function resolveSession(token: string): Promise<AuthenticatedUser | null> {
   const session = await prisma.session.findUnique({
     where: { id: token },
@@ -252,6 +409,15 @@ export async function resolveSession(token: string): Promise<AuthenticatedUser |
   // 2FA ต้องใช้ session นี้ต่อ (มันจะหมดอายุเองภายในไม่กี่นาที)
   if (session.pendingTwoFactor) return null;
 
+  // "ใช้งานล่าสุด" ในหน้าอุปกรณ์ที่เข้าสู่ระบบ — ทุกคำขอผ่านตรงนี้ จึงเขียนไม่ถี่กว่าทุก 5 นาที
+  // พลาดก็ไม่เป็นไร (ค่านี้ใช้แสดงผลอย่างเดียว) ต้องไม่ทำให้คำขอที่ล็อกอินถูกต้องกลายเป็น error
+  const seenAt = session.lastSeenAt ?? session.createdAt;
+  if (Date.now() - seenAt.getTime() > LAST_SEEN_WRITE_INTERVAL_MS) {
+    await prisma.session
+      .update({ where: { id: token }, data: { lastSeenAt: new Date() } })
+      .catch(() => undefined);
+  }
+
   return toAuthenticatedUser(session.user);
 }
 
@@ -265,7 +431,9 @@ export async function completeTwoFactor(
   code: string,
   meta: RequestMeta,
 ): Promise<{ user: AuthenticatedUser; expiresAt: Date }> {
-  const invalid = new AuthError("เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่", 401);
+  const invalid = new AuthError("เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่", 401, undefined, {
+    restartLogin: true,
+  });
   const session = await prisma.session.findUnique({
     where: { id: token },
     include: { user: true },
@@ -281,18 +449,63 @@ export async function completeTwoFactor(
     throw invalid;
   }
 
-  const ok = await verifySecondFactor(session.userId, code);
-  if (!ok) {
-    await writeAuditLog({
+  const audit = (action: string, details?: Record<string, unknown>) =>
+    writeAuditLog({
       userId: session.userId,
-      action: "2FA_FAILED",
+      action,
       entityType: "User",
       entityId: session.userId,
+      details,
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
-    throw new AuthError("รหัสยืนยันไม่ถูกต้อง", 401);
+  // ถูกระงับแล้วเซสชันครึ่งทางนี้ (อายุ 5 นาที) ไม่มีทางใช้ทัน ทิ้งไปเลย ครบเวลาค่อยกรอกรหัสผ่านใหม่
+  const suspended = async (lockedUntil: Date): Promise<never> => {
+    await prisma.session.delete({ where: { id: token } }).catch(() => undefined);
+    throw new AuthError(
+      "กรอกรหัสยืนยันผิดหลายครั้ง ระบบระงับการยืนยันตัวตนของบัญชีนี้ชั่วคราว",
+      423,
+      Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 1000)),
+      { restartLogin: true },
+    );
+  };
+
+  // จองครั้งก่อนตรวจรหัส — เพดานต่อบัญชี (ดู reserveTwoFactorAttempt)
+  const reserved = await reserveTwoFactorAttempt(session.userId);
+  if (!reserved) {
+    await audit("2FA_BLOCKED_LOCKED");
+    const { twoFactorLockedUntil } = await prisma.user.findUniqueOrThrow({
+      where: { id: session.userId },
+      select: { twoFactorLockedUntil: true },
+    });
+    return suspended(twoFactorLockedUntil ?? new Date());
   }
+
+  const result = await verifySecondFactor(session.userId, code);
+  if (result !== "ok") {
+    await audit("2FA_FAILED", { reason: result });
+    if (reserved.lockedUntil) {
+      await audit("2FA_LOCKED", { until: reserved.lockedUntil.toISOString() });
+      // ระงับรอบนี้ = รหัสผ่านถูกแต่รหัส 6 หลักผิดจนครบเพดาน → บอกเจ้าของบัญชีและ OWNER/ADMIN (ล้มก็ไม่ขวางการตอบ 423)
+      await alertTwoFactorLocked(session.user, reserved.lockedUntil).catch(() => undefined);
+      return suspended(reserved.lockedUntil);
+    }
+    const counted = await prisma.session
+      .update({ where: { id: token }, data: { twoFactorAttempts: { increment: 1 } }, select: { twoFactorAttempts: true } })
+      .catch(() => null);
+    if (!counted || counted.twoFactorAttempts >= TWO_FACTOR_SESSION_MAX_ATTEMPTS) {
+      await prisma.session.delete({ where: { id: token } }).catch(() => undefined);
+      throw new AuthError("กรอกรหัสยืนยันผิดหลายครั้ง กรุณาเข้าสู่ระบบใหม่อีกครั้ง", 401, undefined, {
+        restartLogin: true,
+      });
+    }
+    throw new AuthError(
+      result === "reused" ? "รหัสนี้ถูกใช้ไปแล้ว กรุณารอรหัสถัดไปในแอปแล้วกรอกใหม่" : "รหัสยืนยันไม่ถูกต้อง",
+      401,
+    );
+  }
+
+  await clearTwoFactorFailures(session.userId);
 
   const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60_000);
   await prisma.session.update({
@@ -337,7 +550,8 @@ async function findUsableAccessToken(raw: string) {
 /** ฝั่งลูกค้า: เปิดลิงก์ — คืนชื่อ/อีเมลของบัญชีปลายทางเพื่อยืนยันก่อนตั้งรหัส (ไม่แตะสถานะ token) */
 export async function getAccessTokenInfo(raw: string): Promise<{ email: string; fullName: string }> {
   const token = await findUsableAccessToken(raw);
-  return { email: token.user.email, fullName: token.user.fullName };
+  // ลิงก์นี้ออกให้บัญชีลูกค้าเท่านั้น ซึ่งบังคับมีอีเมลเสมอ — `?? ""` กันชนิดข้อมูลไว้ ไม่ใช่เคสจริง
+  return { email: token.user.email ?? "", fullName: token.user.fullName };
 }
 
 /**
@@ -352,6 +566,8 @@ export async function redeemAccessToken(
   address?: string,
 ): Promise<{ user: AuthenticatedUser; token: string; expiresAt: Date }> {
   const accessToken = await findUsableAccessToken(raw);
+  const linkProblem = await newPasswordProblem(accessToken.user, newPassword);
+  if (linkProblem !== null) throw new AuthError(linkProblem, 400);
   const passwordHash = await hashPassword(newPassword);
 
   // บัญชีลูกค้าที่ทีมงานสร้างจากคำขอมี CustomerProfile (พร้อมเบอร์โทร) อยู่แล้ว — upsert ไว้เผื่อ
@@ -359,7 +575,13 @@ export async function redeemAccessToken(
   const user = await prisma.$transaction(async (tx) => {
     const updated = await tx.user.update({
       where: { id: accessToken.userId },
-      data: { passwordHash, sessionVersion: { increment: 1 }, failedAttempts: 0, lockedUntil: null },
+      data: {
+        passwordHash,
+        passwordChangedAt: new Date(),
+        sessionVersion: { increment: 1 },
+        failedAttempts: 0,
+        lockedUntil: null,
+      },
     });
     await tx.accountAccessToken.update({
       where: { id: accessToken.id },
@@ -416,12 +638,19 @@ export async function changePassword(
     throw new AuthError("รหัสผ่านปัจจุบันไม่ถูกต้อง", 401);
   }
 
+  const newProblem = await newPasswordProblem(user, input.newPassword);
+  if (newProblem !== null) throw new AuthError(newProblem, 400);
+
   const newPasswordHash = await hashPassword(input.newPassword);
   const updated = await prisma.user.update({
     where: { id: userId },
     data: {
       passwordHash: newPasswordHash,
+      passwordChangedAt: new Date(),
       sessionVersion: { increment: 1 },
+      // ปลดธงบังคับเปลี่ยนรหัส — ตรงนี้คือทางเดียวที่ปลดได้ เพราะเป็นทางเดียวที่เจ้าตัวต้องพิสูจน์
+      // ว่ารู้รหัสปัจจุบันแล้วตั้งรหัสใหม่ด้วยตัวเอง (ไม่มีใครอื่นรู้รหัสใหม่นี้)
+      mustChangePassword: false,
     },
   });
 
@@ -462,6 +691,8 @@ export async function deleteMyAccount(userId: string, currentPassword: string): 
       data: {
         email: anonymizedEmail(userId),
         fullName: "ลูกค้าที่ลบบัญชี",
+        // รูปหน้าคือข้อมูลส่วนบุคคลชัด ๆ — ล้างลิงก์ แล้วลบไฟล์ทิ้งหลังธุรกรรมผ่าน (ข้างล่าง)
+        avatarUrl: null,
         active: false,
         sessionVersion: { increment: 1 },
       },
@@ -485,6 +716,7 @@ export async function deleteMyAccount(userId: string, currentPassword: string): 
     // ไม่งั้นคำขอลบข้อมูลจะเหลือร่องรอยส่วนตัวค้างอยู่ในระบบ
     prisma.customerNote.deleteMany({ where: { customerId: userId } }),
   ]);
+  if (user.avatarUrl) deleteUploadedFiles(collectUploadFilenames(user.avatarUrl));
 
   await writeAuditLog({
     userId,
@@ -525,6 +757,16 @@ function toProfileFields(profile: {
   };
 }
 
+export async function getAuthenticatedUser(userId: string): Promise<AuthenticatedUser> {
+  return toAuthenticatedUser(await prisma.user.findUniqueOrThrow({ where: { id: userId } }));
+}
+
+/** เวลาที่ตั้ง/เปลี่ยนรหัสผ่านล่าสุด · null = ไม่รู้ (บัญชีก่อนมีคอลัมน์นี้) */
+export async function getPasswordChangedAt(userId: string): Promise<Date | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordChangedAt: true } });
+  return user?.passwordChangedAt ?? null;
+}
+
 export async function getCustomerProfile(userId: string): Promise<CustomerProfileFields> {
   return toProfileFields(await prisma.customerProfile.findUnique({ where: { userId } }));
 }
@@ -551,6 +793,7 @@ export async function updateCustomerProfile(
   const patch = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
 
   const current = await prisma.customerProfile.findUnique({ where: { userId } });
+  const owner = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fullName: true } });
   // กฎเดียวกับฝั่งพนักงาน: ตรวจสถานะปลายทาง ไม่ใช่เฉพาะช่องที่ส่งมา — ระบุว่าเป็นนิติบุคคลได้
   // ก็ต่อเมื่อผลลัพธ์มีชื่อนิติบุคคลจริง ไม่งั้นเอกสารจะออกในนามชื่อคนทั้งที่บอกว่าเป็นบริษัท
   const finalType = input.customerType ?? current?.customerType ?? "INDIVIDUAL";
@@ -560,17 +803,23 @@ export async function updateCustomerProfile(
     throw new AuthError("เลือกผู้ว่าจ้างเป็นนิติบุคคล ต้องกรอกชื่อนิติบุคคลด้วย", 400);
   }
 
-  const profile = await prisma.customerProfile.upsert({
-    where: { userId },
-    create: { userId, ...patch },
-    update: patch,
-  });
+  const renamed = input.fullName !== undefined && input.fullName !== owner.fullName;
+  const [profile] = await prisma.$transaction([
+    prisma.customerProfile.upsert({
+      where: { userId },
+      create: { userId, ...patch },
+      update: patch,
+    }),
+    ...(renamed ? [prisma.user.update({ where: { id: userId }, data: { fullName: input.fullName } })] : []),
+  ]);
 
   await writeAuditLog({
     userId,
     action: "UPDATE_PROFILE",
     entityType: "User",
     entityId: userId,
+    // ชื่อเปลี่ยน = ชื่อผู้ว่าจ้างบนเอกสารที่ยังไม่ตรึงเปลี่ยนตาม ทีมงานต้องย้อนดูได้ว่าเดิมชื่ออะไร
+    ...(renamed ? { details: { fullName: { from: owner.fullName, to: input.fullName } } } : {}),
   });
 
   return toProfileFields(profile);

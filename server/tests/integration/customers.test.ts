@@ -70,4 +70,26 @@ describe("customers module", () => {
     const detailAfter = await owner.agent.get(`/api/projects/${projectId}`);
     expect(detailAfter.body.project.customer).toBeNull();
   });
+
+  it("ไม่พิมพ์อะไร = ลูกค้าล่าสุด (ของโครงการที่แก้ล่าสุดก่อน) · ผลมีเบอร์โทรให้แยกคนชื่อซ้ำ", async () => {
+    const customer = await createAndLoginCustomer("test-customers-recent");
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: customer.email } });
+    createdUserIds.push(user.id);
+    await prisma.customerProfile.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, phone: "0899990001" },
+      update: { phone: "0899990001" },
+    });
+    const createRes = await owner.agent.post("/api/projects").send({ name: "โครงการทดสอบลูกค้าล่าสุด" });
+    createdProjectIds.push(createRes.body.project.id);
+    await owner.agent.patch(`/api/projects/${createRes.body.project.id}`).send({ customerId: user.id });
+
+    const recent = await owner.agent.get("/api/customers");
+    expect(recent.status).toBe(200);
+    expect(recent.body.customers[0]).toMatchObject({ id: user.id, phone: "0899990001" });
+    expect(recent.body.customers.length).toBeLessThanOrEqual(8);
+
+    const byPhone = await owner.agent.get("/api/customers?q=0899990001");
+    expect(byPhone.body.customers.map((c: { id: string }) => c.id)).toEqual([user.id]);
+  });
 });

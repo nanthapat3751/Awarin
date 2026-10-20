@@ -3,8 +3,14 @@ import type { BoqItem } from "@prisma/client";
 import { BOQ_ITEM_ORDER } from "./boq-order";
 import { prisma } from "./prisma";
 
-/** บรรทัด BOQ พร้อมรหัสงานของหมวดระดับ ITEM ที่มันสังกัดอยู่ เช่น "B-02-01" */
-export type BoqGroupedItem = BoqItem & { categoryCode: string | null };
+/**
+ * บรรทัด BOQ พร้อมรหัสงานของหมวดระดับ ITEM ที่มันสังกัดอยู่ เช่น "B-02-01"
+ * + หมวดย่อย (ชั้นถัดจากหมวดบนสุด เช่น B-04 งานฐานราก) — null = บรรทัดอยู่ตรงหมวดใหญ่
+ */
+export type BoqGroupedItem = BoqItem & {
+  categoryCode: string | null;
+  subgroup: { id: string; code: string | null; name: string } | null;
+};
 
 export interface BoqCategoryGroup {
   categoryLabel: string;
@@ -40,6 +46,18 @@ export async function groupBoqItemsByTopCategory(
     return current;
   }
 
+  /** ชั้นที่อยู่ใต้หมวดบนสุดพอดี (แบบเดียวกับแถบหมวดย่อยในหน้าโครงการ) — บรรทัดที่ผูกกับหมวดบนสุดตรง ๆ = null */
+  function subgroupOf(categoryId: string) {
+    let node = categoryById.get(categoryId);
+    while (node?.parentId) {
+      const parent = categoryById.get(node.parentId);
+      if (!parent?.parentId) break;
+      node = parent;
+    }
+    if (!node?.parentId || node.id === categoryId) return null;
+    return { id: node.id, code: node.code, name: node.name };
+  }
+
   const groupsByTopId = new Map<string, BoqCategoryGroup>();
   const topSortOrder = new Map<string, number>();
   const order: string[] = [];
@@ -61,6 +79,7 @@ export async function groupBoqItemsByTopCategory(
     groupsByTopId.get(topId)!.items.push({
       ...item,
       categoryCode: categoryById.get(item.categoryId)?.code ?? null,
+      subgroup: subgroupOf(item.categoryId),
     });
   }
 

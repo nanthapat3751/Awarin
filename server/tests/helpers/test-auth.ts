@@ -8,21 +8,38 @@ function uniqueEmail(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 }
 
+/** ชื่อผู้ใช้ของพนักงานในเทสต์ — ต้องไม่ซ้ำกันข้ามไฟล์ที่รันพร้อมกัน และต้องผ่าน regex ของ createStaffSchema */
+function uniqueUsername(prefix: string): string {
+  const safe = prefix.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "");
+  return `${safe}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * พนักงานล็อกอินด้วย username ไม่ใช่อีเมล — แต่ยังคืน `email` ไว้ด้วยเพราะบางเทสต์ใช้อ้างบัญชี
+ * (บัญชีพนักงานใหม่ในระบบจริงไม่มีอีเมลแล้ว ที่นี่ใส่ไว้เพื่อให้เทสต์เดิมที่ค้นด้วยอีเมลยังทำงานได้)
+ */
 async function createAndLoginStaff(prefix: string, role: "OWNER" | "ADMIN") {
   const email = uniqueEmail(prefix);
-  const password = "test-owner-battery-staple";
+  const username = uniqueUsername(prefix);
+  const password = "Quiet-lantern-42-riverbank";
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({
-    data: { email, passwordHash, fullName: role === "OWNER" ? "Test Owner" : "Test Admin", role },
+    data: {
+      email,
+      username,
+      passwordHash,
+      fullName: role === "OWNER" ? "Test Owner" : "Test Admin",
+      role,
+    },
   });
 
   const agent = request.agent(app);
-  const res = await agent.post("/api/auth/staff/login").send({ email, password });
+  const res = await agent.post("/api/auth/staff/login").send({ username, password });
   if (res.status !== 200) {
     throw new Error(`failed to log in test ${role}: ${res.status} ${JSON.stringify(res.body)}`);
   }
 
-  return { agent, userId: user.id, email, password };
+  return { agent, userId: user.id, email, username, password };
 }
 
 export async function createAndLoginOwner(prefix: string) {
@@ -35,12 +52,16 @@ export async function createAndLoginAdmin(prefix: string) {
 
 export async function createAndLoginCustomer(prefix: string) {
   const email = uniqueEmail(prefix);
-  const password = "test-customer-battery-staple";
+  const password = "Amber-thicket-71-woodgrain";
 
   const agent = request.agent(app);
   await agent
     .post("/api/auth/customer/register")
     .send({ email, password, fullName: "Test Customer", phone: "0812345678" });
+  // สมัครแล้วยังล็อกอินไม่ได้จนกว่าจะยืนยันอีเมล — ที่นี่ข้ามขั้นนั้นด้วยการเขียนลงฐานข้อมูลตรง ๆ
+  // เพราะ helper นี้มีหน้าที่ "ขอลูกค้าที่ล็อกอินแล้วหนึ่งคน" ไม่ได้ทดสอบตัวการยืนยัน
+  // (ตัวการยืนยันมีเทสต์ของตัวเองที่ email-verification.test.ts ซึ่งเดินครบทุกขั้นจริง)
+  await prisma.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } });
   const res = await agent.post("/api/auth/customer/login").send({ email, password });
   if (res.status !== 200) {
     throw new Error(`failed to log in test customer: ${res.status} ${JSON.stringify(res.body)}`);
@@ -58,7 +79,7 @@ export async function createAndLoginCustomer(prefix: string) {
  */
 export async function createCustomerDirect(prefix: string) {
   const email = uniqueEmail(prefix);
-  const password = "test-customer-battery-staple";
+  const password = "Amber-thicket-71-woodgrain";
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({
     data: {
@@ -66,6 +87,9 @@ export async function createCustomerDirect(prefix: string) {
       passwordHash,
       fullName: "Test Customer",
       role: "CUSTOMER",
+      // ลูกค้าที่ยังไม่ยืนยันอีเมลล็อกอินไม่ได้ — helper นี้เลียนแบบบัญชีที่ทีมงานสร้างให้
+      // ซึ่งถือว่ายืนยันแล้ว เทสต์ที่ต้องการทดสอบตัวการยืนยันเองอยู่ที่ email-verification.test.ts
+      emailVerifiedAt: new Date(),
       customerProfile: { create: { phone: "0812345678" } },
     },
   });

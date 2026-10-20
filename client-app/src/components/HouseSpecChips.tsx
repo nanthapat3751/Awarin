@@ -98,24 +98,59 @@ export function HouseSpecChips({ d }: Readonly<{ d: HouseDesignDto }>) {
   );
 }
 
-// เวอร์ชันใหญ่สำหรับหน้ารายละเอียด — ชิปโปร่งมีขอบ ตัวเลขเด่น
-export function HouseSpecChipsLarge({ d }: Readonly<{ d: HouseDesignDto }>) {
+// แบบบรรทัดเดียวไม่มีพื้นชิป — การ์ดแบบบ้านแนะนำหน้าแรก (รูปใหญ่ ชิปเทาทึบจะหนักเกินไปใต้รูป)
+export function HouseSpecLine({ d }: Readonly<{ d: HouseDesignDto }>) {
   const chips = collectChips(d);
   if (chips.length === 0) return null;
   return (
-    <div className="mt-4 flex flex-wrap gap-3">
+    <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
       {chips.map((c) => (
-        <span
-          key={c.key}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm"
-        >
-          <span className="text-brand">
-            <c.icon className="h-5 w-5" />
+        <span key={c.key} className="inline-flex items-center gap-1.5">
+          <span className="text-slate-400">
+            <c.icon />
           </span>
-          <span className="font-semibold text-slate-800">{c.value}</span>
+          <span className="font-medium text-slate-700">{c.value}</span>
           {c.unit}
         </span>
       ))}
-    </div>
+    </p>
   );
 }
+
+/** ป้ายซ้าย + หน่วยหลังตัวเลขของรายการสเปก — ห้องนอน/ห้องน้ำมีชื่อที่ป้ายแล้ว หน่วยจึงเหลือแค่ "ห้อง" */
+const LIST_ROW: Record<string, { label: string; unit: string }> = {
+  area: { label: "พื้นที่ใช้สอย", unit: "ตร.ม." },
+  floors: { label: "จำนวนชั้น", unit: "ชั้น" },
+  bed: { label: "ห้องนอน", unit: "ห้อง" },
+  bath: { label: "ห้องน้ำ", unit: "ห้อง" },
+};
+
+/**
+ * รายการสเปกหน้ารายละเอียดแบบบ้าน (แบบ B ใบสเปก ผู้ใช้เลือก 16 ต.ค. 2569) — ป้ายพร้อมไอคอนเทาทางซ้าย
+ * ค่าตัวหนาชิดขวา คั่นแถวด้วยเส้นบาง · แสดงเฉพาะสเปกที่กรอกไว้จริง (แบบเก่าที่ไม่มีค่าไม่โชว์แถวว่าง)
+ */
+export function HouseSpecList({ d }: Readonly<{ d: HouseDesignDto }>) {
+  const chips = collectChips(d);
+  if (chips.length === 0) return null;
+  return (
+    <dl className="mt-4">
+      {chips.map((c) => {
+        const row = LIST_ROW[c.key];
+        return (
+          <div key={c.key} className="flex items-center justify-between gap-3 border-t border-slate-100 py-3">
+            <dt className="flex items-center gap-2.5 text-sm text-slate-600">
+              <span className="text-slate-400" aria-hidden>
+                <c.icon className="h-4.5 w-4.5" />
+              </span>
+              {row?.label ?? c.unit}
+            </dt>
+            <dd className="text-[15px] font-semibold tabular-nums text-slate-900">
+              {c.value} {row?.unit ?? c.unit}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+

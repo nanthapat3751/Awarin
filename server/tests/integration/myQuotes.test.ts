@@ -13,6 +13,7 @@ import {
   createCustomerDirect,
   sessionCookieFrom,
 } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // mock ด้วยเหตุผลเดียวกับ quotes.test.ts / contracts.test.ts: entry แบบ ESM ของ Puppeteer
 // โหลดใต้ runtime CJS ของ ts-jest ไม่ได้ และเทสต์เหล่านี้ก็ไม่ได้ใช้มันอยู่แล้ว
@@ -87,9 +88,7 @@ describe("my/quotes module (customer-facing)", () => {
 
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     const quoteId = quoteRes.body.quote.id as string;
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
 
     return { projectId, quoteId };
   }
@@ -104,9 +103,13 @@ describe("my/quotes module (customer-facing)", () => {
     const listRes = await customer.agent.get("/api/my/quotes");
     expect(listRes.status).toBe(200);
     expect(listRes.body.quotes.map((q: { id: string }) => q.id)).toContain(quoteId);
+    // หน้ารายการ/รายละเอียดอ่าน quote.project.name — เคยหายจากคำตอบแล้วหน้าลูกค้าเป็นจอขาว
+    const listed = listRes.body.quotes.find((q: { id: string }) => q.id === quoteId);
+    expect(listed.project).toEqual({ projectNo: expect.any(String), name: "โครงการลูกค้าดูใบเสนอราคา" });
 
     const detailRes = await customer.agent.get(`/api/my/quotes/${quoteId}`);
     expect(detailRes.status).toBe(200);
+    expect(detailRes.body.quote.project.name).toBe("โครงการลูกค้าดูใบเสนอราคา");
     expect(detailRes.body.quote.netPrice).toBeDefined();
     expect(detailRes.body.quote.groups).toHaveLength(1);
     const group = detailRes.body.quote.groups[0];
@@ -220,9 +223,7 @@ describe("my/quotes module (customer-facing)", () => {
     // "ลูกค้าปฏิเสธ" ไม่ใช่ปลายทาง: ออกฉบับใหม่แล้วส่ง ดีลกลับมาเดินต่อเอง
     const newQuote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     expect(newQuote.status).toBe(201);
-    const sent = await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${newQuote.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    const sent = await sendQuote(owner.agent, projectId, newQuote.body.quote.id);
     expect(sent.status).toBe(200);
 
     const after = await owner.agent.get(`/api/projects/${projectId}`);
@@ -352,7 +353,7 @@ describe("my/quotes module (customer-facing)", () => {
     const customerCookie = sessionCookieFrom(customerLogin, CUSTOMER_COOKIE_NAME);
     const staffLogin = await request(app)
       .post("/api/auth/staff/login")
-      .send({ email: owner.email, password: owner.password });
+      .send({ username: owner.username, password: owner.password });
     const staffCookie = sessionCookieFrom(staffLogin, STAFF_COOKIE_NAME);
 
     const res = await request(app)

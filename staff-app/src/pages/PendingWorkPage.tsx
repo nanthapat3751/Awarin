@@ -1,53 +1,131 @@
-import { useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronRight, CircleCheckBig } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { PendingWorkDto } from "@systemboq/shared-types";
 
+import { buttonClasses } from "../components/Button";
 import { Layout } from "../components/Layout";
+import { Pagination } from "../components/Pagination";
 import { PageHeader } from "../components/PageHeader";
-import { QuoteViewCell } from "../components/QuoteViewCell";
 import { ApiError } from "../lib/api";
 import { getPendingWork } from "../lib/dashboard-api";
-import { quoteSignal, SIGNAL_CLASS, SIGNAL_ORDER } from "../lib/quote-signal";
+import { setPendingBadge } from "../lib/pending-count";
+import {
+  buildPendingItems,
+  LEVEL_LABEL,
+  LEVEL_ORDER,
+  type PendingItem,
+  type PendingLevel,
+} from "../lib/pending-items";
 import { rowNavClass, stopRowNav, useRowNav } from "../lib/row-nav";
+import { ListSkeleton } from "../components/Skeleton";
 
-// กำหนดส่วนต่าง ๆ เองแทนค่าเริ่มต้นตาม locale ซึ่งจะต่อวินาทีมาด้วย -- พนักงานต้องการแค่วันที่
-// และเวลาถึงระดับนาทีพอ
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString("th-TH", {
-    day: "numeric",
-    month: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+// หน้างานที่รอดำเนินการ — แบบ C ตารางรายการ (ผู้ใช้เลือก 18 ต.ค. แทนแบบ A การ์ดรายระดับที่อ่านยาก)
+// ตารางเดียวทุกระดับ: เรื่อง (จุดสีบอกความเร่ง) · โครงการ · รายละเอียด · ยอด · รอมา · ปุ่มทำต่อ
+// ค่าเริ่มต้นเรียงตามความเร่ง (เร่ง → ควรทำวันนี้ → ติดตาม) กดหัว "ยอด"/"รอมา" เรียงใหม่ได้ · เกณฑ์ระดับอยู่ที่ lib/pending-items.ts
+
+/** สีของแต่ละระดับ — เขียนคลาสเต็มเพราะ Tailwind อ่านได้เฉพาะ literal */
+const LEVEL_STYLE: Record<PendingLevel, { dot: string }> = {
+  urgent: { dot: "bg-red-600" },
+  soon: { dot: "bg-amber-500" },
+  watch: { dot: "bg-slate-400" },
+};
+
+const money = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+type Filter = PendingLevel | "all";
+type SortField = "amount" | "days";
+/** null = เรียงตามความเร่ง (ลำดับจาก buildPendingItems) */
+type Sort = { field: SortField; dir: "asc" | "desc" } | null;
+
+/** ค่าที่ไม่มี (ไม่มียอด/ไม่มีอายุ) อยู่ท้ายเสมอไม่ว่าจะเรียงทางไหน — ไม่ทำเหมือนเป็นศูนย์ */
+function sortItems(list: PendingItem[], sort: Sort): PendingItem[] {
+  if (!sort) return list;
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const x = a[sort.field];
+    const y = b[sort.field];
+    if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0);
+    return (x - y) * sign;
   });
 }
 
-/** วันที่ล้วน (YYYY-MM-DD) — อ่านเป็น UTC ให้ตรงกับคอลัมน์ DATE ที่เซิร์ฟเวอร์เก็บ */
-function formatIsoDate(value: string): string {
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString("th-TH", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+function ageText(days: number | null): string {
+  if (days == null) return "—";
+  return days === 0 ? "วันนี้" : `${days} วัน`;
 }
 
-const money = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-function daysSince(value: string): number {
-  return Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / MS_PER_DAY));
+function SortHeader({
+  field,
+  label,
+  sort,
+  onSort,
+}: Readonly<{ field: SortField; label: string; sort: Sort; onSort: (field: SortField) => void }>) {
+  const active = sort?.field === field;
+  let ariaSort: "ascending" | "descending" | "none" = "none";
+  if (active) ariaSort = sort.dir === "asc" ? "ascending" : "descending";
+  return (
+    <th className="whitespace-nowrap px-3 py-2 text-right" aria-sort={ariaSort}>
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-slate-900 ${
+          active ? "font-semibold text-slate-900" : ""
+        }`}
+      >
+        {label}
+        {active && (sort.dir === "asc" ? <ArrowUp size={12} aria-hidden /> : <ArrowDown size={12} aria-hidden />)}
+      </button>
+    </th>
+  );
 }
 
-// ยิ่งรอนานยิ่งต้องรีบตาม: เกิน 14 วัน = แดง, เกิน 7 วัน = เหลือง, ใหม่กว่านั้น = เทา
-// (เขียนคลาสเต็มเพราะ Tailwind JIT อ่านเฉพาะ literal)
-function waitingBadgeClass(days: number): string {
-  if (days > 14) return "bg-red-100 text-red-700";
-  if (days > 7) return "bg-amber-100 text-amber-700";
-  return "bg-slate-100 text-slate-500";
+/** หน้าละ 15 งาน (ผู้ใช้สั่ง) — นับข้ามระดับ เรียงก่อนแล้วค่อยตัดหน้า */
+const PAGE_SIZE = 15;
+
+function ItemRow({ item, rowNav }: Readonly<{ item: PendingItem; rowNav: ReturnType<typeof useRowNav> }>) {
+  return (
+    <tr {...rowNav(item.href)} className={`group border-t border-slate-100 align-top ${rowNavClass}`}>
+      <td className="px-3 py-2.5">
+        <span className="flex items-start gap-2">
+          <span
+            role="img"
+            aria-label={LEVEL_LABEL[item.level]}
+            title={LEVEL_LABEL[item.level]}
+            className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${LEVEL_STYLE[item.level].dot}`}
+          />
+          <span className="font-medium text-slate-800">{item.category}</span>
+        </span>
+      </td>
+      <td className="px-3 py-2.5">
+        <p className="text-slate-800">{item.title}</p>
+        {item.customer && <p className="text-xs text-slate-500">{item.customer}</p>}
+      </td>
+      <td className="px-3 py-2.5">
+        <p className="text-slate-700">{item.reason}</p>
+        <p className="text-xs tabular-nums text-slate-500">{item.refs}</p>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-slate-800">
+        {item.amount == null ? <span className="text-slate-400">—</span> : money(item.amount)}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-slate-600">{ageText(item.days)}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-right">
+        {/* ปุ่มเป็นลิงก์จริง (คลิกกลางเปิดแท็บใหม่ได้) — หยุดไม่ให้ซ้อนกับการนำทางของทั้งแถว */}
+        <Link
+          to={item.href}
+          onClick={stopRowNav}
+          aria-label={item.action}
+          title={item.action}
+          className={`${buttonClasses("ghost", "sm")} whitespace-nowrap group-hover:border-brand group-hover:text-brand`}
+        >
+          {/* จอแคบกว่า 1280 (iPad) เหลือแค่ลูกศร ตารางจะได้ไม่ต้องเลื่อนข้าง — ชื่อปุ่มยังอยู่ใน title/aria-label */}
+          <span className="hidden xl:inline">{item.action}</span>
+          <ChevronRight size={14} aria-hidden />
+        </Link>
+      </td>
+    </tr>
+  );
 }
 
 export function PendingWorkPage() {
@@ -55,6 +133,9 @@ export function PendingWorkPage() {
   const [data, setData] = useState<PendingWorkDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<Sort>(null);
 
   async function silentRefresh() {
     try {
@@ -77,303 +158,129 @@ export function PendingWorkPage() {
     return () => clearInterval(timer);
   }, []);
 
+  const items = useMemo(() => (data ? buildPendingItems(data) : []), [data]);
+  // ตัวเลขบนเมนูซ้ายคิดจากรายการชุดเดียวกับหน้านี้ (เร่ง + ควรทำวันนี้) จึงตรงกันเสมอ
+  useEffect(() => {
+    if (data) setPendingBadge(items);
+  }, [data, items]);
+
+  const counts = useMemo(() => {
+    const c: Record<PendingLevel, number> = { urgent: 0, soon: 0, watch: 0 };
+    for (const it of items) c[it.level] += 1;
+    return c;
+  }, [items]);
+  // ระดับที่เลือกกรองไว้ไม่มีของแล้ว (เคลียร์หมดระหว่างรีเฟรช) → กลับไปดูทั้งหมด
+  const activeFilter: Filter = filter !== "all" && counts[filter] === 0 ? "all" : filter;
+  const shownLevels = LEVEL_ORDER.filter((lv) => counts[lv] > 0 && (activeFilter === "all" || activeFilter === lv));
+  // เรียงตามระดับ (เร่ง → ควรทำวันนี้ → ติดตาม) แล้วค่อยตัดหน้า — งานรีบสุดอยู่หน้าแรกเสมอ
+  const shownItems = sortItems(
+    shownLevels.flatMap((lv) => items.filter((it) => it.level === lv)),
+    sort,
+  );
+  const pageCount = Math.max(1, Math.ceil(shownItems.length / PAGE_SIZE));
+  // รีเฟรชเบื้องหลังทุก 30 วิ งานอาจหมดจนหน้าที่เปิดอยู่ไม่มีแล้ว → ไปหน้าสุดท้ายที่ยังมี
+  const safePage = Math.min(page, pageCount);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageItems = shownItems.slice(pageStart, pageStart + PAGE_SIZE);
+
+  function changeFilter(next: Filter) {
+    setFilter(next);
+    setPage(1);
+  }
+  // กดหัวคอลัมน์: มาก→น้อย → น้อย→มาก → กลับไปเรียงตามความเร่ง
+  function toggleSort(field: SortField) {
+    setSort((cur) => {
+      if (cur?.field !== field) return { field, dir: "desc" };
+      return cur.dir === "desc" ? { field, dir: "asc" } : null;
+    });
+    setPage(1);
+  }
+  function changePage(next: number) {
+    setPage(next);
+    window.scrollTo({ top: 0 });
+  }
+
   return (
     <Layout>
       <PageHeader
         title="งานที่รอดำเนินการ"
-        subtitle="รวมทุกอย่างที่ค้างให้ทำ ไม่ต้องไล่เปิดทีละโครงการ"
+        subtitle="รวมทุกอย่างที่ค้างให้ทำ ไม่ต้องไล่เปิดทีละโครงการ · ตัวเลขบนเมนูนับงานเร่ง + ควรทำวันนี้ และลดลงเองเมื่อจัดการเสร็จ ไม่ต้องกดอ่าน"
       />
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && <ListSkeleton rows={6} />}
       {error && <p className="text-red-600">{error}</p>}
 
-      {data && (
+      {data && items.length === 0 && (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white px-6 py-12 text-center">
+          <CircleCheckBig size={36} className="text-emerald-600" aria-hidden />
+          <p className="text-lg font-medium text-slate-800">ไม่มีงานค้าง</p>
+          <p className="text-sm text-slate-500">มีเรื่องที่ต้องทำเมื่อไหร่ ระบบจะรวมมาไว้ที่หน้านี้เอง</p>
+        </div>
+      )}
+
+      {data && items.length > 0 && (
         <>
-          {/* วางไว้บนสุด: ดีลที่เสียแล้วคือเรื่องที่ต้องรีบตัดสินใจที่สุด และเดิมไม่มีหมวดนี้เลย
-              งานจึงหายออกจากหน้านี้เงียบ ๆ เหลือร่องรอยแค่การแจ้งเตือนที่ไถผ่านไปก็หาย */}
-          <h2 className="text-lg font-medium text-slate-800 mb-2">
-            ใบเสนอราคาที่ลูกค้าปฏิเสธ ({data.rejectedQuotes.length})
-          </h2>
-          {data.rejectedQuotes.length === 0 && <p className="text-slate-500 mb-8">ไม่มีรายการค้าง</p>}
-          {data.rejectedQuotes.length > 0 && (
-            <table className="w-full text-sm bg-white border border-red-200 rounded-lg overflow-hidden mb-8">
-              <thead className="bg-red-50 text-red-800 font-medium text-left">
-                <tr>
-                  <th className="px-3 py-2">โครงการ</th>
-                  <th className="px-3 py-2">ลูกค้า</th>
-                  <th className="px-3 py-2">ใบเสนอราคา</th>
-                  <th className="px-3 py-2">เหตุผลที่ปฏิเสธ</th>
-                  <th className="px-3 py-2">ปฏิเสธเมื่อ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rejectedQuotes.map(({ project, quote }) => (
-                  <tr
-                    key={quote.id}
-                    {...rowNav(`/projects/${project.id}`)}
-                    className={`border-t border-slate-100 ${rowNavClass}`}
+          <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="กรองตามความเร่ง">
+            {(["all", ...LEVEL_ORDER] as Filter[])
+              .filter((f) => f === "all" || counts[f] > 0)
+              .map((f) => {
+                const pressed = activeFilter === f;
+                const n = f === "all" ? items.length : counts[f];
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    aria-pressed={pressed}
+                    onClick={() => changeFilter(f)}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors ${
+                      pressed
+                        ? "border-brand bg-brand text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
                   >
-                    <td className="px-3 py-2">
-                      <Link
-                        to={`/projects/${project.id}`}
-                        onClick={stopRowNav}
-                        className="font-medium text-slate-800"
-                      >
-                        {project.name}
-                      </Link>
-                      <p className="text-xs text-slate-500">{project.projectNo}</p>
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{project.customer?.fullName ?? "-"}</td>
-                    <td className="px-3 py-2 text-slate-700">{quote.quoteNo}</td>
-                    <td className="px-3 py-2 max-w-xs">
-                      {quote.customerNote ? (
-                        <span className="text-slate-700">{quote.customerNote}</span>
-                      ) : (
-                        <span className="text-slate-400">ไม่ได้ระบุ</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">
-                      {quote.respondedAt ? formatDateTime(quote.respondedAt) : "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          <h2 className="text-lg font-medium text-slate-800 mb-2">
-            ใบเสนอราคาที่ลูกค้าขอแก้ไข ({data.pendingRevisions.length})
-          </h2>
-          {data.pendingRevisions.length === 0 && (
-            <p className="text-slate-500 mb-8">ไม่มีรายการค้าง</p>
-          )}
-          {data.pendingRevisions.length > 0 && (
-            <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70 mb-8">
-              <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
-                <tr>
-                  <th className="px-3 py-2">โครงการ</th>
-                  <th className="px-3 py-2">ลูกค้า</th>
-                  <th className="px-3 py-2">ใบเสนอราคา</th>
-                  <th className="px-3 py-2">รายละเอียดที่ลูกค้าขอแก้</th>
-                  <th className="px-3 py-2">วันที่</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.pendingRevisions.map(({ project, quote }) => (
-                  <tr
-                    key={quote.id}
-                    {...rowNav(`/projects/${project.id}`)}
-                    className={`border-t border-slate-100 ${rowNavClass}`}
-                  >
-                    <td className="px-3 py-2">
-                      <Link
-                        to={`/projects/${project.id}`}
-                        onClick={stopRowNav}
-                        className="font-medium text-slate-800"
-                      >
-                        {project.name}
-                      </Link>
-                      <p className="text-xs text-slate-500">{project.projectNo}</p>
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{project.customer?.fullName ?? "-"}</td>
-                    <td className="px-3 py-2 text-slate-700">{quote.quoteNo}</td>
-                    <td className="px-3 py-2 text-slate-700 max-w-xs">{quote.customerNote ?? "-"}</td>
-                    <td className="px-3 py-2 text-slate-700">
-                      {quote.respondedAt ? formatDateTime(quote.respondedAt) : "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          <h2 className="text-lg font-medium text-slate-800 mb-2">
-            ใบเสนอราคาที่รอลูกค้าตอบ ({data.awaitingResponse.length})
-          </h2>
-          {data.awaitingResponse.length === 0 && (
-            <p className="text-slate-500 mb-8">ไม่มีรายการค้าง</p>
-          )}
-          {data.awaitingResponse.length > 0 && (
-            <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70 mb-8">
-              <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
-                <tr>
-                  <th className="px-3 py-2">โครงการ</th>
-                  <th className="px-3 py-2">ลูกค้า</th>
-                  <th className="px-3 py-2">ใบเสนอราคา</th>
-                  <th className="px-3 py-2">ส่งเมื่อ</th>
-                  <th className="px-3 py-2">ลูกค้าเปิดดู</th>
-                  <th className="px-3 py-2">รอมาแล้ว</th>
-                  <th className="px-3 py-2">ควรทำอะไร</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...data.awaitingResponse]
-                  // เรียงตามความเร่งด่วนก่อน แล้วค่อยตามเวลาที่รอ -- เดิมเรียงตามวันที่ส่งอย่างเดียว
-                  // ซึ่งดันใบที่ "รอนานแต่ลูกค้าอ่านแล้วกำลังคิดอยู่" ขึ้นเหนือใบที่ "ส่งไป 4 วัน
-                  // ยังไม่เปิดเลย" ทั้งที่อย่างหลังคือเรื่องที่ต้องรีบเช็คกว่า
-                  .sort((a, b) => {
-                    const byLevel =
-                      SIGNAL_ORDER[quoteSignal(a.quote).level] -
-                      SIGNAL_ORDER[quoteSignal(b.quote).level];
-                    if (byLevel !== 0) return byLevel;
-                    return (a.quote.sentAt ? new Date(a.quote.sentAt).getTime() : 0) -
-                      (b.quote.sentAt ? new Date(b.quote.sentAt).getTime() : 0);
-                  })
-                  .map(({ project, quote }) => {
-                  const days = quote.sentAt ? daysSince(quote.sentAt) : null;
-                  const signal = quoteSignal(quote);
-                  return (
-                    <tr
-                      key={quote.id}
-                      {...rowNav(`/projects/${project.id}`)}
-                      className={`border-t border-slate-100 ${rowNavClass}`}
+                    {f !== "all" && <span aria-hidden className={`h-2 w-2 rounded-full ${LEVEL_STYLE[f].dot}`} />}
+                    {f === "all" ? "ทั้งหมด" : LEVEL_LABEL[f]}
+                    <span
+                      className={`rounded-full px-1.5 text-xs font-medium tabular-nums ${
+                        pressed ? "bg-white/25 text-white" : "bg-slate-100 text-slate-600"
+                      }`}
                     >
-                      <td className="px-3 py-2">
-                        <Link
-                          to={`/projects/${project.id}`}
-                          onClick={stopRowNav}
-                          className="font-medium text-slate-800"
-                        >
-                          {project.name}
-                        </Link>
-                        <p className="text-xs text-slate-500">{project.projectNo}</p>
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">{project.customer?.fullName ?? "-"}</td>
-                      <td className="px-3 py-2 text-slate-700">{quote.quoteNo}</td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {quote.sentAt ? formatDateTime(quote.sentAt) : "-"}
-                      </td>
-                      {/* ส่งไปกี่วันแล้วอย่างเดียวไม่พอจะตัดสินใจ -- "ส่งไป 5 วัน ยังไม่เปิดเลย"
-                          (ลิงก์ไม่ถึงมือ? ส่งผิดคน?) คนละเรื่องกับ "เปิดดู 4 ครั้งแล้วแต่ยังเงียบ"
-                          (กำลังตัดสินใจ/เทียบราคาอยู่) สองอย่างนี้ตามงานคนละแบบกัน */}
-                      <td className="px-3 py-2">
-                        <QuoteViewCell quote={quote} />
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {days === null ? (
-                          <span className="text-slate-400">-</span>
-                        ) : (
-                          <span
-                            className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${waitingBadgeClass(days)}`}
-                          >
-                            {days === 0 ? "วันนี้" : `${days} วัน`}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <p className={`text-sm ${SIGNAL_CLASS[signal.level]}`}>{signal.headline}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">{signal.action}</p>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+                      {n}
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
 
-          {/*
-            งานที่ทำเสร็จแล้วแต่ยังไม่ได้เงิน — อยู่เหนือคำขอใหม่เพราะเป็นเงินที่หามาได้แล้ว
-            เรียงจากค้างนานสุดมาจากเซิร์ฟเวอร์ (แพตเทิร์นเดียวกับใบเสนอราคาที่รอตอบ)
-          */}
-          <h2 className="text-lg font-medium text-slate-800 mb-2">
-            งวดที่ถึงกำหนดแล้วแต่ยังไม่ได้รับเงิน ({data.awaitingPayment.length})
-          </h2>
-          {data.awaitingPayment.length === 0 && (
-            <p className="text-slate-500 mb-8">ไม่มีรายการค้าง</p>
-          )}
-          {data.awaitingPayment.length > 0 && (
-            <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70 mb-8">
-              <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full min-w-[720px] text-sm md:min-w-0">
+              <thead className="text-left text-xs font-medium text-slate-600 [&_th]:border-b [&_th]:border-slate-300 [&_th]:bg-slate-200">
                 <tr>
-                  <th className="px-3 py-2">โครงการ</th>
-                  <th className="px-3 py-2">ลูกค้า</th>
-                  <th className="px-3 py-2">งวด</th>
-                  <th className="px-3 py-2">ครบกำหนด</th>
-                  <th className="px-3 py-2">ค้างมาแล้ว</th>
-                  <th className="px-3 py-2 text-right">ยอดที่ยังไม่ได้รับ</th>
+                  <th className="whitespace-nowrap px-3 py-2">เรื่อง</th>
+                  <th className="whitespace-nowrap px-3 py-2">โครงการ / ผู้ติดต่อ</th>
+                  <th className="whitespace-nowrap px-3 py-2">รายละเอียด</th>
+                  <SortHeader field="amount" label="ยอด (บาท)" sort={sort} onSort={toggleSort} />
+                  <SortHeader field="days" label="รอมา" sort={sort} onSort={toggleSort} />
+                  <th className="px-3 py-2">
+                    <span className="sr-only">ทำต่อ</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {data.awaitingPayment.map((row) => (
-                  <tr
-                    key={row.installment.id}
-                    {...rowNav(`/projects/${row.project.id}`)}
-                    className={`border-t border-slate-100 ${rowNavClass}`}
-                  >
-                    <td className="px-3 py-2">
-                      <Link
-                        to={`/projects/${row.project.id}`}
-                        onClick={stopRowNav}
-                        className="font-medium text-slate-800"
-                      >
-                        {row.project.name}
-                      </Link>
-                      <p className="text-xs text-slate-500">
-                        {row.project.projectNo} · {row.contract.contractNo}
-                      </p>
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{row.project.customer?.fullName ?? "-"}</td>
-                    <td className="px-3 py-2 text-slate-700">
-                      งวดที่ {row.installment.seq}
-                      <p className="text-xs text-slate-500 max-w-xs truncate">
-                        {row.installment.milestone}
-                      </p>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-700">
-                      {formatIsoDate(row.installment.dueOn)}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <span
-                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${waitingBadgeClass(row.daysOverdue)}`}
-                      >
-                        {row.daysOverdue === 0 ? "ครบกำหนดวันนี้" : `${row.daysOverdue} วัน`}
-                      </span>
-                    </td>
-                    {/* ยอดที่ยังขาด ไม่ใช่ยอดเต็มของงวด -- บางงวดรับมาบางส่วนแล้ว */}
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-800">
-                      {money(row.remaining)}
-                    </td>
-                  </tr>
+                {pageItems.map((it) => (
+                  <ItemRow key={it.key} item={it} rowNav={rowNav} />
                 ))}
               </tbody>
             </table>
-          )}
+          </div>
 
-          <h2 className="text-lg font-medium text-slate-800 mb-2">
-            คำขอใหม่ที่ยังไม่ได้ติดต่อ ({data.newLeads.length})
-          </h2>
-          {data.newLeads.length === 0 && <p className="text-slate-500">ไม่มีรายการค้าง</p>}
-          {data.newLeads.length > 0 && (
-            <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
-              <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
-                <tr>
-                  <th className="px-3 py-2">ชื่อ</th>
-                  <th className="px-3 py-2">เบอร์โทร</th>
-                  <th className="px-3 py-2">บริการที่สนใจ</th>
-                  <th className="px-3 py-2">ข้อความ</th>
-                  <th className="px-3 py-2">วันที่</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.newLeads.map((lead) => (
-                  <tr
-                    key={lead.id}
-                    {...rowNav("/leads")}
-                    className={`border-t border-slate-100 ${rowNavClass}`}
-                  >
-                    <td className="px-3 py-2 text-slate-800">
-                      <Link to="/leads" onClick={stopRowNav} className="font-medium">
-                        {lead.name}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{lead.phone}</td>
-                    <td className="px-3 py-2 text-slate-700">{lead.serviceType}</td>
-                    <td className="px-3 py-2 text-slate-700 max-w-xs truncate">{lead.message ?? "-"}</td>
-                    <td className="px-3 py-2 text-slate-700">{formatDateTime(lead.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {pageCount > 1 && (
+            <div className="mt-4 text-center">
+              <p className="text-xs text-slate-500 tabular-nums" aria-live="polite">
+                งาน {pageStart + 1}–{pageStart + pageItems.length} จาก {shownItems.length}
+              </p>
+              <Pagination page={safePage} pageCount={pageCount} onChange={changePage} className="mt-1.5" />
+            </div>
           )}
         </>
       )}

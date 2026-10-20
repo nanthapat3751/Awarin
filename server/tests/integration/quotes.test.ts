@@ -1,6 +1,7 @@
 import { prisma } from "../../src/lib/prisma";
 import { renderQuotePdf } from "../../src/lib/pdf/quote-pdf";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // จุด entry แบบ ESM อย่างเดียวของ Puppeteer รันใต้ runtime เทสต์แบบ CJS ของ ts-jest ไม่ได้
 // ("Unexpected token 'export'") — นี่คือข้อจำกัดเรื่อง sandbox ของ Jest/Chromium ไม่ใช่บั๊ก
@@ -123,9 +124,7 @@ describe("quotes module", () => {
     const created = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     const quoteId = created.body.quote.id;
 
-    const sendRes = await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    const sendRes = await sendQuote(owner.agent, projectId, quoteId);
     expect(sendRes.status).toBe(200);
     expect(sendRes.body.quote.sentAt).not.toBeNull();
 
@@ -173,9 +172,7 @@ describe("quotes module", () => {
 
     const created2 = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     const quoteId2 = created2.body.quote.id;
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId2}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId2);
     const delSent = await owner.agent.delete(`/api/projects/${projectId}/quotes/${quoteId2}`);
     expect(delSent.status).toBe(409);
   });

@@ -1,13 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
-type ConfirmVariant = "primary" | "danger";
+type ConfirmVariant = "neutral" | "brand" | "danger";
 
 interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
-  /** "danger" (แดง) สำหรับการกระทำที่เป็นอันตรายอย่างการลบ; "primary" (เข้ม) สำหรับอย่างอื่น
-   * ทั้งหมด (เปลี่ยนสถานะ, ลงนาม, ใช้ template, ...) ค่าเริ่มต้นเป็น "primary" -- ถ้าตั้งค่าเริ่มต้น
-   * เป็น "danger" จะทำให้กล่องยืนยันที่ไม่ใช่การลบทุกอันติดป้ายผิด */
+  /** ใช้คำเดียวกับ variant ของ <Button> (ดู components/Button.tsx):
+   * "neutral" (เทาเข้ม) = ยืนยันงานที่ยังอยู่ในบ้านเรา ย้อนได้ — เป็นค่าเริ่มต้น
+   * "brand" (นาวี) = ปล่อยของออกไปถึงคนนอกจริง เช่น ออกเอกสารที่กินเลข ส่งของถึงลูกค้า
+   * "danger" (แดงทึบ) = กู้ไม่ได้ หรือคนนอกรู้ไปแล้ว
+   * ถ้าตั้งค่าเริ่มต้นเป็น "danger" จะทำให้กล่องยืนยันที่ไม่ใช่การลบทุกอันติดป้ายผิด */
   variant?: ConfirmVariant;
 }
 
@@ -31,7 +33,8 @@ const CANCEL_BUTTON_CLASS =
   "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-slate-400";
 
 const CONFIRM_BUTTON_CLASS: Record<ConfirmVariant, string> = {
-  primary: "border-transparent bg-slate-800 text-white hover:bg-slate-900 focus-visible:ring-slate-500",
+  neutral: "border-transparent bg-slate-800 text-white hover:bg-slate-900 focus-visible:ring-slate-500",
+  brand: "border-transparent bg-[#000099] text-white hover:bg-[#000077] focus-visible:ring-[#000099]",
   danger: "border-transparent bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500",
 };
 
@@ -44,7 +47,7 @@ export function ConfirmProvider({ children }: Readonly<{ children: ReactNode }>)
       message,
       confirmLabel: options?.confirmLabel ?? "ยืนยัน",
       cancelLabel: options?.cancelLabel ?? "ยกเลิก",
-      variant: options?.variant ?? "primary",
+      variant: options?.variant ?? "neutral",
     });
     return new Promise<boolean>((resolve) => {
       resolveRef.current = resolve;

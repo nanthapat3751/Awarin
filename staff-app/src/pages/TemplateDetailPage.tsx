@@ -5,8 +5,9 @@ import type { TemplateDetailDto, TemplateItemDetailDto } from "@systemboq/shared
 
 import { Check, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Pencil, X } from "lucide-react";
 
-import { Button, buttonClasses } from "../components/Button";
+import { Button, buttonClasses, iconButtonClasses } from "../components/Button";
 import { Layout } from "../components/Layout";
+import { Pagination } from "../components/Pagination";
 import { ScrollableTabBar } from "../components/ScrollableTabBar";
 import { SearchInput } from "../components/SearchInput";
 import { ApiError } from "../lib/api";
@@ -19,6 +20,7 @@ import {
   updateTemplate,
   updateTemplateItemRecipe,
 } from "../lib/templates-api";
+import { DetailSkeleton } from "../components/Skeleton";
 
 function money(value: string | number): string {
   return Number(value).toLocaleString("th-TH", { minimumFractionDigits: 2 });
@@ -65,7 +67,12 @@ interface SubRun {
   key: string;
   name: string | null;
   items: TemplateItemDetailDto[];
+  /** ก้อนนี้เริ่มมาจากหน้าก่อน (หมวดย่อยถูกตัดข้ามหน้า) — หัวก้อนขึ้น "(ต่อ)" */
+  continued?: boolean;
 }
+
+/** หมวดเดียวแบ่งหน้าละ 15 รายการ เท่าทุกตารางในระบบ (แท็บหมวด + เลขหน้า แบบหน้าหมวดงาน) */
+const ITEMS_PAGE_SIZE = 15;
 
 const groupKeyOf = (group: CategoryGroup) => group.code ?? group.name;
 
@@ -87,6 +94,27 @@ function subRunsOf(group: CategoryGroup): SubRun[] {
       });
   }
   return runs;
+}
+
+/**
+ * ก้อนหมวดย่อยเฉพาะช่วงบรรทัด [from, to) ของหน้าปัจจุบัน — คิดก้อนจากทั้งหมวดก่อนแล้วค่อยตัด
+ * key ของก้อนจึงคงเดิมทุกหน้า (ยุบก้อนไว้แล้วเปลี่ยนหน้า ก้อนเดียวกันยังยุบอยู่)
+ */
+function pageRunsOf(group: CategoryGroup, from: number, to: number): SubRun[] {
+  const out: SubRun[] = [];
+  let offset = 0;
+  for (const run of subRunsOf(group)) {
+    const start = offset;
+    const end = offset + run.items.length;
+    offset = end;
+    if (end <= from || start >= to) continue;
+    out.push({
+      ...run,
+      items: run.items.slice(Math.max(0, from - start), Math.min(run.items.length, to - start)),
+      continued: start < from,
+    });
+  }
+  return out;
 }
 
 /** แก้ไขเมื่อ ≠ สร้างเมื่อ (เผื่อเวลาบันทึกห่างกันเสี้ยววินาทีตอนสร้าง) */
@@ -299,23 +327,29 @@ function ItemRow({ item, onEdit }: Readonly<{ item: TemplateItemDetailDto; onEdi
       <td className="px-4 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
         {item.categoryCode ?? "—"}
       </td>
-      <td className="px-4 py-2 text-slate-800">{item.name}</td>
+      <td className="px-4 py-2 text-slate-800">
+        {item.name}
+        {/* iPad: หมายเหตุอยู่ใต้ชื่อ (คอลัมน์ของมันซ่อนไว้) */}
+        {item.note && <span className="block text-xs text-slate-500 xl:hidden">{item.note}</span>}
+      </td>
       <td className="px-4 py-2 text-right text-slate-800 whitespace-nowrap">
         <QuantityCell item={item} />
+        <span className="text-slate-600 xl:hidden"> {item.unit}</span>
       </td>
-      <td className="px-4 py-2 text-slate-700">{item.unit}</td>
+      <td className="hidden xl:table-cell px-4 py-2 text-slate-700">{item.unit}</td>
       <td className="px-4 py-2 text-right text-slate-800 whitespace-nowrap">
         {money(item.materialUnitPrice)}
+        <span className="block text-xs text-slate-500 xl:hidden">แรง {money(item.laborUnitPrice)}</span>
       </td>
-      <td className="px-4 py-2 text-right text-slate-800 whitespace-nowrap">
+      <td className="hidden xl:table-cell px-4 py-2 text-right text-slate-800 whitespace-nowrap">
         {money(item.laborUnitPrice)}
       </td>
-      <td className="px-4 py-2 text-slate-500">{item.note ?? ""}</td>
+      <td className="hidden xl:table-cell px-4 py-2 text-slate-500">{item.note ?? ""}</td>
       <td className="px-2 py-2 text-right whitespace-nowrap">
         <button
           type="button"
           onClick={onEdit}
-          className="text-slate-400 hover:text-brand"
+          className={iconButtonClasses()}
           title="แก้สูตรถอดปริมาณ"
         >
           <Pencil size={14} />
@@ -421,6 +455,7 @@ function SubRunHeader({ run, collapsed, onToggle }: Readonly<{ run: SubRun; coll
           </span>
           <span className="text-xs font-medium text-slate-500">
             {run.name}
+            {run.continued && <span className="font-normal text-slate-400"> (ต่อ)</span>}
           </span>
           <span className="shrink-0 text-xs text-slate-400">
             ({run.items.length} รายการ)
@@ -434,6 +469,7 @@ function SubRunHeader({ run, collapsed, onToggle }: Readonly<{ run: SubRun; coll
 
 function GroupSection({
   group,
+  range,
   searching,
   collapsedSubs,
   editIndex,
@@ -442,6 +478,8 @@ function GroupSection({
   onEditItem,
 }: Readonly<{
   group: CategoryGroup;
+  /** ช่วงบรรทัดของหน้าที่เปิดอยู่ · null = ทั้งหมวด (ตอนค้นหา) */
+  range: { from: number; to: number } | null;
   searching: boolean;
   collapsedSubs: Set<string>;
   editIndex: number | null;
@@ -457,7 +495,9 @@ function GroupSection({
       className="mt-5 scroll-mt-14"
     >
       <div className="bg-white border border-slate-200 rounded-lg">
-        <div className="overflow-x-auto lg:overflow-x-visible">
+        {/* iPad (<1280) ยุบหน่วย/ค่าแรง/หมายเหตุ ตารางพอดีจอ จึงไม่ต้องเลื่อนข้างตั้งแต่ md —
+            ตัวห่อที่เลื่อนข้างได้ทำให้หัวตารางติดจอเลื่อนลงไปทับแถวแรก (ผู้ใช้สั่ง 18 ต.ค.) */}
+        <div className="overflow-x-auto md:overflow-x-visible">
           <table className="w-full text-sm">
             {/* top-11 = ใต้แถบหมวดที่ล็อกความสูงไว้ h-11 พอดี เลื่อนลงลึกแค่ไหน
                 ก็ยังเห็นว่าอยู่หมวดไหนและคอลัมน์ไหนคืออะไร */}
@@ -481,15 +521,18 @@ function GroupSection({
                 <th className="px-4 py-2 font-medium whitespace-nowrap">รหัส</th>
                 <th className="px-4 py-2 font-medium">ชื่อรายการ</th>
                 <th className="px-4 py-2 font-medium text-right whitespace-nowrap">จำนวน</th>
-                <th className="px-4 py-2 font-medium">หน่วย</th>
-                <th className="px-4 py-2 font-medium text-right whitespace-nowrap">วัสดุ/หน่วย</th>
-                <th className="px-4 py-2 font-medium text-right whitespace-nowrap">ค่าแรง/หน่วย</th>
-                <th className="px-4 py-2 font-medium">หมายเหตุ</th>
+                <th className="hidden xl:table-cell px-4 py-2 font-medium">หน่วย</th>
+                <th className="px-4 py-2 font-medium text-right whitespace-nowrap">
+                  <span className="xl:hidden">วัสดุ / ค่าแรง</span>
+                  <span className="hidden xl:inline">วัสดุ/หน่วย</span>
+                </th>
+                <th className="hidden xl:table-cell px-4 py-2 font-medium text-right whitespace-nowrap">ค่าแรง/หน่วย</th>
+                <th className="hidden xl:table-cell px-4 py-2 font-medium">หมายเหตุ</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody>
-              {subRunsOf(group).map((run) => {
+              {(range ? pageRunsOf(group, range.from, range.to) : subRunsOf(group)).map((run) => {
                 // ระหว่างค้นหาให้กางเสมอ เช่นเดียวกับหมวดใหญ่
                 const subCollapsed = !searching && run.name != null && collapsedSubs.has(run.key);
                 return (
@@ -585,6 +628,8 @@ export function TemplateDetailPage() {
   const [collapsedSubs, setCollapsedSubs] = useState<Set<string>>(new Set());
   // ค้นหาในหน้า — หาบรรทัดในลิสต์ยาวได้เร็วกว่าเลื่อนหาทุกกรณี
   const [search, setSearch] = useState("");
+  // หน้าในหมวดที่เปิดอยู่ (?page=2) — เปลี่ยนหมวดแล้วกลับไปหน้า 1
+  const page = Math.max(1, Math.floor(Number(searchParams.get("page"))) || 1);
 
   function startEditItem(item: TemplateItemDetailDto) {
     setEditIndex(item.index);
@@ -689,6 +734,7 @@ export function TemplateDetailPage() {
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set("cat", key);
+        next.delete("page");
         return next;
       },
       { replace: true },
@@ -696,6 +742,18 @@ export function TemplateDetailPage() {
     // เลื่อนกลับขึ้นมาที่แถบหมวด ถ้าเลื่อนลงไปลึกแล้ว (กดหมวดถัดไปจากท้ายตาราง)
     const bar = document.getElementById("template-group-tabs");
     if (bar && bar.getBoundingClientRect().top <= 0) bar.scrollIntoView({ block: "start" });
+  }
+
+  function goPage(next: number) {
+    setEditIndex(null);
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (next <= 1) p.delete("page");
+      else p.set("page", String(next));
+      return p;
+    });
+    // อ่านจบท้ายตารางแล้วกดหน้าถัดไป → เริ่มอ่านจากหัวตาราง
+    document.getElementById("template-group-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function toggleSub(key: string, items: TemplateItemDetailDto[]) {
@@ -800,6 +858,13 @@ export function TemplateDetailPage() {
     : `ทั้งหมด ${detail?.items.length ?? 0} รายการ · ${groups.length} หมวดงาน`;
   const selectedTabKey = searching || !activeGroup ? null : groupKeyOf(activeGroup);
   const showPager = !searching && activeGroup != null && groups.length > 1;
+  // แบ่งหน้าเฉพาะตอนดูทีละหมวด — ตอนค้นหาโชว์ผลจากทุกหมวดต่อกัน (ผลค้นหามักสั้นอยู่แล้ว)
+  const activeTotal = activeGroup?.items.length ?? 0;
+  const pageCount = Math.max(1, Math.ceil(activeTotal / ITEMS_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageRange = searching
+    ? null
+    : { from: (safePage - 1) * ITEMS_PAGE_SIZE, to: Math.min(safePage * ITEMS_PAGE_SIZE, activeTotal) };
 
   return (
     <Layout>
@@ -807,7 +872,7 @@ export function TemplateDetailPage() {
         ← กลับไปแม่แบบ
       </Link>
 
-      {loading && <p className="text-slate-500 mt-4">กำลังโหลด...</p>}
+      {loading && <DetailSkeleton stats={0} />}
       {error && <p className="text-red-600 mt-4">{error}</p>}
 
       {detail && (
@@ -881,10 +946,16 @@ export function TemplateDetailPage() {
                   ไม่พบรายการที่ตรงกับ &ldquo;{search.trim()}&rdquo;
                 </p>
               )}
+              {pageRange && pageCount > 1 && (
+                <p className="-mb-3 mt-5 text-xs tabular-nums text-slate-500">
+                  แสดง {pageRange.from + 1}-{pageRange.to} จาก {activeTotal} รายการ
+                </p>
+              )}
               {shownGroups.map((group) => (
                 <GroupSection
                   key={groupKeyOf(group)}
                   group={group}
+                  range={pageRange}
                   searching={searching}
                   collapsedSubs={collapsedSubs}
                   editIndex={editIndex}
@@ -894,6 +965,7 @@ export function TemplateDetailPage() {
                 />
               ))}
 
+              {pageRange && <Pagination page={safePage} pageCount={pageCount} onChange={goPage} className="-mt-1" />}
               {showPager && <GroupPager groups={groups} activeIndex={activeIndex} onOpen={openGroup} />}
             </div>
           )}

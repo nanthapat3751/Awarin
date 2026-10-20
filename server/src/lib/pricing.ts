@@ -1,4 +1,8 @@
 // ตรรกะการคิดราคาล้วน ๆ (BR-01..BR-06 ใน MASTER_PROMPT.md §5) ไม่มีการเข้าถึง DB ที่นี่
+import { roundTo, applyNetRounding } from "@systemboq/shared-types";
+
+// การปัดยอดสุทธิอยู่ใน shared-types เพราะหน้าจอต้องพรีวิวด้วยสูตรเดียวกันเป๊ะ
+export { applyNetRounding, ROUNDING_UNITS, type NetRounding } from "@systemboq/shared-types";
 //
 // รายการหนึ่งบรรทัดใน BOQ จะพกทั้งราคาค่าวัสดุ และค่าแรงมาด้วยกัน (วิธี Unit Cost)
 // — เช่น "เข็มตอก I 22 L 24": วัสดุ 7,500/หน่วย ค่าแรง 1,500/หน่วย —
@@ -16,14 +20,34 @@ export interface BoqLineAmounts {
   lineTotal: number;
 }
 
+/**
+ * ส่วนที่เพิ่มเข้ามาทีหลังของสายคำนวณ — แยกเป็นก้อนเดียวเพื่อไม่ให้พารามิเตอร์ตามตำแหน่งยาวจนอ่านไม่ออก
+ *
+ * ไม่ส่งมาเลย = ไม่มีค่าเผื่อเหลือเผื่อขาด ไม่ปัดยอด ซึ่งคือพฤติกรรมเดิมทุกประการ
+ */
+export interface PricingExtras {
+  /** ค่าเผื่อเหลือเผื่อขาด % ของต้นทุนตรง — บวกเข้าเป็น "ค่างานต้นทุน" ก่อนคิดกำไร */
+  contingencyPercent?: number | null;
+  /** ปัดยอดสุทธิ (รวม VAT) ลงให้เป็นทวีคูณของค่านี้ — null/ไม่ส่ง = ไม่ปัด (ดู applyNetRounding) */
+  roundingUnit?: number | null;
+}
+
 export interface PricingBreakdown {
   directCost: number;
+  contingencyPercent: number;
+  contingencyAmount: number;
+  /** ค่างานต้นทุน = ต้นทุนตรง + ค่าเผื่อเหลือเผื่อขาด — ฐานของค่าดำเนินการ/กำไร */
+  baseCost: number;
   overheadProfitPercent: number;
   overheadProfitAmount: number;
   /** เปอร์เซ็นต์ส่วนลด ถ้าลดเป็น % — null คือลดเป็นจำนวนเงินคงที่ หรือไม่ลด */
   discountPercent: number | null;
   discountAmount: number;
-  /** ฐานคิด VAT = ต้นทุนตรง + ค่าดำเนินการ/กำไร − ส่วนลด */
+  /** หน่วยที่ปัดยอดสุทธิ (บาท) — null = ไม่ปัด */
+  roundingUnit: number | null;
+  /** ส่วนลดปัดเศษที่หักก่อน VAT เพื่อให้ยอดสุทธิลงตัว — 0 เมื่อไม่ปัดหรือยอดลงตัวอยู่แล้ว */
+  roundingAmount: number;
+  /** ฐานคิด VAT = ต้นทุนตรง + ค่าดำเนินการ/กำไร − ส่วนลด − ส่วนลดปัดเศษ */
   subtotalBeforeVat: number;
   vatPercent: number;
   vatAmount: number;
@@ -54,7 +78,7 @@ export function discountOf(version: { discountPct: unknown; discountAmt: unknown
 // ปัดเงินเป็น 2 ตำแหน่งเฉพาะตอนจบของแต่ละค่าที่คำนวณได้ เพื่อเลี่ยงไม่ให้ความคลาดเคลื่อน
 // ของ floating point สะสมทบไปตลอดสายการคำนวณ
 export function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return roundTo(value, 2);
 }
 
 function assertNonNegative(value: number, label: string): void {
@@ -134,47 +158,101 @@ export function resolveDiscountAmount(
 }
 
 /**
- * BR-01..BR-06: ต้นทุนตรง -> ค่าดำเนินการ/กำไร -> ส่วนลด -> VAT -> ราคาสุทธิ -> ราคาต่อตารางเมตร
+ * ตัวคูณที่พับ "ทุกอย่างที่บวกทับต้นทุน" ไว้ในราคาต่อหน่วยของแต่ละบรรทัดฝั่งลูกค้า (BR-09)
+ *
+ * เอกสารฝั่งลูกค้าไม่แยกแถวต้นทุน/กำไรออกมา แต่โชว์ราคาต่อบรรทัดที่รวมแล้ว ตัวคูณจึงต้องครบ
+ * ทุกชั้นที่อยู่เหนือต้นทุนตรง (เผื่อเหลือเผื่อขาด + ค่าดำเนินการ/กำไร) ไม่งั้นผลบวกทุกบรรทัด
+ * จะไม่เท่ากับยอดก่อนลดที่พิมพ์อยู่ท้ายใบ
+ */
+export function customerLineMultiplier(version: { contingencyPct: unknown; overheadProfitPct: unknown }): number {
+  const contingency = 1 + Number(version.contingencyPct ?? 0) / 100;
+  return contingency * (1 + Number(version.overheadProfitPct) / 100);
+}
+
+/** ค่างานต้นทุน = ต้นทุนตรง + ค่าเผื่อเหลือเผื่อขาด */
+function resolveBaseCost(directCost: number, contingencyPercent: number | null | undefined) {
+  const percent = contingencyPercent ?? 0;
+  assertNonNegative(percent, "contingencyPercent");
+  const amount = round2(directCost * (percent / 100));
+  return { percent, amount, baseCost: round2(directCost + amount) };
+}
+
+/**
+ * BR-01..BR-06: ต้นทุนตรง -> เผื่อเหลือเผื่อขาด -> ค่าดำเนินการ/กำไร -> ส่วนลด -> VAT -> ราคาสุทธิ
  *
  * ส่วนลดหัก "ก่อน" VAT เสมอ ตามหลักภาษีไทย (ส่วนลดที่ให้ทันทีขณะขายไม่ต้องนำมารวมเป็นฐานภาษี)
  * ถ้าไปหักหลัง VAT จะเก็บ VAT เกินจริงและใบกำกับภาษีจะผิด
  */
+function markupChain(
+  directCost: number,
+  overheadProfitPercent: number,
+  vatPercent: number,
+  discount: DiscountInput | undefined,
+  contingencyPercent: number | null | undefined,
+  roundingUnit: number | null | undefined,
+) {
+  assertNonNegative(overheadProfitPercent, "overheadProfitPercent");
+  assertNonNegative(vatPercent, "vatPercent");
+  const contingency = resolveBaseCost(directCost, contingencyPercent);
+
+  const overheadProfitAmount = round2(contingency.baseCost * (overheadProfitPercent / 100));
+  const beforeDiscount = round2(contingency.baseCost + overheadProfitAmount);
+  const resolved = resolveDiscountAmount(beforeDiscount, discount);
+  const rounded = applyNetRounding(round2(beforeDiscount - resolved.amount), vatPercent, roundingUnit);
+
+  return {
+    contingency,
+    overheadProfitPercent,
+    overheadProfitAmount,
+    resolved,
+    roundingAmount: rounded.roundingAmount,
+    subtotalBeforeVat: rounded.subtotalBeforeVat,
+    vatPercent,
+    vatAmount: rounded.vatAmount,
+    netPrice: rounded.netPrice,
+  };
+}
+
 export function calculatePricing(
   items: BoqLineInput[],
   overheadProfitPercent: number,
   vatPercent: number,
   houseAreaSqm?: number | null,
   discount?: DiscountInput,
+  extras?: PricingExtras,
 ): PricingBreakdown {
-  assertNonNegative(overheadProfitPercent, "overheadProfitPercent");
-  assertNonNegative(vatPercent, "vatPercent");
-
+  // ต้องบวกจาก "ยอดบรรทัดที่ปัดแล้ว" เท่านั้น ห้ามบวกค่าดิบแล้วค่อยปัดทีเดียวตอนท้าย —
+  // ใบเสนอราคาพิมพ์ทั้งยอดรายบรรทัด (lineTotal ที่ปัดแล้ว) และยอดรวมนี้ในหน้าเดียวกัน
+  // ถ้าคิดคนละวิธี ลูกค้าเอาเครื่องคิดเลขบวกคอลัมน์แล้วจะไม่ตรงกับยอดรวม (เคยเพี้ยนจริง 0.01 บาท)
   const directCost = round2(
-    items.reduce((sum, item) => {
-      assertValidLine(item);
-      return sum + item.quantity * item.materialUnitPrice + item.quantity * item.laborUnitPrice;
-    }, 0),
+    items.reduce((sum, item) => sum + calculateLineAmounts(item).lineTotal, 0),
   );
 
-  const overheadProfitAmount = round2(directCost * (overheadProfitPercent / 100));
-  const beforeDiscount = round2(directCost + overheadProfitAmount);
-  const resolved = resolveDiscountAmount(beforeDiscount, discount);
-  const subtotalBeforeVat = round2(beforeDiscount - resolved.amount);
-  const vatAmount = round2(subtotalBeforeVat * (vatPercent / 100));
-  const netPrice = round2(subtotalBeforeVat + vatAmount);
-  const pricePerSqm =
-    houseAreaSqm != null && houseAreaSqm > 0 ? round2(netPrice / houseAreaSqm) : null;
+  const chain = markupChain(
+    directCost,
+    overheadProfitPercent,
+    vatPercent,
+    discount,
+    extras?.contingencyPercent,
+    extras?.roundingUnit,
+  );
 
   return {
     directCost,
-    overheadProfitPercent,
-    overheadProfitAmount,
-    discountPercent: resolved.percent,
-    discountAmount: resolved.amount,
-    subtotalBeforeVat,
-    vatPercent,
-    vatAmount,
-    netPrice,
-    pricePerSqm,
+    contingencyPercent: chain.contingency.percent,
+    contingencyAmount: chain.contingency.amount,
+    baseCost: chain.contingency.baseCost,
+    overheadProfitPercent: chain.overheadProfitPercent,
+    overheadProfitAmount: chain.overheadProfitAmount,
+    discountPercent: chain.resolved.percent,
+    discountAmount: chain.resolved.amount,
+    roundingUnit: extras?.roundingUnit ?? null,
+    roundingAmount: chain.roundingAmount,
+    subtotalBeforeVat: chain.subtotalBeforeVat,
+    vatPercent: chain.vatPercent,
+    vatAmount: chain.vatAmount,
+    netPrice: chain.netPrice,
+    pricePerSqm:
+      houseAreaSqm != null && houseAreaSqm > 0 ? round2(chain.netPrice / houseAreaSqm) : null,
   };
 }

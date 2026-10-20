@@ -13,7 +13,12 @@ export function anonymizedEmail(userId: string): string {
   return `deleted-${userId}${ANONYMIZED_EMAIL_DOMAIN}`;
 }
 
-/** บัญชีนี้ถูกลบตามคำขอของเจ้าของข้อมูลไปแล้วหรือยัง */
-export function isAnonymized(email: string): boolean {
-  return email.endsWith(ANONYMIZED_EMAIL_DOMAIN);
+/**
+ * บัญชีนี้ถูกลบตามคำขอของเจ้าของข้อมูลไปแล้วหรือยัง
+ *
+ * รับ null ได้เพราะบัญชีพนักงานไม่มีอีเมล (ล็อกอินด้วย username) — ไม่มีอีเมล = ไม่ใช่บัญชี
+ * ที่ถูกลบ คนละเรื่องกับการถูกเขียนทับด้วยโดเมนปลอม
+ */
+export function isAnonymized(email: string | null): boolean {
+  return email !== null && email.endsWith(ANONYMIZED_EMAIL_DOMAIN);
 }

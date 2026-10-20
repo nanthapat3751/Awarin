@@ -15,6 +15,8 @@ import {
   onNotificationsChanged,
 } from "../lib/notifications-api";
 import { groupByDay, notificationVisual, timeAgo } from "../lib/notifications-format";
+import { NotificationListSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
 
 /** จำนวนต่อหน้า — API รับ limit สูงสุด 50 */
 const PAGE_SIZE = 15;
@@ -22,6 +24,7 @@ const PAGE_SIZE = 15;
 type Tab = "all" | "unread";
 
 export function MyNotificationsPage() {
+  usePageMeta("การแจ้งเตือน");
   const navigate = useNavigate();
   const listTopRef = useRef<HTMLDivElement>(null);
   const isFirstPageEffect = useRef(true);
@@ -86,25 +89,35 @@ export function MyNotificationsPage() {
     setPage(1);
   }
 
-  async function handleClick(n: NotificationDto) {
+  // ไปหน้าปลายทางทันที บันทึก "อ่านแล้ว" ตามหลัง (เหตุผลเดียวกับแผงกระดิ่ง — ไม่ให้กดแล้วค้าง)
+  function handleClick(n: NotificationDto) {
     if (!n.read) {
-      await markNotificationRead(n.id);
       setItems((list) => list.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
-      notifyNotificationsChanged();
+      markNotificationRead(n.id)
+        .then(() => notifyNotificationsChanged())
+        .catch(() => undefined);
     }
     if (n.link) navigate(n.link);
   }
 
+  const [markingAll, setMarkingAll] = useState(false);
   async function handleMarkAllRead() {
-    await markAllNotificationsRead();
-    if (tab === "unread") {
-      setItems([]);
-      setTotal(0);
-      setPage(1);
-    } else {
-      setItems((list) => list.map((n) => ({ ...n, read: true })));
+    setMarkingAll(true);
+    try {
+      await markAllNotificationsRead();
+      if (tab === "unread") {
+        setItems([]);
+        setTotal(0);
+        setPage(1);
+      } else {
+        setItems((list) => list.map((n) => ({ ...n, read: true })));
+      }
+      notifyNotificationsChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "ทำเครื่องหมายอ่านไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setMarkingAll(false);
     }
-    notifyNotificationsChanged();
   }
 
   const hasUnread = items.some((n) => !n.read);
@@ -132,14 +145,15 @@ export function MyNotificationsPage() {
           <button
             type="button"
             onClick={handleMarkAllRead}
-            className="min-h-11 text-sm text-slate-500 transition-colors hover:text-brand"
+            disabled={markingAll}
+            className="link-pill -mr-2.5 min-h-11 text-sm font-medium text-brand disabled:opacity-60 lg:min-h-0"
           >
-            ทำเครื่องหมายอ่านทั้งหมด
+            {markingAll ? "กำลังบันทึก..." : "ทำเครื่องหมายอ่านทั้งหมด"}
           </button>
         )}
       </div>
 
-      {loading && items.length === 0 && <p className="text-slate-400">กำลังโหลด...</p>}
+      {loading && items.length === 0 && <NotificationListSkeleton count={5} />}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {!loading && !error && items.length === 0 && (

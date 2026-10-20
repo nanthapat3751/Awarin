@@ -1,6 +1,7 @@
 import { groupBoqItemsByTopCategory } from "../../src/lib/boq-grouping";
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginAdmin, createAndLoginOwner, createCustomerDirect } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // entry แบบ ESM ของ Puppeteer โหลดใต้ ts-jest ไม่ได้ — ไฟล์นี้ไม่ได้ทดสอบหน้าตา PDF
 jest.mock("../../src/lib/pdf/quote-pdf", () => ({
@@ -88,9 +89,7 @@ describe("BOQ line order", () => {
   it("เวอร์ชันที่ส่งเป็นใบเสนอราคาแล้ว → แตกเวอร์ชันใหม่ ใบที่ส่งไปคงลำดับเดิม", async () => {
     const { projectId, ids } = await projectWith(["ก", "ข"]);
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quote.body.quote.id);
     const v1 = await prisma.projectVersion.findFirstOrThrow({ where: { projectId, versionNo: 1 } });
 
     const res = await owner.agent.put(`/api/projects/${projectId}/boq/items/order`).send({ itemIds: [ids[1], ids[0]] });

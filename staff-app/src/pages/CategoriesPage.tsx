@@ -1,10 +1,10 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Pencil, Plus, Power, PowerOff, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Pencil, Plus, Power, PowerOff, Tag, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import type { MaterialDto, WorkCategoryDto, WorkCategoryLevel } from "@systemboq/shared-types";
 
-import { Button } from "../components/Button";
+import { Button, buttonClasses } from "../components/Button";
 import { Layout } from "../components/Layout";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
@@ -14,7 +14,8 @@ import { ApiError } from "../lib/api";
 import { createCategory, deleteCategory, listCategories, updateCategory } from "../lib/categories-api";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
-import { createMaterial, listMaterials } from "../lib/materials-api";
+import { listMaterials } from "../lib/materials-api";
+import { TableSkeleton } from "../components/Skeleton";
 
 const CHILD_LEVEL: Record<WorkCategoryLevel, WorkCategoryLevel | null> = {
   CATEGORY: "SUBGROUP",
@@ -48,7 +49,7 @@ function WasteCell({ value }: { value: string | null }) {
 }
 
 /** รายการต่อหน้าในแท็บหมวด — นับเฉพาะรายการ (ITEM) ที่กางอยู่ หัวกลุ่มงานย่อยไม่นับ */
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 15;
 
 /**
  * ชิ้นของกลุ่มงานย่อยหนึ่งกลุ่มที่อยู่ในหน้าหนึ่ง — กลุ่มที่ยาวข้ามหน้าจะมีหลายชิ้น
@@ -127,6 +128,23 @@ function bySortOrderThenName(a: WorkCategoryDto, b: WorkCategoryDto): number {
   return a.name.localeCompare(b.name, "th");
 }
 
+/**
+ * ปุ่ม "ตั้งราคา / แก้ราคา" ของแถวรายการ — ราคาอยู่ที่หน้าวัสดุ/ค่าแรงที่เดียว ปุ่มนี้พาไปที่นั่น
+ * กรองเฉพาะวัสดุของรายการนี้ · ยังไม่มีวัสดุ = เปิดฟอร์มเพิ่มที่เติมหมวด/ชื่อรายการให้แล้ว
+ */
+function PriceLink({ node, materialCount }: Readonly<{ node: WorkCategoryDto; materialCount: number }>) {
+  const priced = materialCount > 0;
+  return (
+    <Link
+      to={`/materials?category=${encodeURIComponent(node.id)}${priced ? "" : "&add=1"}`}
+      className={`${buttonClasses("ghost", "sm")} shrink-0`}
+      title={priced ? `แก้ราคาของ “${node.name}” ที่หน้าวัสดุ/ค่าแรง` : `ตั้งราคาให้ “${node.name}” ที่หน้าวัสดุ/ค่าแรง`}
+    >
+      <Tag size={14} /> {priced ? "แก้ราคา" : "ตั้งราคา"}
+    </Link>
+  );
+}
+
 export function CategoriesPage() {
   const confirm = useConfirm();
   const toast = useToast();
@@ -150,17 +168,8 @@ export function CategoriesPage() {
   const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
   const [newDescription, setNewDescription] = useState("");
-  // Idea 1: optional price fields shown when the child being added is an ITEM — filling
-  // them creates a Material linked to the new หมวดงาน in the same step.
-  const [newUnit, setNewUnit] = useState("");
-  const [newMatPrice, setNewMatPrice] = useState("");
-  const [newLaborPrice, setNewLaborPrice] = useState("");
-
-  // ไอเดียที่ 2: ฟอร์มแบบ inline "เพิ่มวัสดุลงใน ITEM ที่มีอยู่นี้"
-  const [addMaterialFor, setAddMaterialFor] = useState<string | null>(null);
-  const [matUnit, setMatUnit] = useState("");
-  const [matMatPrice, setMatMatPrice] = useState("");
-  const [matLaborPrice, setMatLaborPrice] = useState("");
+  // หน้านี้จัด "โครง" อย่างเดียว — ราคาอยู่ที่หน้าวัสดุ/ค่าแรงที่เดียว (เดิมมีช่องราคาตอนเพิ่มรายการ
+  // และปุ่ม "+ วัสดุ" ที่แอบสร้างวัสดุให้ ผู้ใช้งงว่าของจริงอยู่ไหน เพราะเพิ่มได้สองที่แต่แก้ราคาได้ที่เดียว)
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -303,7 +312,6 @@ export function CategoriesPage() {
     setSearch("");
     setEditingId(null);
     setAddingChildFor((cur) => (cur === "root" ? cur : null));
-    setAddMaterialFor(null);
     navigate(id ? `/categories/${id}` : "/categories", { replace: true });
     // กดจากท้ายหมวดยาว ๆ → พากลับขึ้นมาที่แถบ ไม่งั้นหมวดใหม่เริ่มกลางจอ
     if (scroll) {
@@ -318,32 +326,11 @@ export function CategoriesPage() {
   /** target = id ของหมวดแม่ หรือ "root" สำหรับหมวดหลัก */
   function startAdd(target: string) {
     setAddingChildFor(target);
-    setAddMaterialFor(null);
     setNewName("");
     setNewCode("");
     setNewDescription("");
-    setNewUnit("");
-    setNewMatPrice("");
-    setNewLaborPrice("");
     // ฟอร์ม render อยู่ภายในกลุ่ม จึงต้องเปิดกลุ่มไว้ถึงจะเห็น
     if (target !== "root") open([target]);
-  }
-
-  /** วัสดุที่กรอกมาพร้อมรายการใหม่ — ล้มเหลวได้โดยไม่ทิ้งรายการ (ยังกด "+ วัสดุ" ทีหลังได้) */
-  async function createMaterialForNewItem(categoryId: string) {
-    try {
-      await createMaterial({
-        categoryId,
-        name: newName.trim(),
-        unit: newUnit.trim(),
-        materialUnitPrice: Number(newMatPrice) || 0,
-        laborUnitPrice: Number(newLaborPrice) || 0,
-      });
-    } catch (err) {
-      // The หมวดงาน is still a valid (empty) row — recoverable via "+ วัสดุ" on it.
-      const reason = err instanceof ApiError ? err.message : "เกิดข้อผิดพลาด";
-      toast.error(`สร้างหมวดงานแล้ว แต่เพิ่มวัสดุไม่สำเร็จ: ${reason} — เพิ่มวัสดุอีกครั้งได้ที่ปุ่ม "+ วัสดุ" ของรายการ`);
-    }
   }
 
   /** พาไปดูของที่เพิ่งเพิ่ม — หมวดหลักใหม่มีแท็บของตัวเอง เปิดแท็บนั้นเลย ไม่ทิ้งผู้ใช้ไว้ที่เดิม */
@@ -359,17 +346,6 @@ export function CategoriesPage() {
   async function submitAdd(parentId: string | null, level: WorkCategoryLevel) {
     if (!newName.trim()) return;
 
-    // ไอเดียที่ 1: การกรอกช่องวัสดุช่องใดช่องหนึ่งหมายถึงผู้ประเมินต้องการให้สร้างวัสดุที่มีราคา
-    // พร้อมกับรายการนี้ วัสดุต้องมีหน่วย จึงบังคับให้ระบุตั้งแต่ต้น (ก่อนสร้างหมวด) แทนที่จะปล่อย
-    // หมวดให้ค้างเมื่อเกิด error ตอน validate
-    const wantsMaterial =
-      level === "ITEM" &&
-      (newUnit.trim() !== "" || newMatPrice.trim() !== "" || newLaborPrice.trim() !== "");
-    if (wantsMaterial && !newUnit.trim()) {
-      toast.error("กรุณากรอกหน่วยนับของวัสดุ (เช่น ตร.ม., ลบ.ม., ต้น)");
-      return;
-    }
-
     try {
       const res = await createCategory({
         level,
@@ -379,42 +355,11 @@ export function CategoriesPage() {
         description: newDescription.trim() || undefined,
       });
 
-      if (wantsMaterial) await createMaterialForNewItem(res.category.id);
-
       setAddingChildFor(null);
       await refresh();
       showAdded(res.category.id, parentId, level);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "เพิ่มหมวดงานไม่สำเร็จ");
-    }
-  }
-
-  function startAddMaterial(node: WorkCategoryDto) {
-    setAddMaterialFor(node.id);
-    setAddingChildFor(null);
-    setMatUnit("");
-    setMatMatPrice("");
-    setMatLaborPrice("");
-  }
-
-  async function submitAddMaterial(node: WorkCategoryDto) {
-    if (!matUnit.trim()) {
-      toast.error("กรุณากรอกหน่วยนับของวัสดุ");
-      return;
-    }
-    try {
-      await createMaterial({
-        categoryId: node.id,
-        name: node.name,
-        unit: matUnit.trim(),
-        materialUnitPrice: Number(matMatPrice) || 0,
-        laborUnitPrice: Number(matLaborPrice) || 0,
-      });
-      setAddMaterialFor(null);
-      await refresh();
-      setHighlightId(node.id);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "เพิ่มวัสดุไม่สำเร็จ");
     }
   }
 
@@ -580,11 +525,7 @@ export function CategoriesPage() {
             <Plus size={14} /> {LEVEL_LABEL[childLevel]}
           </Button>
         )}
-        {node.level === "ITEM" && (
-          <Button variant="ghost" size="sm" className="shrink-0" onClick={() => startAddMaterial(node)}>
-            <Plus size={14} /> วัสดุ
-          </Button>
-        )}
+        {node.level === "ITEM" && <PriceLink node={node} materialCount={materialsByCategory.get(node.id)?.length ?? 0} />}
         <Button
           variant="ghost"
           size="sm"
@@ -596,7 +537,7 @@ export function CategoriesPage() {
           <Pencil size={14} /> {!compact && "แก้ไข"}
         </Button>
         <Button
-          variant="ghost"
+          variant={isArchived ? "ghost" : "dangerQuiet"}
           size="sm"
           className={`shrink-0 ${iconOnly}`}
           onClick={() => toggleArchive(node)}
@@ -610,10 +551,10 @@ export function CategoriesPage() {
           size="sm"
           className={`shrink-0 ${iconOnly}`}
           onClick={() => handleDelete(node)}
-          title={compact ? `ลบ ${node.name}` : undefined}
-          aria-label={compact ? `ลบ ${node.name}` : undefined}
+          title={compact ? `ลบถาวร ${node.name}` : undefined}
+          aria-label={compact ? `ลบถาวร ${node.name}` : undefined}
         >
-          <Trash2 size={14} /> {!compact && "ลบ"}
+          <Trash2 size={14} /> {!compact && "ลบถาวร"}
         </Button>
       </div>
     );
@@ -683,71 +624,10 @@ export function CategoriesPage() {
               className="border border-slate-300 rounded-md px-2 py-1 text-sm"
             />
             {childLevel === "ITEM" && (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  placeholder="หน่วย (เช่น ตร.ม.)"
-                  value={newUnit}
-                  onChange={(e) => setNewUnit(e.target.value)}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm w-32"
-                />
-                <input
-                  type="number"
-                  placeholder="ราคาวัสดุ/หน่วย"
-                  value={newMatPrice}
-                  onChange={(e) => setNewMatPrice(e.target.value)}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm w-36"
-                />
-                <input
-                  type="number"
-                  placeholder="ค่าแรง/หน่วย"
-                  value={newLaborPrice}
-                  onChange={(e) => setNewLaborPrice(e.target.value)}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm w-36"
-                />
-                <span className="text-xs text-slate-500">
-                  กรอกหน่วย+ราคา ถ้าต้องการสร้างวัสดุให้เลย (เว้นว่าง = หมวดเปล่า)
-                </span>
-              </div>
+              <p className="text-xs text-slate-500">
+                หน่วยและราคาตั้งที่หน้า “วัสดุ/ค่าแรง” — เพิ่มรายการแล้วกด “ตั้งราคา” ที่แถวนั้น
+              </p>
             )}
-          </div>
-        </td>
-      </tr>
-    );
-  }
-
-  function addMaterialRow(node: WorkCategoryDto) {
-    return (
-      <tr key={`${node.id}-mat`} className="border-t border-slate-200 bg-white">
-        <td colSpan={COL_COUNT} className="px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2">
-            <span className="text-xs text-slate-500">เพิ่มวัสดุให้ “{node.name}”:</span>
-            <input
-              autoFocus
-              placeholder="หน่วย (เช่น ตร.ม.)"
-              value={matUnit}
-              onChange={(e) => setMatUnit(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm w-32"
-            />
-            <input
-              type="number"
-              placeholder="ราคาวัสดุ/หน่วย"
-              value={matMatPrice}
-              onChange={(e) => setMatMatPrice(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm w-36"
-            />
-            <input
-              type="number"
-              placeholder="ค่าแรง/หน่วย"
-              value={matLaborPrice}
-              onChange={(e) => setMatLaborPrice(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm w-36"
-            />
-            <Button size="sm" onClick={() => submitAddMaterial(node)}>
-              <Plus size={14} /> เพิ่มวัสดุ
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setAddMaterialFor(null)}>
-              <X size={14} /> ยกเลิก
-            </Button>
           </div>
         </td>
       </tr>
@@ -913,7 +793,6 @@ export function CategoriesPage() {
 
     // ฟอร์มเพิ่ม/วัสดุอยู่ใต้หัวชิ้นแรกของกลุ่มเท่านั้น ไม่ซ้ำบนหัว "(ต่อ)"
     if (!continued && addingChildFor === node.id && childLevel) out.push(addChildRow(node, childLevel));
-    if (!continued && addMaterialFor === node.id) out.push(addMaterialRow(node));
 
     if (isOpen) {
       for (const child of slice ? slice.items : children) pushRows(child, depth + 1, out);
@@ -1094,7 +973,7 @@ export function CategoriesPage() {
         </div>
       )}
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && <TableSkeleton rows={10} cols={4} />}
       {error && <p className="text-red-600">{error}</p>}
       {!loading && !error && topCategories.length === 0 && (
         <p className="text-slate-500">ยังไม่มีหมวดงาน — เริ่มเพิ่มหมวดงานหลักด้านบน</p>
@@ -1261,7 +1140,12 @@ export function CategoriesPage() {
               {/* กับดัก sticky: overflow-x-auto ทำให้ overflow-y เป็น auto ตาม → กลายเป็น scroll
                   container → หัวตารางไม่ติดจอ จึงปล่อยเป็น visible เมื่อจอกว้างพอให้ตารางลงตัว
                   (พื้นที่เนื้อหาเต็มที่ 1,104px ≥ ตาราง 1,040px ตั้งแต่จอ ~1,330px) */}
-              <div className="mt-4 overflow-x-auto min-[1330px]:overflow-x-visible rounded-lg border border-slate-200 bg-white">
+              {pageCount > 1 && (
+                <p className="mt-4 text-xs text-slate-500 tabular-nums">
+                  แสดง {itemsOnPage > 0 ? `${itemsBeforePage + 1}-${itemsBeforePage + itemsOnPage}` : "—"} จาก {itemsTotal} รายการ
+                </p>
+              )}
+              <div className={`${pageCount > 1 ? "mt-2" : "mt-4"} overflow-x-auto min-[1330px]:overflow-x-visible rounded-lg border border-slate-200 bg-white`}>
                 <table className="w-full min-w-[1040px] table-fixed text-sm">
                   {/* ความกว้างตายตัว: ไม่งั้นเวลายุบ/กางหมวด ตารางจะคำนวณความกว้างใหม่จากเนื้อหา
                       ที่เห็นอยู่ แล้วคอลัมน์ขยับทั้งแถบ (วัดได้ถึง 194px) */}
@@ -1340,17 +1224,7 @@ export function CategoriesPage() {
                   </tbody>
                 </table>
               </div>
-              {pageCount > 1 && (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-xs text-slate-500 tabular-nums">
-                    รายการ {itemsOnPage > 0 ? `${itemsBeforePage + 1}–${itemsBeforePage + itemsOnPage}` : "—"} จาก{" "}
-                    {itemsTotal}
-                  </span>
-                  <div className="[&_nav]:mt-0">
-                    <Pagination page={page} pageCount={pageCount} onChange={(n) => goPage(n)} />
-                  </div>
-                </div>
-              )}
+              <Pagination page={page} pageCount={pageCount} onChange={(n) => goPage(n)} />
               {/* จบหมวดแล้วไปต่อได้เลย ไม่ต้องเลื่อนกลับขึ้นไปที่แถบ */}
               <nav aria-label="เปลี่ยนหมวด" className="mt-3 flex items-center justify-between gap-3 text-sm">
                 {(() => {

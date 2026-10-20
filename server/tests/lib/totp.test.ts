@@ -6,7 +6,7 @@ import {
   generateTotpSecret,
   hashBackupCode,
   normalizeBackupCode,
-  verifyTotp,
+  totpStep,
 } from "../../src/lib/totp";
 
 describe("totp lib", () => {
@@ -14,11 +14,25 @@ describe("totp lib", () => {
     const secret = generateTotpSecret();
     expect(secret.length).toBeGreaterThan(0);
 
-    const token = authenticator.generate(secret);
-    expect(verifyTotp(token, secret)).toBe(true);
-    expect(verifyTotp("000000", secret)).toBe(false);
-    expect(verifyTotp("abc", secret)).toBe(false);
-    expect(verifyTotp("12345", secret)).toBe(false); // สั้นไป
+    const now = Date.now();
+    const token = authenticator.clone({ epoch: now }).generate(secret);
+    expect(totpStep(token, secret, now)).toBe(Math.floor(now / 30_000));
+    expect(totpStep("000000", secret, now)).toBeNull();
+    expect(totpStep("abc", secret, now)).toBeNull();
+    expect(totpStep("12345", secret, now)).toBeNull(); // สั้นไป
+  });
+
+  it("reports which 30-second step a code belongs to, within ±90 seconds only", () => {
+    const secret = generateTotpSecret();
+    const now = Date.now();
+    const at = (offsetMs: number) => authenticator.clone({ epoch: now + offsetMs }).generate(secret);
+    const current = Math.floor(now / 30_000);
+
+    // เวลามือถือช้าไป 60 วิ → รหัสเป็นของสองช่วงก่อน · เร็วไป 90 วิ → สามช่วงหลัง
+    expect(totpStep(at(-60_000), secret, now)).toBe(current - 2);
+    expect(totpStep(at(90_000), secret, now)).toBe(current + 3);
+    // เกินหน้าต่างเวลา (ห้าช่วงก่อน) → ไม่รับ
+    expect(totpStep(at(-150_000), secret, now)).toBeNull();
   });
 
   it("builds an otpauth URI with the issuer and account", () => {

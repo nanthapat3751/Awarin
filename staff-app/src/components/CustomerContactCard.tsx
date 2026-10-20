@@ -167,7 +167,7 @@ export function CustomerContactCard({
                 <Pencil size={13} /> แก้ไข
               </Button>
               {customer.active && (
-                <Button variant="ghost" size="sm" onClick={issueLink} disabled={busy}>
+                <Button variant="brand" size="sm" onClick={issueLink} disabled={busy}>
                   <KeyRound size={13} /> ออกลิงก์เข้าใช้งาน
                 </Button>
               )}
@@ -263,7 +263,7 @@ export function CustomerContactCard({
               {busy ? "กำลังสร้างไฟล์..." : "ดาวน์โหลดไฟล์"}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setPanel(null)} disabled={busy}>
-              ปิด
+              ยกเลิก
             </Button>
           </div>
           <p className="mt-2 text-xs text-slate-500">

@@ -5,6 +5,8 @@ import {
 } from "../contract-template";
 import { renderHtmlToPdf } from "./browser";
 import { sarabunFontFaceCss } from "./fonts";
+import { retentionOf, withholdingAfterRetention } from "@systemboq/shared-types";
+
 import { splitWithholding, type Withholding } from "../billing-party";
 import { renderCustomerParty, type CustomerPartyPdfData } from "./billing-block";
 import { type CompanyDocFields, renderCompanySigner } from "./company-blocks";
@@ -40,6 +42,11 @@ export interface ContractPdfData extends CustomerPartyPdfData, CompanyDocFields 
    * ไม่ได้ — กรณีนั้นพิมพ์แค่คำอธิบายว่าผู้ว่าจ้างมีหน้าที่หัก แต่ไม่พิมพ์ตัวเลขที่เดาเอา
    */
   withholding?: Withholding | null;
+  /**
+   * เงินประกันผลงาน % ของยอดงวด — null = ไม่มี หรือถูกตั้งหลังวันลงนาม (ไม่ได้อยู่ในฉบับที่เซ็น
+   * สัญญาที่ลงนามแล้วต้องพิมพ์เหมือนวันเซ็น)
+   */
+  retentionPct?: number | null;
 }
 
 function money(n: number): string {
@@ -153,6 +160,7 @@ function renderInstallments(
   items: ContractPdfData["installments"],
   withholding: Withholding | null,
   contractAmount: number,
+  retentionPct: number | null,
 ): string {
   if (items.length === 0) return "";
 
@@ -164,7 +172,13 @@ function renderInstallments(
 
   const rows = items
     .map((i, index) => {
-      const wh = perInstallment[index];
+      const retention = retentionOf(i.amount, retentionPct);
+      // ภาษีหัก ณ ที่จ่ายคิดจากเงินที่จ่ายจริง ส่วนของเงินประกันถูกหักตอนคืน
+      const tax = perInstallment[index] ? withholdingAfterRetention(perInstallment[index].tax, i.amount, retention) : 0;
+      const deductions = [
+        retention > 0 ? `หักเงินประกันผลงาน ${retentionPct}% ${money(retention)} บาท` : null,
+        perInstallment[index] ? `หักภาษี ณ ที่จ่าย ${withholding!.pct}% ${money(tax)} บาท` : null,
+      ].filter(Boolean);
       return `
         <div class="inst">
           <div class="inst-line">
@@ -172,10 +186,10 @@ function renderInstallments(
             <span class="inst-amount">${money(i.amount)} บาท</span>
           </div>
           ${
-            wh
-              ? `<div class="inst-wh">หักภาษี ณ ที่จ่าย ${withholding!.pct}% ${money(
-                  wh.tax,
-                )} บาท · โอนสุทธิ ${money(wh.netTransfer)} บาท</div>`
+            deductions.length > 0
+              ? `<div class="inst-wh">${deductions.join(" · ")} · โอนสุทธิ ${money(
+                  Math.round((i.amount - retention - tax) * 100) / 100,
+                )} บาท</div>`
               : ""
           }
           <div class="inst-sign">ลงชื่อ ....................................................... วันที่ ........./........./.........</div>
@@ -195,6 +209,13 @@ function renderInstallments(
             )} บาท นำส่งกรมสรรพากร และออกหนังสือรับรองการหักภาษี ณ ที่จ่ายให้ผู้รับจ้างทุกงวด — ยอดที่หักไม่ใช่ส่วนลด มูลค่าสัญญายังคงเดิม</div>`
           : ""
       }
+      ${
+        retentionPct != null && retentionPct > 0
+          ? `<div class="inst-wh-note">ผู้ว่าจ้างหักเงินประกันผลงานไว้ร้อยละ ${retentionPct} ของเงินค่าจ้างแต่ละงวด รวม ${money(
+              items.reduce((sum, i) => sum + retentionOf(i.amount, retentionPct), 0),
+            )} บาท และจะคืนให้ผู้รับจ้างเมื่อพ้นระยะเวลารับประกันผลงานตามสัญญา — เงินประกันผลงานไม่ใช่ส่วนลด มูลค่าสัญญายังคงเดิม</div>`
+          : ""
+      }
     </div>`;
 }
 
@@ -203,6 +224,7 @@ function renderClauses(
   installments: ContractPdfData["installments"],
   withholding: Withholding | null,
   contractAmount: number,
+  retentionPct: number | null,
 ): string {
   const clauses = body.clauses
     .map((c) => {
@@ -214,7 +236,7 @@ function renderClauses(
           ? paragraphs(c.body)
           : parts
               .map((t) => (t.trim() ? paragraphs(t) : ""))
-              .join(renderInstallments(installments, withholding, contractAmount));
+              .join(renderInstallments(installments, withholding, contractAmount, retentionPct));
       return `
         <div class="clause">
           <div class="clause-heading">${escapeHtml(c.heading)}</div>
@@ -305,6 +327,7 @@ export function buildContractPdfHtml(data: ContractPdfData): string {
                 data.installments,
                 data.withholding ?? null,
                 data.contractAmount,
+                data.retentionPct ?? null,
               )
             : renderLegacyBody(data)
         }

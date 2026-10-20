@@ -11,6 +11,8 @@ import {
 } from "../../lib/project-state-machine";
 import { applyQuoteOutcomeToProject } from "../../lib/project-auto-status";
 import { prisma } from "../../lib/prisma";
+import { loadQuotePdfSigners } from "../../lib/quote-signers";
+import { approvalOf } from "../../lib/quote-approval";
 import {
   assertValidQuoteTransition,
   InvalidQuoteTransitionError,
@@ -49,17 +51,20 @@ export async function listQuotes(projectId: string) {
   const quotes = await prisma.quote.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
+    include: { signers: true },
   });
   const byQuote = await listAttachmentsForQuotes(quotes.map((q) => q.id));
-  return quotes.map((q) => ({
+  return quotes.map(({ signers, ...q }) => ({
     ...q,
     // คอลัมน์ DATE — ส่งเป็น YYYY-MM-DD ไม่ใช่ ISO เต็ม ไม่งั้นหน้าจอแปลงตามเขตเวลาแล้ววันเลื่อน
     validUntil: toIsoDate(q.validUntil),
     attachments: (byQuote.get(q.id) ?? []).map(toAttachmentDto),
+    // ส่งแค่สรุป (ใคร/เมื่อไร/มีลายเซ็นไหม) — รูปลายเซ็นจริงอยู่ใน PDF เท่านั้น
+    approval: approvalOf(signers),
   }));
 }
 
-async function getQuoteOrThrow(projectId: string, quoteId: string) {
+export async function getQuoteOrThrow(projectId: string, quoteId: string) {
   const quote = await prisma.quote.findUnique({ where: { id: quoteId } });
   if (quote?.projectId !== projectId) {
     throw new QuoteError("ไม่พบใบเสนอราคาที่ระบุ", 404);
@@ -159,7 +164,7 @@ function assertQuoteTransitionAllowed(from: QuoteStatus, to: QuoteStatus): void 
  * โครงการกำหนดเอง (CUSTOM) ไม่มี PDF ที่ระบบสร้างให้ ต้องแนบไฟล์ที่ "ให้ลูกค้าเห็น" อย่างน้อย
  * 1 ไฟล์ก่อนส่ง ไม่งั้นลูกค้าจะเปิดใบเสนอราคาแล้วเจอหน้าเปล่า
  */
-async function assertCustomQuoteHasCustomerFile(projectId: string, quoteId: string): Promise<void> {
+export async function assertCustomQuoteHasCustomerFile(projectId: string, quoteId: string): Promise<void> {
   const proj = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
   if (proj.type !== "CUSTOM") return;
   const customerFileCount = await prisma.quoteAttachment.count({
@@ -229,6 +234,17 @@ async function afterQuoteSent(
   }
 }
 
+/** ส่งถึงลูกค้าได้ต่อเมื่อ OWNER อนุมัติแล้ว — ของที่ลูกค้าเห็นต้องผ่านตาผู้อนุมัติก่อนเสมอ */
+async function assertQuoteApproved(quoteId: string): Promise<void> {
+  const approver = await prisma.quoteSigner.findUnique({
+    where: { quoteId_role: { quoteId, role: "APPROVER" } },
+    select: { id: true },
+  });
+  if (!approver) {
+    throw new QuoteError("ใบเสนอราคานี้ยังไม่ได้รับอนุมัติ — ขออนุมัติจากเจ้าของก่อนส่งให้ลูกค้า", 409);
+  }
+}
+
 export async function transitionQuote(
   projectId: string,
   quoteId: string,
@@ -237,7 +253,10 @@ export async function transitionQuote(
 ) {
   const quote = await getQuoteOrThrow(projectId, quoteId);
   assertQuoteTransitionAllowed(quote.status as QuoteStatus, toStatus);
-  if (toStatus === "SENT") await assertCustomQuoteHasCustomerFile(projectId, quoteId);
+  if (toStatus === "SENT") {
+    await assertCustomQuoteHasCustomerFile(projectId, quoteId);
+    await assertQuoteApproved(quoteId);
+  }
 
   const now = new Date();
   const respondedStatuses: QuoteStatus[] = ["ACCEPTED", "REJECTED", "REVISED"];
@@ -391,6 +410,7 @@ export async function generateQuotePdf(projectId: string, quoteId: string): Prom
     logo: company.logo,
     logoSmall: company.logoSmall,
     signatory: company.signatory,
+    signers: await loadQuotePdfSigners(quote.id),
     quoteNo: quote.quoteNo,
     revisionNo: quote.revisionNo,
     projectNo: project.projectNo,
@@ -407,11 +427,14 @@ export async function generateQuotePdf(projectId: string, quoteId: string): Prom
     terms: termLines(quote.terms),
     groups,
     directCost: Number(version.directCost),
+    contingencyPct: Number(version.contingencyPct),
+    contingencyAmt: Number(version.contingencyAmt),
     overheadProfitPct: Number(version.overheadProfitPct),
     overheadProfitAmt: Number(version.overheadProfitAmt),
     discountPct: version.discountPct != null ? Number(version.discountPct) : null,
     discountAmt: Number(version.discountAmt),
     discountNote: version.discountNote,
+    roundingAmt: Number(version.roundingAmt),
     vatPct: Number(version.vatPct),
     vatAmt: Number(version.vatAmt),
     netPrice: Number(version.netPrice),

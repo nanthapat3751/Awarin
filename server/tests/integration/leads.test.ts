@@ -3,6 +3,7 @@ import request from "supertest";
 import { app } from "../../src/app";
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // mock ด้วยเหตุผลเดียวกับ quotes.test.ts / myQuotes.test.ts: entry แบบ ESM ของ Puppeteer
 // รันใต้ runtime CJS ของ ts-jest ไม่ได้ และเทสต์เหล่านี้ก็ไม่ได้ใช้มันอยู่แล้ว
@@ -195,12 +196,132 @@ describe("leads module", () => {
 
     const myLeadsRes = await customer.agent.get("/api/my/leads");
     expect(myLeadsRes.status).toBe(200);
-    expect(myLeadsRes.body.leads.map((l: { id: string }) => l.id)).toContain(res.body.lead.id);
-    expect(
-      myLeadsRes.body.leads.every((l: { customerId: string }) => l.customerId === res.body.lead.customerId),
-    ).toBe(true);
+    expect(myLeadsRes.body.leads.map((l: { id: string }) => l.id)).toEqual([res.body.lead.id]);
+    // มุมลูกค้าไม่ส่งช่องภายในออกไป
+    expect(myLeadsRes.body.leads[0]).not.toHaveProperty("customerId");
+    expect(myLeadsRes.body.leads[0]).not.toHaveProperty("deletedById");
 
     await prisma.user.deleteMany({ where: { email: customer.email } });
+  });
+
+  it("shows a customer their own request detail, and 404s for other customers / trash / unknown ids", async () => {
+    const alice = await createAndLoginCustomer("test-leads-detail-alice");
+    const bob = await createAndLoginCustomer("test-leads-detail-bob");
+    createdUserIds.push((await alice.agent.get("/api/auth/me")).body.user.id);
+    createdUserIds.push((await bob.agent.get("/api/auth/me")).body.user.id);
+
+    const created = await alice.agent.post("/api/public/leads").send({
+      name: "รายละเอียด คำขอ",
+      phone: "0812001200",
+      email: "lead-detail@example.com",
+      serviceType: "รับสร้างบ้าน",
+      message: "บ้านชั้นเดียว\nสามห้องนอน",
+      siteAddress: "12 ต.ในเมือง อ.เมือง จ.ขอนแก่น",
+      areaSqm: 120.5,
+      desiredStartDate: "2026-12-01",
+    });
+    const leadId = created.body.lead.id as string;
+    createdLeadIds.push(leadId);
+
+    const mine = await alice.agent.get(`/api/my/leads/${leadId}`);
+    expect(mine.status).toBe(200);
+    expect(mine.body.lead).toMatchObject({
+      id: leadId,
+      serviceType: "รับสร้างบ้าน",
+      message: "บ้านชั้นเดียว\nสามห้องนอน",
+      siteAddress: "12 ต.ในเมือง อ.เมือง จ.ขอนแก่น",
+      desiredStartDate: "2026-12-01",
+      attachments: [],
+      houseDesign: null,
+      status: "NEW",
+      latestQuote: null,
+      hasContract: false,
+    });
+    expect(Number(mine.body.lead.areaSqm)).toBe(120.5);
+    expect(mine.body.lead).not.toHaveProperty("customerId");
+
+    // ของคนอื่น = ข้อความเดียวกับ id ที่ไม่มีจริง — เดาไม่ได้ว่ามีคำขอนี้อยู่
+    const other = await bob.agent.get(`/api/my/leads/${leadId}`);
+    const unknown = await bob.agent.get("/api/my/leads/does-not-exist");
+    expect(other.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect(other.body).toEqual(unknown.body);
+
+    // พนักงานใช้เส้นทางของลูกค้าไม่ได้
+    expect((await owner.agent.get(`/api/my/leads/${leadId}`)).status).toBe(403);
+
+    // อยู่ในถังขยะ = ไม่พบ
+    await owner.agent.delete(`/api/leads/${leadId}`);
+    expect((await alice.agent.get(`/api/my/leads/${leadId}`)).status).toBe(404);
+  });
+
+  it("keeps the customer's area range (never copied into the project) and lets a typed number win", async () => {
+    // ไม่สมัครลูกค้าใหม่ — registerLimiter 10 ครั้ง/ชม. ทั้งไฟล์นี้ใช้เกือบเต็มแล้ว
+    const post = (body: object) => request(app).post("/api/public/leads").send(body);
+    const base = { name: "ช่วง พื้นที่", phone: "0812001400", email: "lead-area-range@example.com", serviceType: "งานก่อสร้าง" };
+
+    const ranged = await post({ ...base, areaRange: "100_200" });
+    expect(ranged.status).toBe(201);
+    createdLeadIds.push(ranged.body.lead.id);
+    const listed = await owner.agent.get("/api/leads");
+    const lead = (listed.body.leads as { id: string; areaSqm: unknown; areaRange: unknown }[]).find((l) => l.id === ranged.body.lead.id);
+    expect(lead).toMatchObject({ areaSqm: null, areaRange: "100_200" });
+
+    // ช่วงใช้ประเมินขนาดงานเท่านั้น — สร้างโครงการแล้วพื้นที่โครงการยังว่าง (ต้องถามตัวเลขจริง)
+    const projectRes = await owner.agent.post(`/api/leads/${ranged.body.lead.id}/create-project`);
+    createdProjectIds.push(projectRes.body.project.id);
+    expect(projectRes.body.project.areaSqm).toBeNull();
+
+    // พิมพ์ตัวเลขมาด้วย = ตัวเลขชนะ ช่วงถูกทิ้ง
+    const both = await post({ ...base, areaSqm: 150, areaRange: "GT300" });
+    createdLeadIds.push(both.body.lead.id);
+    const row = await prisma.lead.findUniqueOrThrow({ where: { id: both.body.lead.id } });
+    expect(row.areaRange).toBeNull();
+    expect(Number(row.areaSqm)).toBe(150);
+
+    const bad = await post({ ...base, areaRange: "HUGE" });
+    expect(bad.status).toBe(400);
+  });
+
+  it("links a request to its sent quote (never a draft) and deep-links the reply notification", async () => {
+    const customer = await createAndLoginCustomer("test-leads-detail-quote");
+    const customerId = (await customer.agent.get("/api/auth/me")).body.user.id as string;
+    createdUserIds.push(customerId);
+
+    const created = await customer.agent.post("/api/public/leads").send({
+      name: "คำขอ มีใบเสนอราคา",
+      phone: "0812001300",
+      email: "lead-detail-quote@example.com",
+      serviceType: "รับสร้างบ้าน",
+    });
+    const leadId = created.body.lead.id as string;
+    createdLeadIds.push(leadId);
+
+    const projectRes = await owner.agent.post(`/api/leads/${leadId}/create-project`);
+    const projectId = projectRes.body.project.id as string;
+    createdProjectIds.push(projectId);
+    await owner.agent
+      .post(`/api/projects/${projectId}/boq/items`)
+      .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
+    const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+    const quoteId = quoteRes.body.quote.id as string;
+
+    const whileDraft = await customer.agent.get(`/api/my/leads/${leadId}`);
+    expect(whileDraft.body.lead.latestQuote).toBeNull();
+
+    await sendQuote(owner.agent, projectId, quoteId);
+    const afterSend = await customer.agent.get(`/api/my/leads/${leadId}`);
+    expect(afterSend.body.lead.status).toBe("QUOTED");
+    expect(afterSend.body.lead.latestQuote).toMatchObject({ id: quoteId, status: "SENT" });
+    const list = await customer.agent.get("/api/my/leads");
+    expect(list.body.leads[0].latestQuote.id).toBe(quoteId);
+
+    const reply = await owner.agent.patch(`/api/leads/${leadId}/reply`).send({ reply: "ส่งใบเสนอราคาให้แล้วครับ" });
+    expect(reply.status).toBe(200);
+    const note = await prisma.notification.findFirst({
+      where: { userId: customerId, message: { contains: "ตอบกลับคำขอ" } },
+    });
+    expect(note?.link).toBe(`/my/requests/${leadId}`);
   });
 
   it("lets staff list and update lead status", async () => {
@@ -440,9 +561,7 @@ describe("leads module", () => {
       .post(`/api/projects/${projectId}/boq/items`)
       .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteRes.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteRes.body.quote.id);
 
     const afterSentRes = await owner.agent.get("/api/leads");
     expect(afterSentRes.body.leads.find((l: { id: string }) => l.id === leadId).status).toBe("QUOTED");
@@ -484,9 +603,7 @@ describe("leads module", () => {
       .post(`/api/projects/${projectId}/boq/items`)
       .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteRes.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteRes.body.quote.id);
 
     const afterSentRes = await owner.agent.get("/api/leads");
     expect(afterSentRes.body.leads.find((l: { id: string }) => l.id === leadId).status).toBe("REJECTED");
@@ -553,14 +670,14 @@ describe("leads module", () => {
     const token = (res.body.url as string).split("/activate/")[1];
     const redeem = await request(app)
       .post(`/api/auth/access/${token}`)
-      .send({ password: "customer-set-pw-1234" });
+      .send({ password: "Customer-set-pw-1234" });
     expect(redeem.status).toBe(200);
     expect(redeem.body.user.email).toBe(email);
 
     // และล็อกอินด้วยรหัสที่เพิ่งตั้งได้
     const custLogin = await request(app)
       .post("/api/auth/customer/login")
-      .send({ email, password: "customer-set-pw-1234" });
+      .send({ email, password: "Customer-set-pw-1234" });
     expect(custLogin.status).toBe(200);
   });
 
@@ -597,15 +714,17 @@ describe("leads module", () => {
     await prisma.user.deleteMany({ where: { email: existing.email } });
   });
 
-  it("rejects issuing an access link for a project not created from a lead", async () => {
+  // โครงการที่ไม่ได้มาจากคำขอสร้างบัญชีลูกค้าได้แล้ว (ลูกค้าที่โทร/เดินเข้ามาเอง — ทางสำเร็จอยู่ใน
+  // access-link.test.ts) แต่ไม่มีคำขอให้ดึงชื่อ จึงต้องกรอกชื่อเอง
+  it("needs the customer's name to issue an access link for a project not created from a lead", async () => {
     const projectRes = await owner.agent.post("/api/projects").send({ name: "โครงการไม่ได้มาจากคำขอ" });
     const projectId = projectRes.body.project.id as string;
     createdProjectIds.push(projectId);
 
     const res = await owner.agent
       .post(`/api/projects/${projectId}/customer-access-link`)
-      .send({ email: "nolead@example.com", fullName: "x", phone: "0812226666" });
-    expect(res.status).toBe(409);
+      .send({ email: `nolead-${Date.now()}@example.com`, phone: "0812226666" });
+    expect(res.status).toBe(400);
   });
 
   it("finds a registered customer by phone number (auto-match search)", async () => {
@@ -613,7 +732,7 @@ describe("leads module", () => {
     const email = `phone-search-${Date.now()}@example.com`;
     await request(app)
       .post("/api/auth/customer/register")
-      .send({ email, password: "phone-search-pw-1234", fullName: "ค้นด้วยเบอร์", phone: uniquePhone });
+      .send({ email, password: "Juniper-cairn-29-driftglass", fullName: "ค้นด้วย เบอร์โทร", phone: uniquePhone });
     const registered = await prisma.user.findUnique({ where: { email } });
     createdUserIds.push(registered!.id);
 

@@ -33,6 +33,9 @@ export function WaveField({
   ...rest
 }: WaveFieldProps) {
   const graphemes = useMemo(() => toGraphemes(label), [label]);
+  // ผูกข้อความผิดพลาดเข้ากับช่องด้วย aria-describedby — aria-invalid บอกได้แค่ว่า "ช่องนี้ผิด"
+  // แต่ไม่ได้บอกว่าผิดยังไง คนที่ใช้โปรแกรมอ่านหน้าจอจะได้ยินแค่ "ไม่ถูกต้อง" แล้วจบ
+  const errorId = `${id}-error`;
 
   return (
     <div>
@@ -42,6 +45,7 @@ export function WaveField({
           // ต้องมี placeholder เสมอเพื่อให้ :placeholder-shown ทำงาน (คำใบ้จริงจะโผล่ตอนโฟกัสเท่านั้น)
           placeholder={placeholder ?? " "}
           aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
           className={`peer ${trailing ? "has-trailing" : ""} ${className ?? ""}`}
           {...rest}
         />
@@ -57,7 +61,11 @@ export function WaveField({
         </label>
         {trailing && <div className="wave-trailing">{trailing}</div>}
       </div>
-      {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
+      {error && (
+        <span id={errorId} className="mt-1 block text-xs text-red-600">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

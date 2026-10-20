@@ -5,13 +5,18 @@ export class ApiError extends Error {
   details?: unknown;
   /** วินาทีที่ต้องรอก่อนลองใหม่ (มากับสถานะถูกล็อก 423) — หน้า login เอาไปนับถอยหลัง */
   retryAfter?: number;
+  /** ขั้นกรอกรหัส 2FA: เซิร์ฟเวอร์ทิ้งเซสชันครึ่งทางแล้ว ต้องกลับไปกรอกรหัสผ่านใหม่ */
+  restartLogin: boolean;
+  /** รหัสเหตุจากเซิร์ฟเวอร์ (ถ้ามี) ให้หน้าจอแยกกรณีได้โดยไม่เดาจากข้อความ เช่น OVERRUN_REASON_REQUIRED */
+  code?: string;
 
-  constructor(message: string, status: number, details?: unknown, retryAfter?: number) {
+  constructor(message: string, status: number, details?: unknown, retryAfter?: number, restartLogin = false) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.details = details;
     this.retryAfter = retryAfter;
+    this.restartLogin = restartLogin;
   }
 }
 
@@ -32,7 +37,15 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const body = await res.json().catch(() => undefined);
 
   if (!res.ok) {
-    throw new ApiError(body?.error ?? "เกิดข้อผิดพลาด", res.status, body?.details, body?.retryAfter);
+    const error = new ApiError(
+      body?.error ?? "เกิดข้อผิดพลาด",
+      res.status,
+      body?.details,
+      body?.retryAfter,
+      body?.restartLogin === true,
+    );
+    if (typeof body?.code === "string") error.code = body.code;
+    throw error;
   }
 
   return body as T;
@@ -79,7 +92,11 @@ export async function downloadFile(path: string, fileName: string): Promise<void
  *
  * ผู้เรียกต้อง URL.revokeObjectURL() เองตอนเลิกใช้ (หน้าดูเอกสารทำตอน unmount)
  */
-export async function fetchPdfObjectUrl(path: string): Promise<string> {
+// คำขอ PDF ที่กำลังวิ่งอยู่ — StrictMode ของ dev เรียก effect หน้าดูเอกสารสองรอบติดกัน ถ้าไม่ใช้คำขอร่วมกัน
+// เซิร์ฟเวอร์ต้องสั่ง Puppeteer สร้างไฟล์เดียวกันสองรอบพร้อมกัน ใบที่ผู้ใช้รอดูจึงช้าลงเกือบเท่าตัว
+const pdfInFlight = new Map<string, Promise<Blob>>();
+
+async function fetchPdfBlob(path: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
 
   if (!res.ok) {
@@ -87,5 +104,16 @@ export async function fetchPdfObjectUrl(path: string): Promise<string> {
     throw new ApiError(body?.error ?? "เปิดไฟล์ไม่สำเร็จ", res.status);
   }
 
-  return URL.createObjectURL(await res.blob());
+  return res.blob();
+}
+
+export async function fetchPdfObjectUrl(path: string): Promise<string> {
+  let pending = pdfInFlight.get(path);
+  if (!pending) {
+    // เก็บไว้แค่ระหว่างรอ — เปิดใหม่ภายหลังต้องได้ไฟล์ล่าสุดเสมอ ไม่ใช่ของเก่าที่จำไว้
+    pending = fetchPdfBlob(path).finally(() => pdfInFlight.delete(path));
+    pdfInFlight.set(path, pending);
+  }
+  // object URL แยกต่อผู้เรียก — รอบที่ถูกยกเลิก revoke ของตัวเองได้โดยไม่กระทบอีกรอบ
+  return URL.createObjectURL(await pending);
 }

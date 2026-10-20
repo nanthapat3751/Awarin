@@ -36,3 +36,19 @@ export function setQuoteValidity(
     body: JSON.stringify({ validUntil }),
   });
 }
+
+// ── ขั้นอนุมัติก่อนส่ง ──
+// submit = ขออนุมัติ (ใครก็ได้) · approve/return = เจ้าของเท่านั้น · withdraw = คนที่ขอ (หรือเจ้าของ)
+
+type ApprovalStep = "submit" | "approve" | "withdraw";
+
+export function quoteApproval(projectId: string, quoteId: string, step: ApprovalStep): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/quotes/${quoteId}/approval/${step}`, { method: "POST" });
+}
+
+export function returnQuoteForChanges(projectId: string, quoteId: string, note: string): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/quotes/${quoteId}/approval/return`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+}

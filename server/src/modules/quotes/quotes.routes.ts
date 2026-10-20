@@ -1,8 +1,18 @@
-import { Router, type Request } from "express";
+import type { Role } from "@systemboq/shared-types";
+import { Router, type Request, type Response } from "express";
 
+import { sendXlsx } from "../../lib/excel/send-xlsx";
 import { requireAuth } from "../../middleware/auth";
 import { requireRole } from "../../middleware/rbac";
-import { quoteValiditySchema, transitionQuoteSchema } from "./quotes.schemas";
+import { exportCustomerBoq } from "../boq/boq-export.service";
+import { BoqError } from "../boq/boq.service";
+import {
+  approveQuote,
+  returnQuoteForChanges,
+  submitQuoteForApproval,
+  withdrawQuoteApproval,
+} from "./quote-approval.service";
+import { quoteValiditySchema, returnQuoteSchema, transitionQuoteSchema } from "./quotes.schemas";
 import {
   QuoteError,
   createQuote,
@@ -125,4 +135,55 @@ quotesRouter.get("/:quoteId/pdf", async (req: Request<QuoteParams>, res) => {
     }
     throw err;
   }
+});
+
+// Excel ฉบับลูกค้า — ตัวเลขชุดเดียวกับใบเสนอราคา PDF ของลูกค้า ไม่มีราคาทุน
+quotesRouter.get("/:quoteId/export.xlsx", async (req: Request<QuoteParams>, res) => {
+  try {
+    const file = await exportCustomerBoq(req.params.projectId, req.params.quoteId);
+    sendXlsx(res, file.buffer, file.fileName);
+  } catch (err) {
+    if (err instanceof QuoteError || err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// ─────────────── ขั้นอนุมัติก่อนส่ง (ดู quote-approval.service.ts) ───────────────
+
+type ApprovalAction = (projectId: string, quoteId: string, actor: { id: string; role: Role }) => Promise<void>;
+
+async function runApproval(req: Request<QuoteParams>, res: Response, action: ApprovalAction): Promise<void> {
+  try {
+    await action(req.params.projectId, req.params.quoteId, { id: req.user!.id, role: req.user!.role });
+    res.status(204).end();
+  } catch (err) {
+    if (err instanceof QuoteError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+}
+
+quotesRouter.post("/:quoteId/approval/submit", (req: Request<QuoteParams>, res) =>
+  runApproval(req, res, submitQuoteForApproval),
+);
+quotesRouter.post("/:quoteId/approval/approve", (req: Request<QuoteParams>, res) =>
+  runApproval(req, res, approveQuote),
+);
+quotesRouter.post("/:quoteId/approval/withdraw", (req: Request<QuoteParams>, res) =>
+  runApproval(req, res, withdrawQuoteApproval),
+);
+quotesRouter.post("/:quoteId/approval/return", (req: Request<QuoteParams>, res) => {
+  const parsed = returnQuoteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง" });
+    return;
+  }
+  return runApproval(req, res, (projectId, quoteId, actor) =>
+    returnQuoteForChanges(projectId, quoteId, actor, parsed.data.note),
+  );
 });

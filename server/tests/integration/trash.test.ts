@@ -12,14 +12,16 @@ import { createAndLoginOwner } from "../helpers/test-auth";
 
 // ผู้ใช้ ADMIN + ล็อกอิน (helper กลางมีแค่ owner/customer) — ใช้ทดสอบว่า ADMIN ลบถาวรไม่ได้
 async function createAndLoginAdmin(prefix: string) {
-  const email = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
-  const password = "test-admin-battery-staple";
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const email = `${prefix}-${stamp}@example.com`;
+  const username = `${prefix}-${stamp}`.toLowerCase().replace(/[^a-z0-9.-]+/g, "-");
+  const password = "Hollow-cobbler-19-seabreeze";
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({
-    data: { email, passwordHash, fullName: "Test Admin", role: "ADMIN" },
+    data: { email, username, passwordHash, fullName: "Test Admin", role: "ADMIN" },
   });
   const agent = request.agent(app);
-  const res = await agent.post("/api/auth/staff/login").send({ email, password });
+  const res = await agent.post("/api/auth/staff/login").send({ username, password });
   if (res.status !== 200) throw new Error(`admin login failed: ${res.status}`);
   return { agent, userId: user.id };
 }

@@ -104,6 +104,25 @@ async function assertPaymentAccountComplete(input: UpdateSettingsInput): Promise
   }
 }
 
+/**
+ * เปิด "จดทะเบียน VAT" ได้ต่อเมื่อมีเลขประจำตัวผู้เสียภาษี 13 หลักและระบุสถานประกอบการแล้ว
+ *
+ * ใบกำกับภาษีที่ไม่มีเลขผู้เสียภาษีหรือไม่ระบุสำนักงานใหญ่/สาขา เป็นใบกำกับภาษีที่ไม่สมบูรณ์ ผู้ซื้อ
+ * ใช้เครดิตภาษีซื้อไม่ได้ และเป็นความผิดของผู้ออก — กันไว้ตั้งแต่ตอนเปิดใช้ ดีกว่าไปพังตอนออกใบจริง
+ */
+async function assertVatRegistrationComplete(input: UpdateSettingsInput): Promise<void> {
+  if (input.companyVatRegistered !== true) return;
+  const current = await getSettingsMap();
+  const taxId = (input.companyTaxId ?? current.companyTaxId ?? "").replace(/\D/g, "");
+  const branch = (input.companyBranch ?? current.companyBranch ?? "").trim();
+  if (taxId.length !== 13) {
+    throw new SettingsError("ต้องกรอกเลขประจำตัวผู้เสียภาษี 13 หลักก่อน จึงจะเปิดการออกใบกำกับภาษีได้");
+  }
+  if (branch === "") {
+    throw new SettingsError("ต้องระบุสถานประกอบการ (สำนักงานใหญ่ หรือ สาขาที่ ...) ก่อนเปิดการออกใบกำกับภาษี");
+  }
+}
+
 export async function updateSettings(
   rawInput: UpdateSettingsInput,
   actor: { id: string; role: Role },
@@ -113,6 +132,7 @@ export async function updateSettings(
   const input = await withoutUnchangedOwnerOnlyKeys(rawInput, actor.role);
   await assertOverheadWithinTotal(input);
   await assertPaymentAccountComplete(input);
+  await assertVatRegistrationComplete(input);
 
   const entries = Object.entries(input).filter(
     (entry): entry is [string, string | number | null] => entry[1] !== undefined,
@@ -122,7 +142,7 @@ export async function updateSettings(
     entries.map(([key, value]) =>
       prisma.setting.upsert({
         where: { key },
-        // null (เฉพาะ overheadPercent) = ล้างค่า เก็บเป็นสตริงว่างซึ่ง getDefaultRates อ่านเป็น "ยังไม่ได้แยก"
+        // null (overheadPercent / retentionPercent) = ล้างค่า เก็บเป็นสตริงว่างซึ่ง getDefaultRates อ่านเป็น "ยังไม่ได้แยก"
         update: { value: value === null ? "" : String(value), updatedById: actorId },
         create: { key, value: value === null ? "" : String(value), updatedById: actorId },
       }),

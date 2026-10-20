@@ -20,6 +20,7 @@ import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import { badgeClass, type BadgeColor } from "../lib/status-badge";
 import { Button } from "./Button";
+import { Tooltip } from "./Tooltip";
 
 const KIND_LABEL: Record<AttachmentKind, string> = {
   DESIGN: "แบบ",
@@ -77,7 +78,7 @@ export function QuoteAttachmentsPanel({
     if (next === "CUSTOMER") {
       const ok = await confirm(
         `เปิดให้ลูกค้าเห็นและดาวน์โหลดไฟล์ “${a.fileName}” ใช่หรือไม่? ตรวจให้แน่ใจว่าไฟล์นี้ไม่มีข้อมูลต้นทุน/กำไรภายใน`,
-        { confirmLabel: "ให้ลูกค้าเห็น" },
+        { confirmLabel: "ให้ลูกค้าเห็น", variant: "brand" },
       );
       if (!ok) return;
     }
@@ -147,12 +148,18 @@ export function QuoteAttachmentsPanel({
                 <Button variant="ghost" size="sm" onClick={() => handleDownload(a)}>
                   <Download size={14} /> โหลด
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => toggleVisibility(a)}>
+                <Button
+                  variant={a.visibility === "CUSTOMER" ? "dangerQuiet" : "brand"}
+                  size="sm"
+                  onClick={() => toggleVisibility(a)}
+                >
                   {a.visibility === "CUSTOMER" ? "ซ่อนจากลูกค้า" : "ให้ลูกค้าเห็น"}
                 </Button>
-                <Button variant="dangerQuiet" size="sm" onClick={() => handleDelete(a)}>
-                  <Trash2 size={14} />
-                </Button>
+                <Tooltip label="ลบไฟล์แนบ" side="top" align="end">
+                  <Button variant="dangerQuiet" size="sm" aria-label={`ลบไฟล์แนบ ${a.fileName}`} onClick={() => handleDelete(a)}>
+                    <Trash2 size={14} />
+                  </Button>
+                </Tooltip>
               </div>
             </li>
           ))}

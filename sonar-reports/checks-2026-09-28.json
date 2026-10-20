@@ -1,0 +1,80 @@
+{
+ "ranAt": "2026-09-28T15:47:20.776Z",
+ "node": "v22.19.0",
+ "platform": "Windows_NT 10.0.26200",
+ "results": [
+  {
+   "id": "shared-build",
+   "label": "build shared-types (CJS + ESM)",
+   "command": "(packages/shared-types) npm run build",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 4
+  },
+  {
+   "id": "tsc-server",
+   "label": "ตรวจ type — server",
+   "command": "(server) npx tsc --noEmit -p .",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 9
+  },
+  {
+   "id": "tsc-staff",
+   "label": "ตรวจ type — staff-app",
+   "command": "(staff-app) npx tsc --noEmit -p tsconfig.app.json",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 10
+  },
+  {
+   "id": "tsc-client",
+   "label": "ตรวจ type — client-app",
+   "command": "(client-app) npx tsc --noEmit -p tsconfig.app.json",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 4
+  },
+  {
+   "id": "tsc-shared",
+   "label": "ตรวจ type — shared-types",
+   "command": "(packages/shared-types) npx tsc --noEmit -p tsconfig.json",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 2
+  },
+  {
+   "id": "build-staff",
+   "label": "build staff-app (tsc -b + vite build)",
+   "command": "(staff-app) npm run build",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 15
+  },
+  {
+   "id": "build-client",
+   "label": "build client-app (tsc -b + vite build)",
+   "command": "(client-app) npm run build",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 8
+  },
+  {
+   "id": "jest",
+   "label": "เทสต์อัตโนมัติ — server (Jest)",
+   "command": "(server) npx jest --json --outputFile=\"<tmp>.json\"",
+   "exitCode": 0,
+   "passed": true,
+   "seconds": 395,
+   "detail": {
+    "suites": 78,
+    "suitesPassed": 78,
+    "tests": 822,
+    "passed": 822,
+    "failed": 0,
+    "pending": 0
+   },
+   "failures": []
+  }
+ ]
+}

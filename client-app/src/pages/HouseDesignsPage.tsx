@@ -1,14 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { HouseDesignDto } from "@systemboq/shared-types";
 
 import { CtaBanner } from "../components/CtaBanner";
 import { HouseSpecChips } from "../components/HouseSpecChips";
+import { Pagination } from "../components/Pagination";
 import { ImagePeek } from "../components/ImagePeek";
 import { Reveal } from "../components/Reveal";
 import { cardGridClass } from "../lib/card-grid";
 import { listHouseDesigns } from "../lib/public-api";
+import { CardGridSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
+import { useUrlPage } from "../lib/use-url-page";
+
+// 12 การ์ด = ลงตัวทั้งตะแกรง 2 และ 3 คอลัมน์ ไม่เหลือช่องว่างในแถวสุดท้าย (เท่าหน้าผลงาน)
+const PAGE_SIZE = 12;
 
 function HouseDesignCard({ d }: Readonly<{ d: HouseDesignDto }>) {
   // ภาพถ่ายจริงทั้งชุด (ภายนอก + ภายใน) — ไม่รวมแปลนบ้าน เพราะเป็นภาพเชิงเทคนิค คนละเรื่องกับ
@@ -46,22 +53,30 @@ function HouseDesignCard({ d }: Readonly<{ d: HouseDesignDto }>) {
 
       {/* ข้อมูล + action ขอราคา (ไอเดีย B) */}
       <div className="flex flex-1 flex-col p-4">
-        <Link
-          to={detailHref}
-          className="flex min-h-11 items-center font-medium text-slate-800 transition-colors hover:text-brand lg:block lg:min-h-0"
-        >
-          {d.name}
-        </Link>
-        {d.description && (
-          <p className="mt-1 line-clamp-2 text-sm text-slate-500">{d.description}</p>
-        )}
+        {/* ก้อนเนื้อหาเป็นตัวดูดพื้นที่ว่างที่เหลือของการ์ด (flex-1) ไม่ใช่ให้ปุ่มดันตัวเองด้วย
+            mt-auto — การ์ดในแถวเดียวกันสูงเท่ากันตามใบที่เนื้อหายาวสุด ใบนั้นจึงไม่เหลือที่ว่าง
+            ให้ mt-auto ดันเลย ช่องไฟเหนือปุ่มกลายเป็น 0 ไปชนแถวชิปพอดี ส่วนใบที่เนื้อหาสั้น
+            ได้ 24px — ต่างกันคนละเรื่องทั้งที่อยู่ข้างกัน · แบบนี้ทุกใบได้ช่องไฟเท่ากันเสมอ
+            และยังเรียงปุ่มชิดขอบล่างตรงแนวกันเหมือนเดิม */}
+        <div className="flex-1">
+          <Link
+            to={detailHref}
+            className="flex min-h-11 items-center font-medium text-slate-800 transition-colors hover:text-brand lg:block lg:min-h-0"
+          >
+            {d.name}
+          </Link>
+          {d.description && (
+            <p className="mt-1 line-clamp-2 text-sm text-slate-500">{d.description}</p>
+          )}
 
-        <HouseSpecChips d={d} />
+          <HouseSpecChips d={d} />
+        </div>
 
-        {/* ดันปุ่มลงล่างสุดของการ์ดเสมอ (การ์ดสูงเท่ากันแม้เนื้อหาไม่เท่า) */}
+        {/* ช่องไฟเหนือปุ่ม (20px) จงใจให้มากกว่าระยะขอบล่างการ์ด (p-4 = 16px) เล็กน้อย
+            ปุ่มจะได้อ่านเป็นของที่อยู่ท้ายการ์ด ไม่ใช่ของที่ห้อยต่อจากแถวชิป */}
         <Link
           to={`/contact?houseDesignId=${d.id}`}
-          className="mt-4 inline-flex min-h-11 items-center justify-center rounded-md border border-brand px-3 py-2 text-sm font-medium text-brand transition-colors hover:bg-brand hover:text-white sm:mt-auto"
+          className="mt-5 inline-flex min-h-11 items-center justify-center rounded-md border border-brand px-3 py-2 text-sm font-medium text-brand transition-colors hover:bg-brand hover:text-white"
         >
           ขอประเมินราคาแบบนี้
         </Link>
@@ -71,14 +86,28 @@ function HouseDesignCard({ d }: Readonly<{ d: HouseDesignDto }>) {
 }
 
 export function HouseDesignsPage() {
+  usePageMeta(
+    "แบบบ้าน",
+    "รวมแบบบ้านพร้อมจำนวนชั้น ห้องนอน ห้องน้ำ และพื้นที่ใช้สอย ดูภาพภายนอก ภายใน และแปลน ปรับแบบได้ตามต้องการ และขอประเมินราคาก่อสร้างฟรี",
+  );
   const [designs, setDesigns] = useState<HouseDesignDto[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const { page, setPage, topRef } = useUrlPage();
 
   useEffect(() => {
     listHouseDesigns()
       .then((res) => setDesigns(res.houseDesigns))
       .finally(() => setLoading(false));
   }, []);
+
+  const pageCount = Math.max(1, Math.ceil(designs.length / PAGE_SIZE));
+  // ลิงก์เก่า/แบบบ้านถูกถอดจนหน้านั้นไม่มีแล้ว → แสดงหน้าสุดท้ายแทนตะแกรงว่าง
+  const safePage = Math.min(page, pageCount);
+  const pageItems = useMemo(
+    () => designs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [designs, safePage],
+  );
 
   return (
     // สูงเต็มจอ + คอลัมน์ ดัน CtaBanner/footer ลงล่างสุดเมื่อแบบบ้านมีไม่มาก
@@ -91,18 +120,19 @@ export function HouseDesignsPage() {
           </p>
         </Reveal>
 
-        {loading && <p className="text-slate-400">กำลังโหลด...</p>}
+        {loading && <CardGridSkeleton count={6} label="กำลังโหลดแบบบ้าน..." />}
         {!loading && designs.length === 0 && (
           <p className="text-slate-400">ยังไม่มีแบบบ้านให้เลือกชม</p>
         )}
 
-        <div className={`grid gap-6 ${cardGridClass(designs.length)}`}>
-          {designs.map((d, i) => (
+        <div ref={topRef} className={`grid gap-6 ${cardGridClass(pageItems.length)}`}>
+          {pageItems.map((d, i) => (
             <Reveal key={d.id} className="h-full" delay={i * 90}>
               <HouseDesignCard d={d} />
             </Reveal>
           ))}
         </div>
+        <Pagination page={safePage} pageCount={pageCount} onChange={(n) => setPage(n)} className="mt-10" />
       </div>
 
       {/* ต่อจากตะแกรง — ตอบคำถามที่คนดูแบบบ้านถามจริงก่อนตัดสินใจ ("ต่อไปต้องทำยังไง"

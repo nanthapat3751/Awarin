@@ -27,7 +27,7 @@ describe("delete-account (PDPA anonymization)", () => {
 
     const res = await customer.agent
       .post("/api/auth/delete-account")
-      .send({ currentPassword: "test-customer-battery-staple" });
+      .send({ currentPassword: "Amber-thicket-71-woodgrain" });
     expect(res.status).toBe(204);
 
     // session ตายทันที
@@ -49,7 +49,7 @@ describe("delete-account (PDPA anonymization)", () => {
     // ข้อมูลล็อกอินเดิมใช้ไม่ได้อีกต่อไปเลย (บัญชีถูกปิดใช้งาน)
     const loginAttempt = await request(app)
       .post("/api/auth/customer/login")
-      .send({ email: originalEmail, password: "test-customer-battery-staple" });
+      .send({ email: originalEmail, password: "Amber-thicket-71-woodgrain" });
     expect(loginAttempt.status).toBe(401);
 
     createdUserIds.push(anonymized.id);
@@ -61,7 +61,7 @@ describe("delete-account (PDPA anonymization)", () => {
 
     const res = await owner.agent
       .post("/api/auth/delete-account")
-      .send({ currentPassword: "test-owner-battery-staple" });
+      .send({ currentPassword: "Quiet-lantern-42-riverbank" });
     expect(res.status).toBe(403);
   });
 

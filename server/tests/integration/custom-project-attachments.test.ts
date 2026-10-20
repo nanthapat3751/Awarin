@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // Puppeteer เรนเดอร์ PDF ไม่ได้ใต้ jest (ESM/Chromium sandbox) — mock ไว้เหมือน quotes.test.ts
 jest.mock("../../src/lib/pdf/contract-pdf", () => ({
@@ -130,6 +131,10 @@ describe("custom projects + quote attachments", () => {
     const internalId = internalUp.body.attachment.id as string;
 
     // ส่งไม่ได้ถ้ายังไม่มีไฟล์ที่ "ให้ลูกค้าเห็น"
+    // ขออนุมัติก็ไม่ได้เช่นกัน — กันไว้ตั้งแต่ต้นทาง ไม่งั้นอนุมัติเสร็จแล้วค่อยเจอว่าส่งไม่ได้
+    // และตอนนั้นไฟล์ที่ลูกค้าเห็นก็ถูกล็อกไปแล้ว
+    const blockedSubmit = await owner.agent.post(`/api/projects/${projectId}/quotes/${quoteId}/approval/submit`);
+    expect(blockedSubmit.status).toBe(409);
     const blockedSend = await owner.agent
       .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
       .send({ toStatus: "SENT" });
@@ -148,9 +153,7 @@ describe("custom projects + quote attachments", () => {
     const customerAttId = customerUp.body.attachment.id as string;
 
     // ตอนนี้ส่งได้แล้ว
-    const send = await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    const send = await sendQuote(owner.agent, projectId, quoteId);
     expect(send.status).toBe(200);
 
     // พนักงานเห็นไฟล์แนบทั้งสอง
@@ -222,6 +225,180 @@ describe("custom projects + quote attachments", () => {
     expect(otherAtt.status).toBe(404);
   });
 
+  it("holds the attachment notice until the quote is sent (customers cannot open drafts)", async () => {
+    const customer = await createAndLoginCustomer("test-draft-notice-customer");
+    const customerUser = await prisma.user.findUniqueOrThrow({ where: { email: customer.email } });
+    createdUserIds.push(customerUser.id);
+
+    const projectId = await createCustomProject("บ้าน CUSTOM แจ้งเตือน", customerUser.id);
+    await owner.agent.post(`/api/projects/${projectId}/custom-price`).send({ subtotalBeforeVat: 900_000 });
+    const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+    const quoteId = quoteRes.body.quote.id as string;
+    const attBase = `/api/projects/${projectId}/quotes/${quoteId}/attachments`;
+
+    const draftUp = await owner.agent
+      .post(attBase)
+      .field("kind", "QUOTE")
+      .field("visibility", "CUSTOMER")
+      .attach("file", Buffer.from("%PDF draft"), {
+        filename: "ใบเสนอราคา-ร่าง.pdf",
+        contentType: "application/pdf",
+      });
+    expect(draftUp.status).toBe(201);
+
+    // แนบตอนใบยังเป็นร่าง = ยังไม่แจ้ง — ลูกค้ากดแล้วจะเจอหน้า 404
+    const draftNotices = await prisma.notification.count({ where: { userId: customerUser.id } });
+    expect(draftNotices).toBe(0);
+
+    // ยืนยันว่าเปิดไม่ได้จริง
+    const draftQuote = await customer.agent.get(`/api/my/quotes/${quoteId}`);
+    expect(draftQuote.status).toBe(404);
+
+    await sendQuote(owner.agent, projectId, quoteId);
+
+    // ตอนส่งแจ้งครั้งเดียว ไฟล์ที่แนบตอนร่างไปถึงมือพร้อมกัน
+    const afterSend = await prisma.notification.findMany({ where: { userId: customerUser.id } });
+    expect(afterSend).toHaveLength(1);
+    expect(afterSend[0].link).toBe(`/my/quotes/${quoteId}`);
+
+    // แนบเพิ่มหลังส่งแล้ว = ของใหม่ที่ลูกค้าเปิดได้จริง ต้องแจ้ง
+    const sentUp = await owner.agent
+      .post(attBase)
+      .field("kind", "OTHER")
+      .field("visibility", "CUSTOMER")
+      .attach("file", Buffer.from("%PDF extra"), {
+        filename: "แบบเพิ่มเติม.pdf",
+        contentType: "application/pdf",
+      });
+    expect(sentUp.status).toBe(201);
+
+    const afterAttach = await prisma.notification.findMany({
+      where: { userId: customerUser.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(afterAttach).toHaveLength(2);
+    expect(afterAttach[1].message).toContain("แบบเพิ่มเติม.pdf");
+  });
+
+  it("tells the customer when an internal file is opened up to them, and only when it really changed", async () => {
+    const customer = await createAndLoginCustomer("test-flip-notice-customer");
+    const customerUser = await prisma.user.findUniqueOrThrow({ where: { email: customer.email } });
+    createdUserIds.push(customerUser.id);
+
+    const projectId = await createCustomProject("บ้าน CUSTOM พลิกสิทธิ์ไฟล์", customerUser.id);
+    await owner.agent.post(`/api/projects/${projectId}/custom-price`).send({ subtotalBeforeVat: 750_000 });
+    const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+    const quoteId = quoteRes.body.quote.id as string;
+    const attBase = `/api/projects/${projectId}/quotes/${quoteId}/attachments`;
+
+    // ไฟล์ภายในสองตัว: ตัวแรกใช้ทดสอบตอนใบยังเป็นร่าง ตัวที่สองใช้ตอนส่งแล้ว
+    const uploadInternal = async (filename: string) => {
+      const res = await owner.agent
+        .post(attBase)
+        .field("kind", "DESIGN")
+        .field("visibility", "INTERNAL")
+        .attach("file", Buffer.from("%PDF internal"), { filename, contentType: "application/pdf" });
+      expect(res.status).toBe(201);
+      return res.body.attachment.id as string;
+    };
+    const draftFlipId = await uploadInternal("แบบภายใน-ร่าง.pdf");
+    const sentFlipId = await uploadInternal("แบบภายใน-หลังส่ง.pdf");
+
+    // พลิกตอนใบยังเป็นร่าง = เงียบ (ลูกค้าเปิดใบร่างไม่ได้) และต้องคงป้าย "แบบ" ไว้
+    const draftFlip = await owner.agent.patch(`${attBase}/${draftFlipId}`).send({ visibility: "CUSTOMER" });
+    expect(draftFlip.status).toBe(200);
+    expect(draftFlip.body.attachment.visibility).toBe("CUSTOMER");
+    expect(draftFlip.body.attachment.kind).toBe("DESIGN");
+    expect(await prisma.notification.count({ where: { userId: customerUser.id } })).toBe(0);
+
+    await sendQuote(owner.agent, projectId, quoteId);
+    const countAfterSend = await prisma.notification.count({ where: { userId: customerUser.id } });
+    expect(countAfterSend).toBe(1); // แจ้งว่าใบเสนอราคาพร้อมให้ดู
+
+    // พลิกบนใบที่ส่งแล้ว = ลูกค้าได้เอกสารเพิ่มจริง ต้องแจ้ง
+    const sentFlip = await owner.agent.patch(`${attBase}/${sentFlipId}`).send({ visibility: "CUSTOMER" });
+    expect(sentFlip.status).toBe(200);
+    expect(sentFlip.body.attachment.kind).toBe("DESIGN");
+    const afterFlip = await prisma.notification.findMany({
+      where: { userId: customerUser.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(afterFlip).toHaveLength(2);
+    expect(afterFlip[1].message).toContain("แบบภายใน-หลังส่ง.pdf");
+    expect(afterFlip[1].link).toBe(`/my/quotes/${quoteId}`);
+
+    // ลูกค้าเห็นไฟล์ที่เพิ่งเปิดให้จริง
+    const myQuote = await customer.agent.get(`/api/my/quotes/${quoteId}`);
+    expect(myQuote.body.quote.attachments.map((a: { id: string }) => a.id)).toContain(sentFlipId);
+
+    // ส่งค่าเดิมซ้ำ / แก้ช่องอื่น = ไม่มีอะไรเปลี่ยน ต้องไม่แจ้งซ้ำ
+    await owner.agent.patch(`${attBase}/${sentFlipId}`).send({ visibility: "CUSTOMER" });
+    await owner.agent.patch(`${attBase}/${sentFlipId}`).send({ kind: "QUOTE" });
+    expect(await prisma.notification.count({ where: { userId: customerUser.id } })).toBe(2);
+
+    // พลิกกลับเป็นไฟล์ภายใน = ไม่แจ้ง (ไฟล์แค่หายไปจากหน้าลูกค้า)
+    const back = await owner.agent.patch(`${attBase}/${sentFlipId}`).send({ visibility: "INTERNAL" });
+    expect(back.status).toBe(200);
+    expect(back.body.attachment.kind).toBe("QUOTE"); // ค่าที่เพิ่งตั้งไว้ต้องไม่ถูกรีเซ็ต
+    expect(await prisma.notification.count({ where: { userId: customerUser.id } })).toBe(2);
+
+    // ค่าที่ไม่ใช่ตัวเลือกที่มีอยู่ต้องตอบ 400 ไม่ใช่เงียบ ๆ เปลี่ยนสถานะไฟล์ให้
+    const bad = await owner.agent.patch(`${attBase}/${sentFlipId}`).send({ visibility: "PUBLIC" });
+    expect(bad.status).toBe(400);
+    const untouched = await prisma.quoteAttachment.findUniqueOrThrow({ where: { id: sentFlipId } });
+    expect(untouched.visibility).toBe("INTERNAL");
+    expect(untouched.kind).toBe("QUOTE");
+  });
+
+  it("stays quiet about files added to a quote whose project is in the trash", async () => {
+    const customer = await createAndLoginCustomer("test-trash-notice-customer");
+    const customerUser = await prisma.user.findUniqueOrThrow({ where: { email: customer.email } });
+    createdUserIds.push(customerUser.id);
+
+    const projectId = await createCustomProject("บ้าน CUSTOM ถังขยะ", customerUser.id);
+    await owner.agent.post(`/api/projects/${projectId}/custom-price`).send({ subtotalBeforeVat: 600_000 });
+    const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+    const quoteId = quoteRes.body.quote.id as string;
+    const attBase = `/api/projects/${projectId}/quotes/${quoteId}/attachments`;
+
+    const first = await owner.agent
+      .post(attBase)
+      .field("kind", "QUOTE")
+      .field("visibility", "CUSTOMER")
+      .attach("file", Buffer.from("%PDF trash"), {
+        filename: "ใบเสนอราคา-ถังขยะ.pdf",
+        contentType: "application/pdf",
+      });
+    expect(first.status).toBe(201);
+    await sendQuote(owner.agent, projectId, quoteId);
+
+    const before = await prisma.notification.count({ where: { userId: customerUser.id } });
+
+    // ทาง endpoint ลบโครงการที่มีใบเสนอราคาแล้วไม่ได้ (ตอบ 409 ให้ไปใช้การยกเลิกแทน) สถานะนี้จึง
+    // เกิดจากการใช้งานปกติไม่ได้ — ตั้ง deletedAt ตรง ๆ เพื่อกันชั้นนี้ไว้เหมือนที่ myQuotes.service กันไว้เอง
+    const blocked = await owner.agent.delete(`/api/projects/${projectId}`);
+    expect(blocked.status).toBe(409);
+    await prisma.project.update({ where: { id: projectId }, data: { deletedAt: new Date() } });
+
+    // โครงการในถังขยะ: ลูกค้าเปิดใบเสนอราคาไม่ได้แล้ว การแจ้งจึงต้องไม่เกิด
+    const myQuote = await customer.agent.get(`/api/my/quotes/${quoteId}`);
+    expect(myQuote.status).toBe(404);
+
+    const afterTrash = await owner.agent
+      .post(attBase)
+      .field("kind", "OTHER")
+      .field("visibility", "CUSTOMER")
+      .attach("file", Buffer.from("%PDF trash 2"), {
+        filename: "เอกสารหลังลบโครงการ.pdf",
+        contentType: "application/pdf",
+      });
+    expect(afterTrash.status).toBe(201);
+    expect(await prisma.notification.count({ where: { userId: customerUser.id } })).toBe(before);
+
+    // คืนโครงการออกจากถังขยะ ให้ afterAll เก็บกวาดตามทางปกติ
+    await prisma.project.update({ where: { id: projectId }, data: { deletedAt: null } });
+  });
+
   it("serves attachments inline for preview, but only for file types a browser can render", async () => {
     const customer = await createAndLoginCustomer("test-preview-customer");
     const customerUser = await prisma.user.findUniqueOrThrow({ where: { email: customer.email } });
@@ -274,9 +451,7 @@ describe("custom projects + quote attachments", () => {
       });
     const internalId = internalUp.body.attachment.id as string;
 
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
 
     // ลูกค้าเปิดดู PDF ได้ในเบราว์เซอร์ (inline) — ไม่ถูกบังคับให้บันทึกลงเครื่องก่อน
     const preview = await customer.agent.get(

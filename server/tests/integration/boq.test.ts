@@ -365,4 +365,29 @@ describe("boq module", () => {
 
     await prisma.user.deleteMany({ where: { email: customer.email } });
   });
+
+  // ใบเสนอราคาพิมพ์ยอดรายบรรทัดกับ "รวมมูลค่างานก่อสร้าง" ไว้หน้าเดียวกัน ลูกค้าบวกคอลัมน์แล้วต้องตรง
+  it("ต้นทุนตรงที่บันทึกไว้ = ผลบวกยอดรายบรรทัด แม้ทุกบรรทัดจะมีเศษที่ต้องปัด", async () => {
+    const projectId = await createProject("BOQ โครงการเศษสตางค์");
+
+    // ปริมาณเก็บ 3 ตำแหน่ง ราคาเก็บ 2 ตำแหน่ง → 3.125 × 12.34 = 38.5625 ปัดเหลือ 38.56
+    // ทิ้งเศษบรรทัดละ 0.0025 บาท พอรวม 3 บรรทัดจะต่างจากการบวกค่าดิบแล้วค่อยปัดอยู่ 0.01
+    for (let i = 0; i < 3; i++) {
+      const res = await owner.agent.post(`/api/projects/${projectId}/boq/items`).send({
+        categoryId: itemCategoryId,
+        name: `รายการเศษสตางค์ ${i + 1}`,
+        unit: "ตร.ม.",
+        quantity: 3.125,
+        materialUnitPrice: 12.34,
+        laborUnitPrice: 0,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.item.lineTotal).toBe("38.56");
+    }
+
+    const boq = await owner.agent.get(`/api/projects/${projectId}/boq`);
+    const sumOfLines = boq.body.items.reduce((s: number, i: { lineTotal: string }) => s + Number(i.lineTotal), 0);
+    expect(sumOfLines).toBe(115.68);
+    expect(Number(boq.body.version.directCost)).toBe(sumOfLines);
+  });
 });

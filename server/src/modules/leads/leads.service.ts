@@ -1,8 +1,10 @@
 import type { LeadStatus, Prisma } from "@prisma/client";
+import { isAreaRange, type CustomerLeadDto, type LeadListPageDto } from "@systemboq/shared-types";
 
 import { writeAuditLog } from "../../lib/audit-log";
 import { createNotification, notifyStaff } from "../../lib/notifications";
 import { prisma } from "../../lib/prisma";
+import { clampPage, LIST_PAGE_SIZE } from "../../lib/list-query";
 import { createProject } from "../projects/projects.service";
 import type { CreateLeadInput } from "./leads.schemas";
 
@@ -44,6 +46,7 @@ export async function createLead(input: CreateLeadInput, customerId: string | nu
       message: input.message,
       siteAddress: input.siteAddress ?? null,
       areaSqm: input.areaSqm ?? null,
+      areaRange: input.areaSqm == null ? (input.areaRange ?? null) : null,
       desiredStartDate: input.desiredStartDate ?? null,
       attachments: input.attachments as Prisma.InputJsonValue | undefined,
       status: "NEW",
@@ -73,11 +76,125 @@ export async function listLeads(status?: LeadStatus) {
   return leads.map(({ project, ...lead }) => ({ ...lead, projectId: project?.id ?? null }));
 }
 
-export async function listMyLeads(customerId: string) {
-  return prisma.lead.findMany({
+const LEAD_STATUSES: LeadStatus[] = ["NEW", "CONTACTED", "QUOTED", "CLOSED", "REJECTED"];
+
+/**
+ * หน้ารายการคำขอแบบแบ่งหน้าที่เซิร์ฟเวอร์ (หน้าละ 15) — ค้นหาชื่อ/เบอร์/อีเมล/บริการ/ข้อความ
+ * + สถานะ + ช่วงวันที่ส่งคำขอ · counts (ตัวเลขบนปุ่มสถานะ) นับใต้คำค้น+ช่วงเวลาเดียวกัน
+ */
+export async function listLeadsPage(query: {
+  q?: string;
+  status?: string;
+  period: { gte: Date; lt: Date } | null;
+  page: unknown;
+}): Promise<LeadListPageDto> {
+  const status = LEAD_STATUSES.includes(query.status as LeadStatus) ? (query.status as LeadStatus) : null;
+  const text = (field: "name" | "phone" | "email" | "serviceType" | "message") => ({
+    [field]: { contains: query.q, mode: "insensitive" as const },
+  });
+  const base: Prisma.LeadWhereInput = {
+    deletedAt: null,
+    ...(query.period ? { createdAt: query.period } : {}),
+    ...(query.q ? { OR: [text("name"), text("phone"), text("email"), text("serviceType"), text("message")] } : {}),
+  };
+  const where: Prisma.LeadWhereInput = status ? { ...base, status } : base;
+
+  const [total, grouped] = await Promise.all([
+    prisma.lead.count({ where }),
+    prisma.lead.groupBy({ by: ["status"], where: base, _count: { _all: true } }),
+  ]);
+  const counts = Object.fromEntries([["ALL", 0], ...LEAD_STATUSES.map((s) => [s, 0])]) as LeadListPageDto["counts"];
+  for (const g of grouped) {
+    counts[g.status] = g._count._all;
+    counts.ALL += g._count._all;
+  }
+
+  const page = clampPage(query.page, total);
+  const rows = await prisma.lead.findMany({
+    where,
+    include: { project: { select: { id: true } } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: (page - 1) * LIST_PAGE_SIZE,
+    take: LIST_PAGE_SIZE,
+  });
+  const leads = rows.map(({ project, ...lead }) => ({ ...lead, projectId: project?.id ?? null }));
+  return {
+    leads: leads as unknown as LeadListPageDto["leads"],
+    page,
+    pageSize: LIST_PAGE_SIZE,
+    total,
+    counts,
+  };
+}
+
+// สิ่งที่หน้า "คำขอของฉัน" ต้องดึงมาพร้อมคำขอ — แบบบ้าน (เฉพาะที่ยังเปิดดูได้) + ทางไปเอกสารของโครงการ
+// ใบเสนอราคา/สัญญานับเฉพาะเมื่อโครงการยังเป็นของลูกค้าคนนี้และไม่อยู่ในถังขยะ (เงื่อนไขเดียวกับหน้าใบเสนอราคา/สัญญา)
+const CUSTOMER_LEAD_INCLUDE = {
+  houseDesign: { select: { id: true, name: true, published: true, deletedAt: true } },
+  project: {
+    select: {
+      customerId: true,
+      deletedAt: true,
+      quotes: {
+        where: { status: { not: "DRAFT" } },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { id: true, quoteNo: true, revisionNo: true, status: true },
+      },
+      _count: { select: { contracts: true } },
+    },
+  },
+} satisfies Prisma.LeadInclude;
+
+type CustomerLeadRow = Prisma.LeadGetPayload<{ include: typeof CUSTOMER_LEAD_INCLUDE }>;
+
+function toCustomerLeadDto(lead: CustomerLeadRow, customerId: string): CustomerLeadDto {
+  const design = lead.houseDesign;
+  const project = lead.project?.customerId === customerId && !lead.project.deletedAt ? lead.project : null;
+  const attachments = Array.isArray(lead.attachments)
+    ? lead.attachments.filter((a): a is string => typeof a === "string" && /^https?:\/\//i.test(a))
+    : [];
+  return {
+    id: lead.id,
+    serviceType: lead.serviceType,
+    message: lead.message,
+    name: lead.name,
+    phone: lead.phone,
+    email: lead.email,
+    siteAddress: lead.siteAddress,
+    areaSqm: lead.areaSqm?.toString() ?? null,
+    areaRange: isAreaRange(lead.areaRange) ? lead.areaRange : null,
+    desiredStartDate: lead.desiredStartDate?.toISOString().slice(0, 10) ?? null,
+    attachments,
+    houseDesign: design?.published && !design.deletedAt ? { id: design.id, name: design.name } : null,
+    status: lead.status,
+    reply: lead.reply,
+    repliedAt: lead.repliedAt?.toISOString() ?? null,
+    createdAt: lead.createdAt.toISOString(),
+    latestQuote: project?.quotes[0] ?? null,
+    hasContract: (project?._count.contracts ?? 0) > 0,
+  };
+}
+
+export async function listMyLeads(customerId: string): Promise<CustomerLeadDto[]> {
+  const leads = await prisma.lead.findMany({
     where: { customerId, deletedAt: null },
+    include: CUSTOMER_LEAD_INCLUDE,
     orderBy: { createdAt: "desc" },
   });
+  return leads.map((lead) => toCustomerLeadDto(lead, customerId));
+}
+
+// ของคนอื่น / อยู่ในถังขยะ / ไม่มีจริง → 404 ข้อความเดียวกันทุกกรณี เดาไม่ได้ว่า id ไหนมีอยู่
+export async function getMyLead(customerId: string, id: string): Promise<CustomerLeadDto> {
+  const lead = await prisma.lead.findFirst({
+    where: { id, customerId, deletedAt: null },
+    include: CUSTOMER_LEAD_INCLUDE,
+  });
+  if (!lead) {
+    throw new LeadError("ไม่พบคำขอที่ระบุ", 404);
+  }
+  return toCustomerLeadDto(lead, customerId);
 }
 
 export async function updateLeadStatus(id: string, status: LeadStatus, actorId: string) {
@@ -127,7 +244,7 @@ export async function replyToLead(id: string, reply: string, actorId: string) {
     await createNotification({
       userId: lead.customerId,
       message: `ทีมงานตอบกลับคำขอของคุณ (${lead.serviceType}) แล้ว`,
-      link: "/my/requests",
+      link: `/my/requests/${lead.id}`,
     });
   }
 

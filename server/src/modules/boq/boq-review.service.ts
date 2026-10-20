@@ -13,6 +13,7 @@ import { calculateLineAmounts, deriveMaterialUnitPrice, round2 } from "../../lib
 import { prisma } from "../../lib/prisma";
 import {
   BoqError,
+  ITEM_INCLUDE,
   assertNotCustom,
   getLatestVersion,
   getOrCreateEditableVersion,
@@ -39,7 +40,7 @@ function loadItems(where: { projectVersionId: string; id?: { in: string[] }; sou
   return prisma.boqItem.findMany({
     where,
     orderBy: BOQ_ITEM_ORDER,
-    include: { components: { orderBy: { sortOrder: "asc" } } },
+    include: ITEM_INCLUDE,
   });
 }
 
@@ -155,6 +156,24 @@ function differs(item: ItemWithComponents, price: CatalogPrice): boolean {
 function isDrifted(item: ItemWithComponents, price: CatalogPrice): boolean {
   if (!differs(item, price) || !price.changedAt) return false;
   return item.pricedAt == null || price.changedAt > item.pricedAt;
+}
+
+/**
+ * หลังเซ็นสัญญา: บรรทัดของเวอร์ชันตามสัญญาที่ราคาในคลังเปลี่ยน "หลังเซ็น" (และหลังตั้งราคาบรรทัดนั้น —
+ * บรรทัดที่ตั้งราคาใหม่ตอนออกใบงานเพิ่ม-ลดนับจากตอนนั้น) · ราคาที่เปลี่ยนก่อนเซ็นไม่นับ เพราะตกลงราคากับ
+ * ลูกค้าทั้งที่รู้แล้ว (แถบเตือนก่อนเซ็นมีอยู่แล้ว) · ใช้ที่แท็บต้นทุนจริง ไม่แก้ BOQ ใด ๆ
+ */
+export async function signedPriceDriftLines(versionId: string, signedAt: Date) {
+  const items = await loadItems({ projectVersionId: versionId });
+  const catalog = await loadCatalog(items);
+  const lines: { item: ItemWithComponents; price: CatalogPrice }[] = [];
+  for (const item of items) {
+    const price = catalogPriceOf(item, catalog);
+    if (!price?.changedAt || !differs(item, price)) continue;
+    const since = item.pricedAt && item.pricedAt > signedAt ? item.pricedAt : signedAt;
+    if (price.changedAt > since) lines.push({ item, price });
+  }
+  return lines;
 }
 
 export async function getPriceDrift(projectId: string): Promise<BoqPriceDriftDto> {
@@ -411,9 +430,11 @@ export async function compareVersions(projectId: string, fromNo: number, toNo: n
     versionNo: v.versionNo,
     createdAt: v.createdAt.toISOString(),
     directCost: money(v.directCost),
+    contingencyAmt: money(v.contingencyAmt),
     overheadProfitPct: money(v.overheadProfitPct),
     overheadProfitAmt: money(v.overheadProfitAmt),
     discountAmt: money(v.discountAmt),
+    roundingAmt: money(v.roundingAmt),
     vatPct: money(v.vatPct),
     vatAmt: money(v.vatAmt),
     netPrice: money(v.netPrice),

@@ -1,6 +1,7 @@
 import { prisma } from "../../src/lib/prisma";
 import { renderContractPdf } from "../../src/lib/pdf/contract-pdf";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // ดู quotes.test.ts ว่าทำไมต้อง mock: entry แบบ ESM ของ Puppeteer รันใต้ runtime CJS ของ
 // ts-jest ไม่ได้ การเรนเดอร์จริงยืนยันแล้วว่าทำงานได้ผ่าน `tsx` + การ curl ด้วยมือ
@@ -75,9 +76,7 @@ describe("contracts module", () => {
 
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     const quoteId = quoteRes.body.quote.id;
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
     await owner.agent
       .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
       .send({ toStatus: "ACCEPTED" });

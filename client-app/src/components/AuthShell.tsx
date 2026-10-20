@@ -5,10 +5,18 @@ import type { ReactNode } from "react";
 //
 // fill=false สำหรับหน้าที่มีเนื้อหาต่อท้ายเชลล์เอง (หน้าติดต่อเรามีแถบแผนที่เต็มจอต่อท้าย) —
 // ถ้ายังบังคับสูงเต็มจอจะเกิดช่องว่างเปล่าคั่นกลางก่อนถึงส่วนถัดไป (วัดได้ 226px บนจอสูง 1000px)
-export function AuthShell({ children, fill = true }: Readonly<{ children: ReactNode; fill?: boolean }>) {
+//
+// note = บรรทัดเล็ก ๆ ใต้การ์ด (คำแจ้งเรื่องข้อมูลส่วนบุคคล) — วางนอกฟอร์มเพื่อไม่ให้ไปเบียด
+// บรรทัด "มีบัญชีอยู่แล้ว?" ที่อยู่ท้ายฟอร์ม และเพื่อให้อยู่กึ่งกลางใต้การ์ดทั้งสองคอลัมน์
+// ไม่ใส่ให้ทุกหน้าอัตโนมัติ เพราะหน้าติดต่อเราก็ใช้เชลล์นี้และมีฟุตเตอร์ที่มีลิงก์นโยบายอยู่แล้ว
+export function AuthShell({
+  children,
+  fill = true,
+  note,
+}: Readonly<{ children: ReactNode; fill?: boolean; note?: ReactNode }>) {
   return (
     <div
-      className={`relative isolate flex items-center justify-center overflow-hidden px-4 py-16 ${
+      className={`relative isolate flex flex-col items-center justify-center gap-4 overflow-hidden px-4 py-16 ${
         fill ? "min-h-[calc(100vh-4.5rem)]" : ""
       }`}
     >
@@ -28,6 +36,7 @@ export function AuthShell({ children, fill = true }: Readonly<{ children: ReactN
         </svg>
       </div>
       {children}
+      {note}
     </div>
   );
 }

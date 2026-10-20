@@ -7,7 +7,7 @@ import {
   generateBackupCodes,
   generateTotpSecret,
   hashBackupCode,
-  verifyTotp,
+  totpStep,
 } from "../../lib/totp";
 import { AuthError } from "./auth.error";
 
@@ -15,6 +15,77 @@ interface RequestMeta {
   ip?: string | null;
   userAgent?: string | null;
 }
+
+// ── เพดานกรอกรหัสผิดต่อบัญชี ──
+// limiter ที่ route นับต่อไอพี คนที่รู้รหัสผ่านแล้วสลับไอพีก็เดาต่อได้ไม่จำกัด จึงต้องนับที่บัญชีด้วย
+// ผิดครบ 10 ครั้งระงับ 15 นาที จากนั้นทุก ๆ 5 ครั้งที่ผิดต่อโดยไม่เคยผ่าน ระงับนานขึ้นเท่าตัว (สูงสุด 1 วัน)
+// คนกรอกพลาดจริงแทบไม่มีทางถึงรอบสอง แต่คนเดาถูกบีบเหลือไม่กี่ครั้งต่อวัน
+const TWO_FACTOR_LOCK_AFTER = 10;
+const TWO_FACTOR_LOCK_EVERY = 5;
+const TWO_FACTOR_LOCK_BASE_MINUTES = 15;
+const TWO_FACTOR_LOCK_MAX_MINUTES = 24 * 60;
+// ยกกำลังได้ไม่เกินนี้ (15 × 2^7 เกิน 1 วันแล้ว) — ไม่งั้นตัวนับสูงมาก ๆ ทำ power() ล้นจน SQL error
+const TWO_FACTOR_LOCK_MAX_DOUBLINGS = 7;
+/** กรอกผิดในเซสชันครึ่งทางเดียวกันได้กี่ครั้งก่อนต้องกรอกรหัสผ่านใหม่ */
+export const TWO_FACTOR_SESSION_MAX_ATTEMPTS = 5;
+
+/**
+ * จองสิทธิ์กรอกรหัส 2FA หนึ่งครั้ง "ก่อน" ตรวจรหัส — UPDATE คำสั่งเดียว นับ +1 และถ้าครั้งนี้ถึงเกณฑ์
+ * ก็ตั้งเวลาระงับทันที คำขอที่ยิงมาพร้อมกันจึงหลุดเกินเพดานไม่ได้ (แถวถูกล็อกระหว่าง UPDATE
+ * คำขอถัดไปเห็นเวลาระงับแล้วไม่ผ่าน WHERE) ใช้ได้ถูกต้องแม้รัน API หลายตัว
+ *
+ * คืน null = บัญชีถูกระงับอยู่ (ไม่ต้องตรวจรหัสเลย) · คืน lockedUntil เมื่อครั้งนี้เป็นครั้งที่ทำให้ถูกระงับ
+ * ยืนยันผ่านแล้วต้องเรียก clearTwoFactorFailures — ครั้งที่จองไว้ (รวมถึงเวลาระงับที่เพิ่งตั้ง) จะถูกล้าง
+ */
+export async function reserveTwoFactorAttempt(
+  userId: string,
+): Promise<{ lockedUntil: Date | null } | null> {
+  const rows = await prisma.$queryRaw<{ twoFactorLockedUntil: Date | null }[]>`
+    UPDATE "User" SET
+      "twoFactorFailedCount" = "twoFactorFailedCount" + 1,
+      "twoFactorLockedUntil" = CASE
+        WHEN "twoFactorFailedCount" + 1 >= ${TWO_FACTOR_LOCK_AFTER}::int
+         AND ("twoFactorFailedCount" + 1 - ${TWO_FACTOR_LOCK_AFTER}::int) % ${TWO_FACTOR_LOCK_EVERY}::int = 0
+          THEN (now() AT TIME ZONE 'UTC') + make_interval(mins => LEAST(
+            ${TWO_FACTOR_LOCK_BASE_MINUTES}::int * power(2, LEAST(
+              ("twoFactorFailedCount" + 1 - ${TWO_FACTOR_LOCK_AFTER}::int) / ${TWO_FACTOR_LOCK_EVERY}::int,
+              ${TWO_FACTOR_LOCK_MAX_DOUBLINGS}::int)),
+            ${TWO_FACTOR_LOCK_MAX_MINUTES}::int)::int)
+        ELSE NULL
+      END
+    WHERE "id" = ${userId}
+      AND ("twoFactorLockedUntil" IS NULL OR "twoFactorLockedUntil" <= (now() AT TIME ZONE 'UTC'))
+    RETURNING "twoFactorLockedUntil"`;
+  if (rows.length === 0) return null;
+  return { lockedUntil: rows[0].twoFactorLockedUntil };
+}
+
+/** ยืนยันผ่านแล้ว — ล้างตัวนับ/เวลาระงับ (รวมครั้งที่เพิ่งจองไว้) */
+export async function clearTwoFactorFailures(userId: string): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { twoFactorFailedCount: 0, twoFactorLockedUntil: null },
+  });
+}
+
+/**
+ * จดว่ารหัสจากแอปของช่วง `step` ถูกใช้แล้ว — สำเร็จเฉพาะเมื่อยังไม่เคยใช้ช่วงนี้หรือช่วงที่ใหม่กว่า
+ * UPDATE คำสั่งเดียว สองคำขอที่ส่งรหัสเดียวกันมาพร้อมกันจึงผ่านได้คำขอเดียว
+ * `data` = สิ่งที่ต้องเขียนพร้อมกัน (เช่น เปิดใช้ 2FA) เพื่อไม่ให้มีจังหวะที่จดแล้วแต่ยังไม่เปิด
+ */
+async function consumeTotpStep(
+  userId: string,
+  step: number,
+  data: { totpEnabled?: boolean; twoFactorBackupCodes?: string[] } = {},
+): Promise<boolean> {
+  const { count } = await prisma.user.updateMany({
+    where: { id: userId, OR: [{ totpLastStep: null }, { totpLastStep: { lt: step } }] },
+    data: { ...data, totpLastStep: step },
+  });
+  return count === 1;
+}
+
+const REUSED_CODE_MESSAGE = "รหัสนี้ถูกใช้ไปแล้ว กรุณารอรหัสถัดไปในแอปแล้วกรอกใหม่";
 
 export interface TwoFactorStatus {
   enabled: boolean;
@@ -49,7 +120,9 @@ export async function startTotpSetup(
   }
 
   const secret = generateTotpSecret();
-  await prisma.user.update({ where: { id: userId }, data: { totpSecret: secret } });
+  // secret ใหม่ = รหัสชุดใหม่ ช่วงที่จดไว้ของ secret เก่าไม่เกี่ยวแล้ว (ไม่ล้าง = ปิดแล้วเปิดใหม่
+  // ภายใน 90 วิ จะเปิดไม่ได้เพราะรหัสแรกของ secret ใหม่ดูเหมือน "ใช้ไปแล้ว")
+  await prisma.user.update({ where: { id: userId }, data: { totpSecret: secret, totpLastStep: null } });
 
   const otpauthUri = buildOtpAuthUri(accountEmail, secret);
   const qrDataUrl = await buildQrDataUrl(otpauthUri);
@@ -74,15 +147,15 @@ export async function activateTotp(
   if (!user.totpSecret) {
     throw new AuthError("ยังไม่ได้เริ่มตั้งค่า 2FA กรุณาเริ่มใหม่", 400);
   }
-  if (!verifyTotp(token, user.totpSecret)) {
+  const step = totpStep(token, user.totpSecret);
+  if (step === null) {
     throw new AuthError("รหัสยืนยันไม่ถูกต้อง", 400);
   }
 
   const { plain, hashed } = generateBackupCodes();
-  await prisma.user.update({
-    where: { id: userId },
-    data: { totpEnabled: true, twoFactorBackupCodes: hashed },
-  });
+  if (!(await consumeTotpStep(userId, step, { totpEnabled: true, twoFactorBackupCodes: hashed }))) {
+    throw new AuthError(REUSED_CODE_MESSAGE, 400);
+  }
 
   await writeAuditLog({
     userId,
@@ -174,15 +247,15 @@ export async function regenerateBackupCodes(
   if (!user.totpEnabled || !user.totpSecret) {
     throw new AuthError("บัญชีนี้ยังไม่ได้เปิดใช้ 2FA", 400);
   }
-  if (!verifyTotp(token, user.totpSecret)) {
+  const step = totpStep(token, user.totpSecret);
+  if (step === null) {
     throw new AuthError("รหัสยืนยันไม่ถูกต้อง", 400);
   }
 
   const { plain, hashed } = generateBackupCodes();
-  await prisma.user.update({
-    where: { id: userId },
-    data: { twoFactorBackupCodes: hashed },
-  });
+  if (!(await consumeTotpStep(userId, step, { twoFactorBackupCodes: hashed }))) {
+    throw new AuthError(REUSED_CODE_MESSAGE, 400);
+  }
 
   await writeAuditLog({
     userId,
@@ -196,27 +269,28 @@ export async function regenerateBackupCodes(
   return { backupCodes: plain };
 }
 
+/** ผลตรวจปัจจัยที่สอง — "reused" = รหัสจากแอปถูกต้องแต่ช่วงเวลานั้นถูกใช้ไปแล้ว */
+export type SecondFactorResult = "ok" | "invalid" | "reused";
+
 /**
- * ตรวจปัจจัยที่สองระหว่างล็อกอิน: ลองรหัส TOTP จากแอปก่อน ถ้าไม่ผ่านลองรหัสสำรอง (ใช้แล้วลบทิ้ง
- * ทันที — ใช้ได้ครั้งเดียว) คืน true เมื่อผ่านทางใดทางหนึ่ง
+ * ตรวจปัจจัยที่สองระหว่างล็อกอิน: ลองรหัส TOTP จากแอปก่อน ถ้าไม่ผ่านลองรหัสสำรอง
+ * ทั้งสองแบบใช้ได้ครั้งเดียว และตัดสินด้วย UPDATE คำสั่งเดียว (ส่งซ้ำพร้อมกันผ่านได้คำขอเดียว)
  */
-export async function verifySecondFactor(userId: string, code: string): Promise<boolean> {
+export async function verifySecondFactor(userId: string, code: string): Promise<SecondFactorResult> {
   const user = await prisma.user.findUniqueOrThrow({
     where: { id: userId },
-    select: { totpSecret: true, twoFactorBackupCodes: true },
+    select: { totpSecret: true },
   });
-  if (!user.totpSecret) return false;
+  if (!user.totpSecret) return "invalid";
 
-  if (verifyTotp(code, user.totpSecret)) return true;
+  const step = totpStep(code, user.totpSecret);
+  if (step !== null) return (await consumeTotpStep(userId, step)) ? "ok" : "reused";
 
+  // ลบรหัสสำรองออกจากรายการพร้อมเช็คว่ายังอยู่ในคำสั่งเดียว — เดิมอ่าน → กรอง → เขียนกลับ
+  // สองคำขอที่ส่งรหัสเดียวกันมาพร้อมกันอ่านเจอทั้งคู่ เลยใช้รหัสเดียวได้สองครั้ง
   const hashed = hashBackupCode(code);
-  if (user.twoFactorBackupCodes.includes(hashed)) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { twoFactorBackupCodes: user.twoFactorBackupCodes.filter((c) => c !== hashed) },
-    });
-    return true;
-  }
-
-  return false;
+  const removed = await prisma.$executeRaw`
+    UPDATE "User" SET "twoFactorBackupCodes" = array_remove("twoFactorBackupCodes", ${hashed})
+    WHERE "id" = ${userId} AND ${hashed} = ANY("twoFactorBackupCodes")`;
+  return removed === 1 ? "ok" : "invalid";
 }

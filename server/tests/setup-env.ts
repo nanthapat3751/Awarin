@@ -25,6 +25,11 @@ process.env.DATABASE_URL_RUNTIME = testRuntimeUrl;
 // อยู่แล้วที่ auth.test.ts (registration rate limiting)
 process.env.PUBLIC_LEAD_RATELIMIT_MAX = process.env.PUBLIC_LEAD_RATELIMIT_MAX ?? "10000";
 
+// ตัวนับ rate limit ของจริงอยู่ใน DB (นับร่วมกันทุกเครื่อง) แต่เทสต์ต้องให้แต่ละไฟล์เริ่มนับใหม่
+// เหมือนเดิม ไม่งั้นการล็อกอินสะสมข้ามไฟล์จะชนเพดานกลางชุด · ที่เก็บแบบ DB เทสต์แยกที่
+// tests/integration/multi-instance.test.ts
+process.env.RATE_LIMIT_STORE = "memory";
+
 // สำรองข้อมูล: .env ของ dev ชี้ไปที่ฐานข้อมูลจริงและโฟลเดอร์ server/backups ของจริง — เทสต์ต้องไม่แตะ
 // ทั้งคู่เด็ดขาด (สำรองซ้อนหรือลบชุดเก่าของจริงตามอายุได้) จึงบังคับให้ชี้ฐานข้อมูลทดสอบ
 // ด้วย role อ่านอย่างเดียว และเก็บลงโฟลเดอร์ชั่วคราวแยกต่อโปรเซส
@@ -45,3 +50,12 @@ process.env.PUBLIC_LEAD_RATELIMIT_MAX = process.env.PUBLIC_LEAD_RATELIMIT_MAX ??
   process.env.UPLOADS_DIR = path.join(root, "uploads");
   process.env.PRIVATE_UPLOADS_DIR = path.join(root, "private-uploads");
 }
+
+// เช็ค MX ต้องปิดตอนเทสต์ — บัญชีทดสอบทั้งหมดใช้โดเมน example.com ซึ่งเป็นโดเมนสงวนที่ไม่มี
+// MX จริง (ตั้งใจตามมาตรฐาน) และเทสต์ต้องไม่พึ่ง DNS ภายนอกซึ่งทำให้ผลไม่นิ่ง
+// ตรรกะของตัวเช็คเองมีเทสต์แยกที่ email-domain.test.ts
+process.env.EMAIL_MX_CHECK = "off";
+
+// เมล: โหมด silent = ไม่ส่งจริงและไม่พิมพ์ลง log แต่ยังเก็บฉบับล่าสุดไว้ใน outbox ให้เทสต์
+// อ่านรหัสยืนยันออกมาได้ (ฐานข้อมูลเก็บแต่แฮช) · ป้องกันการยิงเมลจริงตอนรันเทสต์โดยเด็ดขาด
+process.env.MAIL_TRANSPORT = "silent";

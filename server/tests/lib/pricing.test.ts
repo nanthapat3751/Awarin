@@ -94,6 +94,30 @@ describe("calculatePricing", () => {
     expect(() => calculatePricing([], -1, 7)).toThrow();
     expect(() => calculatePricing([], 10, -1)).toThrow();
   });
+
+  // ใบเสนอราคาพิมพ์ยอดรายบรรทัดกับยอดรวมไว้หน้าเดียวกัน ถ้าคิดคนละวิธีลูกค้าบวกแล้วไม่ตรง
+  // (ปริมาณเก็บ 3 ตำแหน่ง ราคาเก็บ 2 ตำแหน่ง ผลคูณจึงมีเศษเกิน 2 ตำแหน่งได้ตามปกติ)
+  it("ต้นทุนตรงต้องเท่ากับผลบวกของยอดรายบรรทัดที่ปัดแล้วเป๊ะ ๆ", () => {
+    // แต่ละบรรทัดได้ 38.5625 → ปัดลงเหลือ 38.56 (ทิ้งบรรทัดละ 0.0025)
+    // ถ้าบวกค่าดิบก่อนแล้วค่อยปัดทีเดียวจะได้ 115.69 ซึ่งไม่ตรงกับคอลัมน์ในใบเสนอราคา
+    const items = Array.from({ length: 3 }, () => ({
+      quantity: 3.125,
+      materialUnitPrice: 12.34,
+      laborUnitPrice: 0,
+    }));
+    expect(calculateLineAmounts(items[0]).lineTotal).toBe(38.56);
+    expect(calculatePricing(items, 10, 7).directCost).toBe(115.68);
+  });
+
+  it("ต้นทุนตรงเท่ากับผลบวกรายบรรทัด แม้เศษของแต่ละบรรทัดจะปัดคนละทาง", () => {
+    const items = [
+      { quantity: 3.125, materialUnitPrice: 12.34, laborUnitPrice: 5.67 },
+      { quantity: 0.375, materialUnitPrice: 999.99, laborUnitPrice: 0.01 },
+      { quantity: 7.005, materialUnitPrice: 45.67, laborUnitPrice: 12.5 },
+    ];
+    const sumOfLines = items.reduce((s, i) => s + calculateLineAmounts(i).lineTotal, 0);
+    expect(calculatePricing(items, 10, 7).directCost).toBe(Math.round(sumOfLines * 100) / 100);
+  });
 });
 
 describe("calculatePricing กับส่วนลด", () => {

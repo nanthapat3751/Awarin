@@ -8,7 +8,7 @@ import {
   Signature,
   X,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type {
   CustomerActivityDto,
@@ -19,6 +19,8 @@ import type {
 import { getProjectCustomerActivity } from "../lib/customer-file-api";
 import { getProjectActivity } from "../lib/projects-api";
 import { CustomerActivityList } from "./CustomerActivityList";
+import { Pagination } from "./Pagination";
+import { ListSkeleton } from "./Skeleton";
 
 // จำนวนที่โชว์ตอนยังไม่กด "ดูทั้งหมด" — หน้ารายละเอียดโครงการยาว ~6,000px อยู่แล้ว
 // ไทม์ไลน์จึงต้องไม่ต่อความยาวออกไปอีกโดยไม่จำเป็น
@@ -64,7 +66,13 @@ const LENS_LABEL: Record<Lens, string> = { all: "ทั้งหมด", custome
 
 export function ProjectActivity({ projectId }: Readonly<{ projectId: string }>) {
   const [items, setItems] = useState<ProjectActivityDto[] | null>(null);
+  // เซิร์ฟเวอร์แบ่งหน้าละ 15 — ยุบอยู่ = พรีวิว 4 แถวแรกของหน้า 1 · กางแล้ว = ทีละหน้าพร้อมเลขหน้า
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+  const [total, setTotal] = useState(0);
+  const [stale, setStale] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const topRef = useRef<HTMLDivElement>(null);
   const [lens, setLens] = useState<Lens>("all");
   const [customerItems, setCustomerItems] = useState<CustomerActivityDto[] | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -74,18 +82,38 @@ export function ProjectActivity({ projectId }: Readonly<{ projectId: string }>) 
 
   useEffect(() => {
     let alive = true;
-    getProjectActivity(projectId)
+    getProjectActivity(projectId, page)
       .then((res) => {
-        if (alive) setItems(res.activity);
+        if (!alive) return;
+        setItems(res.activity);
+        setPage(res.page);
+        setPageSize(res.pageSize);
+        setTotal(res.total);
       })
       // เงียบไว้: ไทม์ไลน์เป็นข้อมูลประกอบ ไม่ควรขึ้น error ทับหน้าที่ส่วนอื่นยังใช้งานได้ปกติ
       .catch(() => {
         if (alive) setItems([]);
+      })
+      .finally(() => {
+        if (alive) setStale(false);
       });
     return () => {
       alive = false;
     };
-  }, [projectId]);
+  }, [projectId, page]);
+
+  function goPage(next: number) {
+    setStale(true);
+    setPage(next);
+    // กดเปลี่ยนหน้าจากท้ายรายการแล้วต้องได้เริ่มอ่านจากหัวไทม์ไลน์ ไม่ใช่โผล่กลางรายการ
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function toggleExpanded() {
+    // ย่อกลับ = พรีวิวของหน้าแรก (เหตุการณ์ล่าสุด) ไม่ใช่ 4 แถวแรกของหน้าที่เปิดค้างไว้
+    if (expanded && page !== 1) goPage(1);
+    setExpanded((v) => !v);
+  }
 
   // โหลดมุมมองลูกค้าเมื่อกดดูจริงเท่านั้น -- ส่วนใหญ่เปิดหน้าโครงการมาเพื่อดูไทม์ไลน์รวม
   useEffect(() => {
@@ -107,10 +135,13 @@ export function ProjectActivity({ projectId }: Readonly<{ projectId: string }>) 
   }, [lens, projectId, customerItems]);
 
   if (items === null) {
-    return <p className="text-sm text-slate-500">กำลังโหลดกิจกรรม...</p>;
+    return <ListSkeleton rows={4} label="กำลังโหลดกิจกรรม..." />;
   }
 
   const shown = expanded ? items : items.slice(0, PREVIEW_COUNT);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
 
   // ปุ่มสลับมุมมอง -- ไทม์ไลน์รวมเห็นทั้งงานพนักงานและลูกค้า แต่กรองการเปิดอ่านซ้ำ ๆ ออก
   // ส่วนมุมมองลูกค้าเห็นเฉพาะสิ่งที่ลูกค้าทำ และเห็นทุกครั้งที่เปิด (ละเอียดระดับนาที)
@@ -144,7 +175,7 @@ export function ProjectActivity({ projectId }: Readonly<{ projectId: string }>) 
           </p>
           {lensToggle}
         </div>
-        {customerItems === null && <p className="text-sm text-slate-500">กำลังโหลด...</p>}
+        {customerItems === null && <ListSkeleton rows={3} />}
         {customerItems !== null && customerItems.length === 0 && (
           <p className="text-sm text-slate-500">
             ลูกค้ายังไม่ได้ทำอะไรกับโครงการนี้ (หรือยังไม่ได้ระบุลูกค้า)
@@ -177,24 +208,29 @@ export function ProjectActivity({ projectId }: Readonly<{ projectId: string }>) 
   }
 
   return (
-    <div>
+    <div ref={topRef} className="scroll-mt-20">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium text-slate-700">กิจกรรมล่าสุด</p>
         <div className="flex items-center gap-2">
-          {items.length > PREVIEW_COUNT && (
+          {total > PREVIEW_COUNT && (
             <button
               type="button"
-              onClick={() => setExpanded((v) => !v)}
+              onClick={toggleExpanded}
               className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-100"
             >
-              {expanded ? "ย่อลง" : `ดูทั้งหมด (${items.length})`}
+              {expanded ? "ย่อลง" : `ดูทั้งหมด (${total})`}
             </button>
           )}
           {lensToggle}
         </div>
       </div>
 
-      <ol className="flex flex-col">
+      {expanded && total > pageSize && (
+        <p className="mb-2 text-xs tabular-nums text-slate-500">
+          แสดง {from}-{to} จาก {total} รายการ
+        </p>
+      )}
+      <ol className={`flex flex-col transition-opacity ${stale ? "opacity-50" : ""}`} aria-busy={stale}>
         {shown.map((item, i) => {
           const style = KIND_STYLE[item.kind];
           const last = i === shown.length - 1;
@@ -224,6 +260,7 @@ export function ProjectActivity({ projectId }: Readonly<{ projectId: string }>) 
           );
         })}
       </ol>
+      {expanded && <Pagination page={page} pageCount={pageCount} onChange={goPage} />}
     </div>
   );
 }

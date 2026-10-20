@@ -16,12 +16,18 @@ interface AuthContextValue {
   user: AuthenticatedUser | null;
   status: "loading" | "ready";
   login: (email: string, password: string) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
+  /** คืนตั๋วแก้อีเมลจากหน้ายืนยัน (null ถ้าเซิร์ฟเวอร์ไม่ได้ให้มา) */
+  register: (input: RegisterInput) => Promise<string | null>;
+  /** ยืนยันอีเมลด้วยรหัส 6 หลัก — ผ่านแล้วต้องล็อกอินเองอีกที (ปลายทางนี้ไม่ออก session) */
+  verifyEmail: (email: string, code: string) => Promise<void>;
+  resendVerifyCode: (email: string) => Promise<{ sent: boolean; retryAfterSeconds: number }>;
   // ตั้งรหัสผ่านผ่านลิงก์เข้าใช้ครั้งเดียว แล้วเข้าระบบทันที (บัญชีที่ทีมงานสร้างให้) — ที่อยู่ไม่บังคับ
   activateAccount: (token: string, password: string, address?: string) => Promise<void>;
   logout: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   deleteAccount: (currentPassword: string) => Promise<void>;
+  /** แทนข้อมูลผู้ใช้ด้วยค่าที่เซิร์ฟเวอร์คืนมา (หลังแก้ชื่อ/รูป) — แถบเมนูจะได้เปลี่ยนตามทันที */
+  replaceUser: (next: AuthenticatedUser) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -45,13 +51,31 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     setUser(res.user);
   }, []);
 
+  /**
+   * สมัครแล้ว **ยังไม่เข้าระบบ** — บัญชีใช้งานไม่ได้จนกว่าจะกรอกรหัสที่ส่งไปทางอีเมล
+   * (เดิมสมัครเสร็จแล้วล็อกอินให้เลย) หน้าที่เรียกต้องพาผู้ใช้ไปหน้ากรอกรหัสต่อ
+   */
   const register = useCallback(async (input: RegisterInput) => {
-    await apiFetch("/api/auth/customer/register", {
+    const res = await apiFetch<{ signupTicket?: string }>("/api/auth/customer/register", {
       method: "POST",
       body: JSON.stringify(input),
     });
-    await login(input.email, input.password);
-  }, [login]);
+    return res.signupTicket ?? null;
+  }, []);
+
+  const verifyEmail = useCallback(async (email: string, code: string) => {
+    await apiFetch("/api/auth/customer/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    });
+  }, []);
+
+  const resendVerifyCode = useCallback(async (email: string) => {
+    return apiFetch<{ sent: boolean; retryAfterSeconds: number }>(
+      "/api/auth/customer/verify-email/resend",
+      { method: "POST", body: JSON.stringify({ email }) },
+    );
+  }, []);
 
   const activateAccount = useCallback(async (token: string, password: string, address?: string) => {
     const res = await apiFetch<{ user: AuthenticatedUser }>(
@@ -83,8 +107,20 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
 
   // ห่อด้วย useMemo — ไม่งั้นทุก component ที่ใช้ useAuth() re-render ตามทุกครั้งที่ AuthProvider render
   const value = useMemo(
-    () => ({ user, status, login, register, activateAccount, logout, changePassword, deleteAccount }),
-    [user, status, login, register, activateAccount, logout, changePassword, deleteAccount],
+    () => ({
+      user,
+      status,
+      login,
+      register,
+      verifyEmail,
+      resendVerifyCode,
+      activateAccount,
+      logout,
+      changePassword,
+      deleteAccount,
+      replaceUser: setUser,
+    }),
+    [user, status, login, register, verifyEmail, resendVerifyCode, activateAccount, logout, changePassword, deleteAccount],
   );
 
   return (

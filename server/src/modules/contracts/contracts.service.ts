@@ -20,6 +20,8 @@ import { loadCompanyProfile } from "../../lib/company-profile";
 import { renderContractPdf } from "../../lib/pdf/contract-pdf";
 import { createNotification } from "../../lib/notifications";
 import { prisma } from "../../lib/prisma";
+import { getDefaultRetentionPct } from "../../lib/settings";
+import { retentionSetAfterSigning } from "../../lib/contract-retention";
 import { resolveTemplateForContract } from "../contractTemplates/contractTemplates.service";
 import type {
   UpdateContractBodyInput,
@@ -108,6 +110,8 @@ export async function createContract(projectId: string, actorId: string, templat
   const { amount, vatAmount } = await latestVersionTotals(projectId);
 
   const party = billingPartyOf(customer, customer?.customerProfile);
+  // เงินประกันผลงานตั้งต้นจากหน้าตั้งค่า (ว่าง = ไม่มี) — แก้ได้จนกว่าจะลงนาม
+  const retentionPct = await getDefaultRetentionPct();
 
   const body = renderStructure(
     template.structure as unknown as ContractStructure,
@@ -154,6 +158,8 @@ export async function createContract(projectId: string, actorId: string, templat
       // สัญญาที่เซ็นไปแล้วจะพิมพ์ชื่อคนใหม่ใต้ลายเซ็นคนเก่า และขัดกับอารัมภบทที่แช่แข็งชื่อคนเดิมไว้
       signatoryName: company.signatory?.name ?? null,
       signatoryTitle: company.signatory?.title ?? null,
+      retentionPct,
+      retentionSetAt: retentionPct == null ? null : new Date(),
       installments: {
         create: splitByPercent(amount, DEFAULT_INSTALLMENT_PLAN).map((i, index) => ({
           seq: index + 1,
@@ -363,13 +369,18 @@ export async function generateContractPdf(projectId: string, contractId: string)
       contract.vatAmount != null ? Number(contract.vatAmount) : null,
     ),
     signedAt: contract.signedAt,
+    // % ที่ OWNER เติมหลังวันลงนามไม่ได้อยู่ในฉบับที่เซ็น — ห้ามพิมพ์ย้อนเข้าไปในสัญญา
+    retentionPct:
+      contract.retentionPct != null && !retentionSetAfterSigning(contract) ? Number(contract.retentionPct) : null,
     docTitle: contract.docTitle ?? "สัญญาก่อสร้าง",
     body: frozenBody(contract),
+    // สัญญาที่ลงนามแล้วต้องพิมพ์ออกมาเหมือนวันเซ็น — งวดที่ใบงานเพิ่ม-ลดสร้างไม่อยู่ในสัญญา
+    // และงวดที่ถูกหักพิมพ์ยอดตามสัญญา (originalAmount) การเปลี่ยนแปลงอยู่ในใบงานเพิ่ม-ลดแต่ละใบ
     installments: (
       await prisma.contractInstallment.findMany({
-        where: { contractId },
+        where: { contractId, changeOrderId: null },
         orderBy: { seq: "asc" },
       })
-    ).map((i) => ({ seq: i.seq, milestone: i.milestone, amount: Number(i.amount) })),
+    ).map((i) => ({ seq: i.seq, milestone: i.milestone, amount: Number(i.originalAmount ?? i.amount) })),
   });
 }

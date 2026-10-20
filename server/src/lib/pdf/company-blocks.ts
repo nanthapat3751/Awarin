@@ -13,7 +13,12 @@ export interface CompanyDocFields {
   companyAddress: string;
   companyPhone: string;
   companyTaxId?: string | null;
+  /** สถานประกอบการของผู้ขาย — พิมพ์ต่อท้ายเลขผู้เสียภาษีบนหัวจดหมาย */
+  companyBranch?: string | null;
   companyEmail?: string | null;
+  /** ชื่อ/ที่อยู่ภาษาอังกฤษ — พิมพ์บนหัวใบแจ้งหนี้/ใบเสร็จตามแบบฟอร์มของบริษัท · ว่าง = ไม่พิมพ์บรรทัดนั้น */
+  companyNameEn?: string | null;
+  companyAddressEn?: string | null;
   logo?: string | null;
   logoSmall?: string | null;
   /** null/ไม่ส่ง = พิมพ์ชื่อบริษัทใต้เส้นเซ็นเหมือนเดิม */
@@ -104,4 +109,82 @@ export const QUOTE_TERMS_CSS = `
   .terms-title { font-weight: 700; }
   .terms-validity { font-weight: 700; }
   .terms ol { margin: 2px 0 0; padding-left: 18px; }
+`;
+
+// ─────────────────────────── ช่องเซ็นท้ายใบเสนอราคา ───────────────────────────
+
+/** คนเซ็นที่ตรึงลงใบ (QuoteSigner) — ลายเซ็นเป็น data URI เพราะ Puppeteer ไม่มีสิทธิ์โหลดไฟล์ภายนอก */
+export interface QuotePdfSigner {
+  role: "PROPOSER" | "APPROVER";
+  name: string;
+  title: string | null;
+  phone: string | null;
+  signatureDataUrl: string | null;
+  signedAt: Date;
+}
+
+const signDate = new Intl.DateTimeFormat("th-TH", {
+  timeZone: "Asia/Bangkok",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+const ROLE_LABEL: Record<QuotePdfSigner["role"], string> = { PROPOSER: "ผู้เสนอราคา", APPROVER: "ผู้อนุมัติ" };
+
+function renderSignerColumn(role: QuotePdfSigner["role"], signer: QuotePdfSigner | undefined): string {
+  // ลายเซ็นลอยทับเส้นประเหมือนเซ็นด้วยปากกาจริง · ไม่มีรูป = เว้นเส้นไว้ให้เซ็นมือ
+  const ink = signer?.signatureDataUrl
+    ? `<img class="sign-ink" src="${signer.signatureDataUrl}" alt="" />`
+    : "";
+  const lines = signer
+    ? [
+        `<div>( ${escapeHtml(signer.name)} )</div>`,
+        signer.title ? `<div>${escapeHtml(signer.title)}</div>` : "",
+        signer.phone ? `<div>โทร ${escapeHtml(signer.phone)}</div>` : "",
+        `<div class="sign-date">วันที่ ${signDate.format(signer.signedAt)}</div>`,
+      ].join("")
+    : `<div>( ....................................... )</div><div class="sign-date">วันที่ ........./........./.........</div>`;
+  return `
+        <div class="sign-col">
+          <div class="sign-line">${ink}ลงชื่อ ....................................... ${ROLE_LABEL[role]}</div>
+          <div class="sign-who">${lines}</div>
+        </div>`;
+}
+
+/**
+ * ท้ายใบเสนอราคา: ใบที่ผ่านขั้นอนุมัติ → สองช่อง "ผู้เสนอราคา + ผู้อนุมัติ" พร้อมลายเซ็นที่ตรึงไว้
+ * ใบที่ส่งก่อนมีขั้นอนุมัติ (ไม่มีคนเซ็น) → หน้าตาเดิมทุกประการ ไม่เติมย้อนหลัง
+ */
+export function renderQuoteSignatures(input: {
+  companyName: string;
+  signatory?: CompanySignatory | null;
+  signers?: QuotePdfSigner[];
+}): string {
+  const signers = input.signers ?? [];
+  const proposer = signers.find((s) => s.role === "PROPOSER");
+  if (!proposer) {
+    return `
+      <div class="signature">
+        <div>ลงชื่อ ....................................... ผู้เสนอราคา</div>
+        ${renderCompanySigner(input.companyName, input.signatory)}
+      </div>`;
+  }
+  return `
+      <div class="signature signers">
+        ${renderSignerColumn("PROPOSER", proposer)}
+        ${renderSignerColumn("APPROVER", signers.find((s) => s.role === "APPROVER"))}
+      </div>
+      <div class="sign-company">${escapeHtml(input.companyName)}</div>`;
+}
+
+export const SIGNATURE_CSS = `
+  .signers { display: flex; justify-content: space-between; gap: 24px; page-break-inside: avoid; }
+  .sign-col { width: 46%; text-align: center; }
+  .sign-line { position: relative; padding-top: 44px; white-space: nowrap; }
+  /* สูงสุด 44px ตั้งบนเส้นประ — ลายเซ็นยาวถูกย่อตามสัดส่วน ไม่ล้นช่อง */
+  .sign-ink { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); max-height: 44px; max-width: 170px; }
+  .sign-who { margin-top: 6px; line-height: 1.6; }
+  .sign-date { color: #555; }
+  .sign-company { margin-top: 10px; text-align: center; font-size: 10px; color: #555; }
 `;

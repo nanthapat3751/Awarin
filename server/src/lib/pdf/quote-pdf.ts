@@ -1,3 +1,4 @@
+
 import { renderHtmlToPdf } from "./browser";
 import { sarabunFontFaceCss } from "./fonts";
 import type { Withholding } from "../billing-party";
@@ -11,7 +12,9 @@ import {
 import {
   type CompanyDocFields,
   QUOTE_TERMS_CSS,
-  renderCompanySigner,
+  type QuotePdfSigner,
+  renderQuoteSignatures,
+  SIGNATURE_CSS,
   renderQuoteTerms,
 } from "./company-blocks";
 import { documentChrome, LETTERHEAD_CSS, renderLetterhead } from "./letterhead";
@@ -38,6 +41,8 @@ export interface QuotePdfCategoryGroup {
 }
 
 export interface QuotePdfData extends CustomerPartyPdfData, CompanyDocFields {
+  /** ผู้เสนอราคา/ผู้อนุมัติที่ตรึงลงใบ · ว่าง = ใบก่อนมีขั้นอนุมัติ พิมพ์ช่องเซ็นแบบเดิม */
+  signers?: QuotePdfSigner[];
   quoteNo: string;
   revisionNo: number;
   projectNo: string;
@@ -49,12 +54,16 @@ export interface QuotePdfData extends CustomerPartyPdfData, CompanyDocFields {
   terms?: string[];
   groups: QuotePdfCategoryGroup[];
   directCost: number;
+  contingencyPct?: number;
+  contingencyAmt?: number;
   overheadProfitPct: number;
   overheadProfitAmt: number;
   // ส่วนลด: pct มีค่าเมื่อลดเป็น % (เอาไปโชว์ในวงเล็บ) — amt = 0 คือไม่มีส่วนลด แถวจะไม่ถูกพิมพ์เลย
   discountPct: number | null;
   discountAmt: number;
   discountNote: string | null;
+  /** ส่วนลดปัดเศษ (หักก่อน VAT) — 0/ไม่ส่ง = ไม่พิมพ์แถว */
+  roundingAmt?: number;
   vatPct: number;
   vatAmt: number;
   netPrice: number;
@@ -85,6 +94,46 @@ function discountLabel(pct: number | null, note: string | null): string {
   return `ส่วนลด${pctPart}${notePart}`;
 }
 
+/** แถวส่วนลดปัดเศษ — ไม่ได้ปัด = ไม่พิมพ์แถวเลย ใบเดิมหน้าตาเหมือนเดิมเป๊ะ */
+function roundingRow(data: QuotePdfData): string {
+  const amt = data.roundingAmt ?? 0;
+  if (amt <= 0) return "";
+  return `<tr><td class="label">ส่วนลดปัดเศษ</td><td class="num">-${money(amt)}</td></tr>`;
+}
+
+/** แถวค่าเผื่อเหลือเผื่อขาด — ไม่ได้เผื่อไว้ = ไม่พิมพ์แถวเลย ใบที่ไม่ใช้จะหน้าตาเหมือนเดิมเป๊ะ */
+function contingencyRow(data: QuotePdfData): string {
+  const amt = data.contingencyAmt ?? 0;
+  if (amt <= 0) return "";
+  return `<tr><td class="label">ค่าเผื่อเหลือเผื่อขาด (${data.contingencyPct ?? 0}%)</td><td class="num">${money(amt)}</td></tr>`;
+}
+
+function renderMarkupTotals(data: QuotePdfData): string {
+  // ส่วนลดหักก่อน VAT — ฐานภาษีจึงเป็นยอดหลังหักส่วนลดแล้ว (ดู calculatePricing)
+  const baseCost = data.directCost + (data.contingencyAmt ?? 0);
+  const beforeDiscount = baseCost + data.overheadProfitAmt;
+  const beforeVat = beforeDiscount - data.discountAmt - (data.roundingAmt ?? 0);
+  // ไม่มีส่วนลด = ไม่พิมพ์แถวเลย ใบเสนอราคาที่ไม่ได้ลดจะหน้าตาเหมือนเดิมทุกประการ
+  const discountRow =
+    data.discountAmt > 0
+      ? `<tr><td class="label">${discountLabel(data.discountPct, data.discountNote)}</td><td class="num">-${money(data.discountAmt)}</td></tr>`
+      : "";
+
+  return `
+      <table class="totals">
+        <tbody>
+          <tr><td class="label">รวมมูลค่างานก่อสร้าง</td><td class="num" style="width:120px">${money(data.directCost)}</td></tr>
+          ${contingencyRow(data)}
+          <tr><td class="label">ค่าดำเนินการและกำไร (${data.overheadProfitPct}%)</td><td class="num">${money(data.overheadProfitAmt)}</td></tr>
+          ${discountRow}
+          ${roundingRow(data)}
+          <tr><td class="label">รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม</td><td class="num">${money(beforeVat)}</td></tr>
+          <tr><td class="label">ภาษีมูลค่าเพิ่ม (${data.vatPct}%)</td><td class="num">${money(data.vatAmt)}</td></tr>
+          <tr class="grand"><td class="label">รวมมูลค่าทั้งสิ้น</td><td class="num">${money(data.netPrice)}</td></tr>${renderWithholdingRows(data.withholding ?? null)}
+        </tbody>
+      </table>`;
+}
+
 function renderSummarySection(data: QuotePdfData): string {
   const rows = data.groups
     .map(
@@ -97,14 +146,7 @@ function renderSummarySection(data: QuotePdfData): string {
     )
     .join("");
 
-  // ส่วนลดหักก่อน VAT — ฐานภาษีจึงเป็นยอดหลังหักส่วนลดแล้ว (ดู calculatePricing)
-  const beforeDiscount = data.directCost + data.overheadProfitAmt;
-  const beforeVat = beforeDiscount - data.discountAmt;
-  // ไม่มีส่วนลด = ไม่พิมพ์แถวเลย ใบเสนอราคาที่ไม่ได้ลดจะหน้าตาเหมือนเดิมทุกประการ
-  const discountRow =
-    data.discountAmt > 0
-      ? `<tr><td class="label">${discountLabel(data.discountPct, data.discountNote)}</td><td class="num">-${money(data.discountAmt)}</td></tr>`
-      : "";
+  const totals = renderMarkupTotals(data);
 
   return `
     <div class="section">
@@ -134,65 +176,67 @@ function renderSummarySection(data: QuotePdfData): string {
         <tbody>${rows}</tbody>
       </table>
 
-      <table class="totals">
-        <tbody>
-          <tr><td class="label">รวมมูลค่างานก่อสร้าง</td><td class="num" style="width:120px">${money(data.directCost)}</td></tr>
-          <tr><td class="label">ค่าดำเนินการและกำไร (${data.overheadProfitPct}%)</td><td class="num">${money(data.overheadProfitAmt)}</td></tr>
-          ${discountRow}
-          <tr><td class="label">รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม</td><td class="num">${money(beforeVat)}</td></tr>
-          <tr><td class="label">ภาษีมูลค่าเพิ่ม (${data.vatPct}%)</td><td class="num">${money(data.vatAmt)}</td></tr>
-          <tr class="grand"><td class="label">รวมมูลค่าทั้งสิ้น</td><td class="num">${money(data.netPrice)}</td></tr>${renderWithholdingRows(data.withholding ?? null)}
-        </tbody>
-      </table>
+      ${totals}
       ${withholdingNote(data.withholding ?? null)}
       ${renderQuoteTerms(data.validUntil, data.terms)}
 
-      <div class="signature">
-        <div>ลงชื่อ ....................................... ผู้เสนอราคา</div>
-        ${renderCompanySigner(data.companyName, data.signatory)}
-      </div>
+      ${renderQuoteSignatures(data)}
     </div>`;
 }
 
+/** ช่องที่เป็นศูนย์แสดงเป็น "-" — 0.00 เต็มตารางดูเหมือนตัวเลขจริงที่ต้องอ่าน (แบบ BOQ ราชการก็ใช้ขีด) */
+function moneyOrDash(value: string | number): string {
+  const n = Number(value);
+  return n === 0 ? `<span class="dash">-</span>` : money(n);
+}
+
+/**
+ * ตาราง BOQ รายหมวด แบบ A (ผู้ใช้เลือก 18 ต.ค.) — ตารางเส้นครบแบบ BOQ ราชการ/ปร.4
+ * หัวสองชั้น "ค่าวัสดุ (หน่วยละ · เป็นเงิน) | ค่าแรง (หน่วยละ · เป็นเงิน)" ช่องหัวสีฟ้าชุดเดียวกับใบเสร็จแบบฟอร์มบริษัท
+ * · แถบชื่อหมวดเต็มแถวในตาราง (เดิมลอยอยู่ขวาบน) · แถวรวมหมวดพื้นสีอ่อน · หัวตารางซ้ำทุกหน้าเมื่อหมวดยาวข้ามหน้า
+ */
 function renderDetailSection(group: QuotePdfCategoryGroup): string {
   const rows = group.items
     .map(
       (item, idx) => `
         <tr>
-          <td>${escapeHtml(item.code ?? String(idx + 1))}</td>
+          <td class="c">${escapeHtml(item.code ?? String(idx + 1))}</td>
           <td>${escapeHtml(item.name)}</td>
           <td class="num">${item.quantity}</td>
-          <td>${escapeHtml(item.unit)}</td>
-          <td class="num">${money(Number(item.materialUnitPrice))}</td>
-          <td class="num">${money(Number(item.materialTotal))}</td>
-          <td class="num">${money(Number(item.laborUnitPrice))}</td>
-          <td class="num">${money(Number(item.laborTotal))}</td>
-          <td class="num" style="font-weight:700">${money(Number(item.lineTotal))}</td>
-          <td>${item.note ? escapeHtml(item.note) : ""}</td>
+          <td class="c">${escapeHtml(item.unit)}</td>
+          <td class="num">${moneyOrDash(item.materialUnitPrice)}</td>
+          <td class="num">${moneyOrDash(item.materialTotal)}</td>
+          <td class="num">${moneyOrDash(item.laborUnitPrice)}</td>
+          <td class="num">${moneyOrDash(item.laborTotal)}</td>
+          <td class="num strong">${money(Number(item.lineTotal))}</td>
+          <td class="note">${item.note ? escapeHtml(item.note) : ""}</td>
         </tr>`,
     )
     .join("");
 
   return `
     <div class="section">
-      <div class="header-row">
-        <h1>BILL OF QUANTITY</h1>
-        <span>${escapeHtml(group.categoryLabel)} ${escapeHtml(group.categoryName)}</span>
-      </div>
+      <h1>BILL OF QUANTITY</h1>
 
-      <table>
+      <table class="boq">
+        <colgroup>
+          <col style="width:8%" /><col style="width:27%" /><col style="width:6%" /><col style="width:6%" />
+          <col style="width:9%" /><col style="width:9.5%" /><col style="width:9%" /><col style="width:9.5%" />
+          <col style="width:10%" /><col style="width:6%" />
+        </colgroup>
         <thead>
           <tr>
-            <th>รหัส</th><th>รายการ</th><th class="num">จำนวน</th><th>หน่วย</th>
-            <th class="num">วัสดุ/หน่วย</th><th class="num">รวมวัสดุ</th>
-            <th class="num">แรง/หน่วย</th><th class="num">รวมแรง</th>
-            <th class="num">ราคารวม</th><th>หมายเหตุ</th>
+            <th rowspan="2">รหัส</th><th rowspan="2">รายการ</th><th rowspan="2">จำนวน</th><th rowspan="2">หน่วย</th>
+            <th colspan="2">ค่าวัสดุ</th><th colspan="2">ค่าแรง</th>
+            <th rowspan="2">รวม</th><th rowspan="2">หมายเหตุ</th>
           </tr>
+          <tr><th>หน่วยละ</th><th>เป็นเงิน</th><th>หน่วยละ</th><th>เป็นเงิน</th></tr>
         </thead>
         <tbody>
+          <tr class="band"><td colspan="10">${escapeHtml(group.categoryLabel)} ${escapeHtml(group.categoryName)}</td></tr>
           ${rows}
           <tr class="subtotal-row">
-            <td colspan="8" class="label num">รวมมูลค่า${escapeHtml(group.categoryName)}</td>
+            <td colspan="8" class="num">รวมมูลค่า${escapeHtml(group.categoryName)}</td>
             <td class="num">${money(group.subtotal)}</td>
             <td></td>
           </tr>
@@ -226,7 +270,20 @@ function baseStyles(): string {
     .totals .label { text-align: right; }
     .totals .grand td { font-weight: 700; font-size: 12px; border-top: 1.5px solid #888; padding-top: 8px; }
     .subtotal-row td { font-weight: 700; border-top: 1.5px solid #888; border-bottom: none; }
+    /* ตาราง BOQ รายหมวดแบบ A — เส้นครบ หัวสองชั้นสีฟ้า (สีเดียวกับใบแจ้งหนี้/ใบเสร็จแบบฟอร์มบริษัท) */
+    table.boq { margin-top: 8px; table-layout: fixed; }
+    table.boq thead { display: table-header-group; }
+    table.boq th { background: #c6d9f1; text-align: center; vertical-align: middle; border: 1px solid #333; padding: 4px 3px; }
+    table.boq td { border: 1px solid #999; padding: 4px 5px; }
+    table.boq td.c { text-align: center; }
+    table.boq td.strong { font-weight: 700; }
+    table.boq td.note { font-size: 9px; color: #444; }
+    table.boq td .dash { color: #888; }
+    table.boq tr { page-break-inside: avoid; }
+    table.boq tr.band td { background: #eef3fa; border: 1px solid #333; font-weight: 700; font-size: 10.5px; }
+    table.boq tr.subtotal-row td { background: #eef3fa; border: 1px solid #333; }
     .signature { margin-top: 50px; font-size: 10px; }
+    ${SIGNATURE_CSS}
     ${QUOTE_TERMS_CSS}
   `;
 }

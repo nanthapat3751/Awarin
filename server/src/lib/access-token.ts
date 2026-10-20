@@ -15,11 +15,20 @@ function withoutTrailingSlashes(url: string): string {
 
 // ฐาน URL ของเว็บฝั่งลูกค้า (client-app) สำหรับประกอบลิงก์เข้าใช้ — ใช้ CLIENT_BASE_URL ก่อน ถ้าไม่มี
 // ถอยไปใช้ค่า CORS_ORIGIN_CLIENT (ซึ่งชี้ที่เว็บลูกค้าอยู่แล้ว) แล้วค่อยเป็นค่า dev
-function clientBaseUrl(): string {
+export function clientBaseUrl(): string {
   return withoutTrailingSlashes(
     process.env.CLIENT_BASE_URL ??
     process.env.CORS_ORIGIN_CLIENT ??
     "http://localhost:5174",
+  );
+}
+
+/** ที่อยู่หน้าเว็บฝั่งพนักงาน — ลิงก์ตั้งรหัสผ่านใหม่ของพนักงานชี้มาที่นี่ (ตอน deploy ต้องตั้ง STAFF_BASE_URL) */
+export function staffBaseUrl(): string {
+  return withoutTrailingSlashes(
+    process.env.STAFF_BASE_URL ??
+    process.env.CORS_ORIGIN_STAFF ??
+    "http://localhost:5173",
   );
 }
 

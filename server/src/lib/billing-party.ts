@@ -117,19 +117,28 @@ export function splitWithholding(
   contractAmount: number,
   installments: { amount: number }[],
 ): { tax: number; netTransfer: number }[] {
+  return splitByShare(withholding.tax, contractAmount, installments).map((tax, index) => ({
+    tax,
+    netTransfer: round2(installments[index].amount - tax),
+  }));
+}
+
+/**
+ * แบ่งยอดหนึ่งก้อน (ภาษีหัก ณ ที่จ่าย / ภาษีมูลค่าเพิ่มของทั้งสัญญา) ลงแต่ละงวดตามสัดส่วนของงวด
+ * เศษสตางค์ทั้งหมดไปอยู่งวดสุดท้าย ผลบวกทุกงวดจึงเท่ายอดทั้งก้อนพอดีเสมอ
+ */
+export function splitByShare(
+  total: number,
+  contractAmount: number,
+  installments: { amount: number }[],
+): number[] {
   if (installments.length === 0 || contractAmount <= 0) return [];
 
-  const out: { tax: number; netTransfer: number }[] = [];
   let allocated = 0;
-
-  installments.forEach((item, index) => {
+  return installments.map((item, index) => {
     const last = index === installments.length - 1;
-    const tax = last
-      ? round2(withholding.tax - allocated)
-      : round2((withholding.tax * item.amount) / contractAmount);
-    allocated = round2(allocated + tax);
-    out.push({ tax, netTransfer: round2(item.amount - tax) });
+    const share = last ? round2(total - allocated) : round2((total * item.amount) / contractAmount);
+    allocated = round2(allocated + share);
+    return share;
   });
-
-  return out;
 }

@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
   ClipboardList,
   FileSignature,
+  FileSpreadsheet,
   FolderKanban,
   Home,
   ImagePlus,
@@ -19,9 +20,13 @@ import {
   Users,
 } from "lucide-react";
 
+
 import { useAuth } from "../lib/auth-context";
+import { usePendingBadge } from "../lib/pending-count";
+import { NARROW_SCREEN, useMediaQuery } from "../lib/use-media-query";
 import { LogoutButton } from "./LogoutButton";
 import { NotificationBell } from "./NotificationBell";
+import { RecoveryEmailBanner } from "./RecoveryEmailBanner";
 import { UserMenu } from "./UserMenu";
 
 interface NavItem {
@@ -45,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/users", label: "จัดการผู้ใช้", icon: UserCog, ownerOnly: true },
   { to: "/contract-templates", label: "แม่แบบสัญญา", icon: FileSignature },
   { to: "/site-images", label: "คลังรูปเว็บไซต์", icon: ImagePlus },
+  { to: "/reports/sales-tax", label: "รายงานภาษีขาย", icon: FileSpreadsheet },
   { to: "/trash", label: "ถังขยะ", icon: Trash2 },
   { to: "/settings", label: "ตั้งค่า", icon: Settings },
 ];
@@ -55,19 +61,49 @@ const COLLAPSED_STORAGE_KEY = "staffSidebarCollapsed";
 
 export function Layout({ children }: Readonly<{ children: ReactNode }>) {
   const { user } = useAuth();
+  // ตัวเลขบนเมนู = เรื่องที่ต้องทำตอนนี้ (เร่ง + ควรทำวันนี้) · มีเรื่องเร่ง = แดง ไม่งั้นนาวี
+  // แดชบอร์ด/งานค้างเปิดได้เฉพาะ OWNER/ADMIN (บทบาทอื่นไม่ยิงขอเลย)
+  const pendingBadge = usePendingBadge(user?.role === "OWNER" || user?.role === "ADMIN");
+  const showBadge = pendingBadge != null && pendingBadge.count > 0;
+  const badgeColor = pendingBadge && pendingBadge.urgent > 0 ? "bg-red-600" : "bg-brand";
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_STORAGE_KEY) === "1");
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(
+    () => localStorage.getItem(COLLAPSED_STORAGE_KEY) === "1",
+  );
   const [logoError, setLogoError] = useState(false);
+  // จอแคบกว่า 1280 (iPad ทุกรุ่นทั้งสองแนว) = รางไอคอน 64px เสมอ กด ☰ แล้วเมนูเต็มกางทับเนื้อหา (ไม่ดันเนื้อหาให้แคบลง)
+  // จอคอม 1280 ขึ้นไป = แบบเดิม ย่อ/ขยายเองแล้วจำไว้
+  const narrow = useMediaQuery(NARROW_SCREEN);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const collapsed = narrow ? !overlayOpen : pinnedCollapsed;
 
   useEffect(() => {
-    localStorage.setItem(COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
-  }, [collapsed]);
+    localStorage.setItem(COLLAPSED_STORAGE_KEY, pinnedCollapsed ? "1" : "0");
+  }, [pinnedCollapsed]);
+
+  // เปลี่ยนหน้า / หมุนจอเป็นแนวนอน → ปิดเมนูที่กางทับอยู่
+  useEffect(() => {
+    setOverlayOpen(false);
+  }, [location.pathname, narrow]);
+
+  useEffect(() => {
+    if (!overlayOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOverlayOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overlayOpen]);
+
+  function toggleMenu() {
+    if (narrow) setOverlayOpen((v) => !v);
+    else setPinnedCollapsed((v) => !v);
+  }
 
   // ปุ่มย่อ/ขยายเมนู (hamburger เส้นเหลื่อม) — วางไว้มุมบนขวาของหัว sidebar ใช้ซ้ำทั้งตอนขยาย/ย่อ
   const toggleBtn = (
     <button
       type="button"
-      onClick={() => setCollapsed((v) => !v)}
+      onClick={toggleMenu}
+      aria-expanded={!collapsed}
       title={collapsed ? "ขยายเมนู" : "ยุบเมนู"}
       aria-label={collapsed ? "ขยายเมนู" : "ยุบเมนู"}
       className="menu-toggle shrink-0 rounded-md p-2 text-slate-500 hover:text-brand hover:bg-slate-100 transition-colors"
@@ -86,8 +122,15 @@ export function Layout({ children }: Readonly<{ children: ReactNode }>) {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
+      {/* จอแคบ: เมนูลอย (fixed) ทับเนื้อหา — กล่องเปล่า 64px นี้กันที่ไว้ให้รางไอคอน เนื้อหาจึงไม่ขยับตอนกาง */}
+      {narrow && <div aria-hidden className="w-16 shrink-0" />}
+      {narrow && overlayOpen && (
+        <div aria-hidden className="fixed inset-0 z-40 bg-slate-900/30" onClick={() => setOverlayOpen(false)} />
+      )}
       <aside
-        className={`shrink-0 border-r border-slate-200 bg-white flex flex-col sticky top-0 h-screen ${collapsed ? "w-16" : "w-60"}`}
+        className={`shrink-0 border-r border-slate-200 bg-white flex flex-col h-screen ${
+          narrow ? "fixed inset-y-0 left-0 z-40" : "sticky top-0"
+        } ${narrow && overlayOpen ? "shadow-xl" : ""} ${collapsed ? "w-16" : "w-60"}`}
       >
         {/* หัว sidebar สูง 64px (h-16) เท่ากับแถบ header ด้านขวาเป๊ะ → เส้นขอบล่างตรงกันเป็นเส้นเดียว
             โลโก้ h-14 (56px) พอดีในความสูงนี้ ไม่ต้องย่อ */}
@@ -132,8 +175,23 @@ export function Layout({ children }: Readonly<{ children: ReactNode }>) {
                     : "flex items-center gap-3 px-4 py-2 text-sm text-slate-700 border-l-2 border-transparent hover:bg-slate-50 hover:text-slate-800"
                 }
               >
-                <Icon size={18} className="shrink-0" />
+                <span className="relative shrink-0">
+                  <Icon size={18} />
+                  {/* เมนูยุบ = จุดแดงเล็ก ๆ บนไอคอน (ไม่มีที่วางตัวเลข) */}
+                  {collapsed && item.to === "/pending-work" && showBadge && (
+                    <span aria-hidden className={`absolute -right-1 -top-1 h-2 w-2 rounded-full ${badgeColor}`} />
+                  )}
+                </span>
                 {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
+                {!collapsed && item.to === "/pending-work" && showBadge && (
+                  <span
+                    className={`ml-auto rounded-full px-1.5 text-xs font-medium leading-5 tabular-nums text-white ${badgeColor}`}
+                    aria-label={`ต้องทำตอนนี้ ${pendingBadge.count} เรื่อง${pendingBadge.urgent > 0 ? ` (เร่ง ${pendingBadge.urgent})` : ""}`}
+                    title="เรื่องที่ต้องทำตอนนี้ (เร่ง + ควรทำวันนี้) · เรื่องระดับติดตามไม่นับ"
+                  >
+                    {pendingBadge.count > 99 ? "99+" : pendingBadge.count}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -151,6 +209,7 @@ export function Layout({ children }: Readonly<{ children: ReactNode }>) {
           <NotificationBell />
           <LogoutButton />
         </header>
+        <RecoveryEmailBanner />
         <main className="flex-1 px-6 py-8 w-full max-w-6xl mx-auto">{children}</main>
       </div>
     </div>

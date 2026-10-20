@@ -14,13 +14,17 @@ import {
   type CompanyDocFields,
   PAYMENT_CSS,
   QUOTE_TERMS_CSS,
-  renderCompanySigner,
+  type QuotePdfSigner,
+  renderQuoteSignatures,
+  SIGNATURE_CSS,
   renderPaymentAccount,
   renderQuoteTerms,
 } from "./company-blocks";
 import { documentChrome, LETTERHEAD_CSS, renderLetterhead } from "./letterhead";
 
 export interface CustomerQuotePdfItem {
+  /** หมวดย่อย (B-04 งานฐานราก) — ใช้ใน Excel ฉบับลูกค้า; PDF ยังไม่พิมพ์ */
+  subgroup?: { code: string | null; name: string } | null;
   /** รหัสงานของหมวดในบรรทัดนี้ ("B-02-01"); ถ้าไม่มีจะใช้เลขลำดับวิ่งแทน */
   code: string | null;
   name: string;
@@ -42,6 +46,8 @@ export interface CustomerQuotePdfCategoryGroup {
 // อัตรา overhead/กำไรเด็ดขาด ให้มีแค่ราคาขายต่อรายการที่บวก markup แล้ว และสรุปยอดรวม/VAT/
 // ยอดสุทธิมาตรฐานเท่านั้น ดู myQuotes.service.ts
 export interface CustomerQuotePdfData extends CustomerPartyPdfData, CompanyDocFields {
+  /** ผู้เสนอราคา/ผู้อนุมัติที่ตรึงลงใบ · ว่าง = ใบก่อนมีขั้นอนุมัติ พิมพ์ช่องเซ็นแบบเดิม */
+  signers?: QuotePdfSigner[];
   /** บัญชีรับเงินของบริษัท — null/ไม่ส่ง = ยังไม่ได้ตั้ง ไม่พิมพ์กล่องการชำระเงิน */
   paymentAccount?: PaymentAccountDto | null;
   quoteNo: string;
@@ -60,6 +66,8 @@ export interface CustomerQuotePdfData extends CustomerPartyPdfData, CompanyDocFi
   discountPct: number | null;
   discountAmt: number;
   discountNote: string | null;
+  /** ส่วนลดปัดเศษ (หักก่อน VAT ให้ยอดสุทธิลงตัว) — 0/ไม่ส่ง = ไม่พิมพ์แถว */
+  roundingAmt?: number;
   subtotalBeforeVat: number;
   vatPct: number;
   vatAmt: number;
@@ -91,6 +99,13 @@ function discountLabel(pct: number | null, note: string | null): string {
   return `ส่วนลด${pctPart}${notePart}`;
 }
 
+/** แถวก่อน VAT + แถว VAT */
+function vatRows(data: CustomerQuotePdfData): string {
+  return `
+          <tr><td class="label">รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม</td><td class="num" style="width:120px">${money(data.subtotalBeforeVat)}</td></tr>
+          <tr><td class="label">ภาษีมูลค่าเพิ่ม (${data.vatPct}%)</td><td class="num">${money(data.vatAmt)}</td></tr>`;
+}
+
 function renderSummarySection(data: CustomerQuotePdfData): string {
   const rows = data.groups
     .map(
@@ -105,12 +120,21 @@ function renderSummarySection(data: CustomerQuotePdfData): string {
 
   // ไม่มีส่วนลด = ไม่พิมพ์อะไรเพิ่ม ใบที่ไม่ได้ลดหน้าตาเหมือนเดิมทุกประการ
   // มีส่วนลด = ต้องโชว์ยอดก่อนลดด้วย ไม่งั้นลูกค้าบวกตัวเลขในตารางแล้วไม่ตรงกับยอดก่อน VAT
-  const discountRows =
+  // ส่วนลดปัดเศษก็เช่นกัน — ลดยอดก่อน VAT ลงเหมือนส่วนลด ต้องเห็นเป็นแถวของตัวเอง
+  const roundingAmt = data.roundingAmt ?? 0;
+  const discountLine =
     data.discountAmt > 0
+      ? `<tr><td class="label">${discountLabel(data.discountPct, data.discountNote)}</td><td class="num">-${money(data.discountAmt)}</td></tr>`
+      : "";
+  const roundingLine =
+    roundingAmt > 0 ? `<tr><td class="label">ส่วนลดปัดเศษ</td><td class="num">-${money(roundingAmt)}</td></tr>` : "";
+  const discountRows =
+    data.discountAmt > 0 || roundingAmt > 0
       ? `<tr><td class="label">รวมมูลค่างาน</td><td class="num" style="width:120px">${money(
           data.beforeDiscount,
         )}</td></tr>
-          <tr><td class="label">${discountLabel(data.discountPct, data.discountNote)}</td><td class="num">-${money(data.discountAmt)}</td></tr>`
+          ${discountLine}
+          ${roundingLine}`
       : "";
 
   return `
@@ -143,8 +167,7 @@ function renderSummarySection(data: CustomerQuotePdfData): string {
       <table class="totals">
         <tbody>
           ${discountRows}
-          <tr><td class="label">รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม</td><td class="num" style="width:120px">${money(data.subtotalBeforeVat)}</td></tr>
-          <tr><td class="label">ภาษีมูลค่าเพิ่ม (${data.vatPct}%)</td><td class="num">${money(data.vatAmt)}</td></tr>
+          ${vatRows(data)}
           <tr class="grand"><td class="label">รวมมูลค่าทั้งสิ้น</td><td class="num">${money(data.netPrice)}</td></tr>${renderWithholdingRows(data.withholding ?? null)}
         </tbody>
       </table>
@@ -152,47 +175,56 @@ function renderSummarySection(data: CustomerQuotePdfData): string {
       ${renderQuoteTerms(data.validUntil, data.terms)}
       ${renderPaymentAccount(data.paymentAccount)}
 
-      <div class="signature">
-        <div>ลงชื่อ ....................................... ผู้เสนอราคา</div>
-        ${renderCompanySigner(data.companyName, data.signatory)}
-      </div>
+      ${renderQuoteSignatures(data)}
     </div>`;
 }
 
+/** ช่องที่เป็นศูนย์แสดงเป็น "-" (แบบเดียวกับ BOQ ฝั่งพนักงาน) */
+function moneyOrDash(value: string | number): string {
+  const n = Number(value);
+  return n === 0 ? `<span class="dash">-</span>` : money(n);
+}
+
+/**
+ * ตารางรายหมวด แบบ A ชุดเดียวกับ BOQ ฝั่งพนักงาน (ผู้ใช้สั่ง 18 ต.ค.) — เส้นครบ ช่องหัวสีฟ้า
+ * แถบชื่อหมวดเต็มแถว แถวรวมหมวดพื้นอ่อน · คอลัมน์คงเดิม (ราคาขายต่อหน่วย/ราคารวม) ไม่มีราคาทุน (BR-09)
+ */
 function renderDetailSection(group: CustomerQuotePdfCategoryGroup): string {
   const rows = group.items
     .map(
       (item, idx) => `
         <tr>
-          <td>${escapeHtml(item.code ?? String(idx + 1))}</td>
+          <td class="c">${escapeHtml(item.code ?? String(idx + 1))}</td>
           <td>${escapeHtml(item.name)}</td>
           <td class="num">${item.quantity}</td>
-          <td>${escapeHtml(item.unit)}</td>
-          <td class="num">${money(Number(item.unitPrice))}</td>
-          <td class="num" style="font-weight:700">${money(Number(item.lineTotal))}</td>
-          <td>${item.note ? escapeHtml(item.note) : ""}</td>
+          <td class="c">${escapeHtml(item.unit)}</td>
+          <td class="num">${moneyOrDash(item.unitPrice)}</td>
+          <td class="num strong">${money(Number(item.lineTotal))}</td>
+          <td class="note">${item.note ? escapeHtml(item.note) : ""}</td>
         </tr>`,
     )
     .join("");
 
   return `
     <div class="section">
-      <div class="header-row">
-        <h1>QUOTATION</h1>
-        <span>${escapeHtml(group.categoryLabel)} ${escapeHtml(group.categoryName)}</span>
-      </div>
+      <h1>QUOTATION</h1>
 
-      <table>
+      <table class="boq">
+        <colgroup>
+          <col style="width:10%" /><col style="width:40%" /><col style="width:8%" /><col style="width:8%" />
+          <col style="width:12%" /><col style="width:13%" /><col style="width:9%" />
+        </colgroup>
         <thead>
           <tr>
-            <th>รหัส</th><th>รายการ</th><th class="num">จำนวน</th><th>หน่วย</th>
-            <th class="num">ราคาต่อหน่วย</th><th class="num">ราคารวม</th><th>หมายเหตุ</th>
+            <th>รหัส</th><th>รายการ</th><th>จำนวน</th><th>หน่วย</th>
+            <th>ราคาต่อหน่วย</th><th>ราคารวม</th><th>หมายเหตุ</th>
           </tr>
         </thead>
         <tbody>
+          <tr class="band"><td colspan="7">${escapeHtml(group.categoryLabel)} ${escapeHtml(group.categoryName)}</td></tr>
           ${rows}
           <tr class="subtotal-row">
-            <td colspan="5" class="label num">รวมมูลค่า${escapeHtml(group.categoryName)}</td>
+            <td colspan="5" class="num">รวมมูลค่า${escapeHtml(group.categoryName)}</td>
             <td class="num">${money(group.subtotal)}</td>
             <td></td>
           </tr>
@@ -228,7 +260,20 @@ function baseStyles(): string {
     .totals .label { text-align: right; }
     .totals .grand td { font-weight: 700; font-size: 12px; border-top: 1.5px solid #888; padding-top: 8px; }
     .subtotal-row td { font-weight: 700; border-top: 1.5px solid #888; border-bottom: none; }
+    /* ตารางรายหมวดแบบ A — ชุดเดียวกับ BOQ ฝั่งพนักงาน (quote-pdf.ts) และใบแจ้งหนี้/ใบเสร็จ */
+    table.boq { margin-top: 8px; table-layout: fixed; }
+    table.boq thead { display: table-header-group; }
+    table.boq th { background: #c6d9f1; text-align: center; vertical-align: middle; border: 1px solid #333; padding: 5px 3px; }
+    table.boq td { border: 1px solid #999; padding: 4px 5px; }
+    table.boq td.c { text-align: center; }
+    table.boq td.strong { font-weight: 700; }
+    table.boq td.note { font-size: 9px; color: #444; }
+    table.boq td .dash { color: #888; }
+    table.boq tr { page-break-inside: avoid; }
+    table.boq tr.band td { background: #eef3fa; border: 1px solid #333; font-weight: 700; font-size: 10.5px; }
+    table.boq tr.subtotal-row td { background: #eef3fa; border: 1px solid #333; }
     .signature { margin-top: 50px; font-size: 10px; }
+    ${SIGNATURE_CSS}
   `;
 }
 

@@ -1,4 +1,4 @@
-import { rebarUnitWeightKgPerM, rebarWeightKg, STANDARD_REBARS } from "@systemboq/shared-types";
+import { roundTo, rebarUnitWeightKgPerM, rebarWeightKg, STANDARD_REBARS } from "@systemboq/shared-types";
 import { Calculator, ChevronDown } from "lucide-react";
 
 import { Button } from "./Button";
@@ -121,12 +121,12 @@ export function RebarCalculator({
 
             <Button
               size="sm"
-              variant="secondary"
+              variant="neutral"
               disabled={weight == null}
               onClick={() => {
                 if (weight == null) return;
                 // ปัดที่ 3 ตำแหน่ง — ปริมาณ BOQ ไม่ต้องละเอียดกว่านี้ และกันเลขทศนิยมยาวเหยียด
-                onInsert(Math.round(weight * 1000) / 1000);
+                onInsert(roundTo(weight, 3));
                 if (onUnitChange && !unitIsKg) onUnitChange(KG);
               }}
             >

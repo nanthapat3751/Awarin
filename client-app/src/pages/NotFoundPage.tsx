@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { usePageMeta } from "../lib/page-meta";
 
 /**
  * หน้าปลายทางของ URL ที่ไม่ตรงกับเส้นทางไหนเลย (ฝั่งลูกค้า)
@@ -11,6 +12,7 @@ import { Link, useLocation } from "react-router-dom";
  * มีชุดเดียวกันอยู่แล้วทั้งคู่ ใส่อีกชุดจะกลายเป็นเมนูเดิมซ้ำสามรอบในจอเดียว
  */
 export function NotFoundPage() {
+  usePageMeta("ไม่พบหน้านี้");
   const { pathname } = useLocation();
 
   return (

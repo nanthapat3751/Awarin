@@ -85,7 +85,7 @@ export function ConfirmProvider({ children }: Readonly<{ children: ReactNode }>)
               <button
                 type="button"
                 onClick={() => handleChoice(false)}
-                className="text-sm text-slate-500 hover:underline"
+                className="link-pill text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-800"
               >
                 {request.cancelLabel}
               </button>

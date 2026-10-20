@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { roundingUnitLabel } from "@systemboq/shared-types";
 
 import { prisma } from "../../lib/prisma";
 
@@ -55,6 +56,11 @@ const TIMELINE_ACTIONS = new Set([
   "CUSTOMER_DOWNLOAD_ATTACHMENT",
   "CUSTOMER_RESPOND_QUOTE",
   "DELETE_QUOTE",
+  // ขั้นอนุมัติก่อนส่ง (quote-approval.service.ts)
+  "QUOTE_APPROVAL_REQUESTED",
+  "QUOTE_APPROVED",
+  "QUOTE_APPROVAL_RETURNED",
+  "QUOTE_APPROVAL_WITHDRAWN",
   "ADD_QUOTE_ATTACHMENT",
   "UPDATE_QUOTE_ATTACHMENT",
   "CREATE_CONTRACT",
@@ -62,6 +68,7 @@ const TIMELINE_ACTIONS = new Set([
   "ISSUE_ACCESS_LINK",
   "ACCESS_LINK_REDEEMED",
   "CREATE_CUSTOMER_FROM_LEAD",
+  "CREATE_CUSTOMER_FOR_PROJECT",
 ]);
 
 const PROJECT_STATUS_LABEL: Record<string, string> = {
@@ -97,6 +104,8 @@ interface RatesSnapshot {
   vatPct?: number;
   discountPct?: number | null;
   discountAmt?: number;
+  contingencyPct?: number;
+  roundingUnit?: number | null;
 }
 
 const baht = (n: number) =>
@@ -110,6 +119,11 @@ function discountLabel(snap: RatesSnapshot): string {
   return `ส่วนลด ${baht(amt)} บาท`;
 }
 
+/** "ไม่ปัดยอด" / "ปัดยอดสุทธิ: ปัดลงหลักพัน" — สถานะการปัดหนึ่งฝั่ง */
+function roundingLabel(snap: RatesSnapshot): string {
+  return snap.roundingUnit == null ? "ไม่ปัดยอด" : `ปัดยอดสุทธิ: ${roundingUnitLabel(snap.roundingUnit)}`;
+}
+
 /** "ยังไม่ได้แยก" / "ค่าดำเนินการ 4% + กำไร 6%" — สถานะการแบ่งหนึ่งฝั่ง */
 function splitLabel(snap: RatesSnapshot): string {
   if (snap.overheadPct == null) return "ยังไม่ได้แยกค่าดำเนินการกับกำไร";
@@ -117,12 +131,21 @@ function splitLabel(snap: RatesSnapshot): string {
   return `ค่าดำเนินการ ${snap.overheadPct}% + กำไร ${Math.round((total - snap.overheadPct) * 100) / 100}%`;
 }
 
+/**
+ * ค่าเผื่อเหลือเผื่อขาดเปลี่ยน — ต้องอยู่ในไทม์ไลน์เพราะมันเปลี่ยนราคาทั้งใบ
+ * (ของเก่าก่อนมีค่าเผื่อไม่มีคีย์นี้ใน details จึงต้องเช็ค undefined)
+ */
+function contingencyParts(before: RatesSnapshot, after: RatesSnapshot): string[] {
+  if ((before.contingencyPct ?? 0) === (after.contingencyPct ?? 0)) return [];
+  return [`เผื่อเหลือเผื่อขาด ${before.contingencyPct ?? 0}% → ${after.contingencyPct ?? 0}%`];
+}
+
 /** "ค่าดำเนินการ+กำไร 10% → 7%" — เขียนเฉพาะตัวที่เปลี่ยนจริง อีกตัวไม่ต้องรก */
 function ratesDetail(details: Details): string | null {
   const before = details.before as RatesSnapshot | undefined;
   const after = details.after as RatesSnapshot | undefined;
   if (!before || !after) return null;
-  const parts: string[] = [];
+  const parts: string[] = contingencyParts(before, after);
   if (before.overheadProfitPct !== after.overheadProfitPct) {
     parts.push(`ค่าดำเนินการ+กำไร ${before.overheadProfitPct}% → ${after.overheadProfitPct}%`);
   }
@@ -140,6 +163,10 @@ function ratesDetail(details: Details): string | null {
   ) {
     parts.push(`${discountLabel(before)} → ${discountLabel(after)}`);
   }
+  // ของเก่าก่อนมีการปัดยอดไม่มีคีย์นี้ — undefined กับ null คือ "ไม่ปัด" เหมือนกัน
+  if ((before.roundingUnit ?? null) !== (after.roundingUnit ?? null)) {
+    parts.push(`${roundingLabel(before)} → ${roundingLabel(after)}`);
+  }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -154,10 +181,12 @@ function ratesTitle(details: Details): string {
   const rateChanged =
     before.overheadProfitPct !== after.overheadProfitPct ||
     (before.overheadPct ?? null) !== (after.overheadPct ?? null) ||
-    before.vatPct !== after.vatPct;
+    before.vatPct !== after.vatPct ||
+    contingencyParts(before, after).length > 0;
   const discountChanged =
     (before.discountPct ?? null) !== (after.discountPct ?? null) ||
-    (before.discountAmt ?? 0) !== (after.discountAmt ?? 0);
+    (before.discountAmt ?? 0) !== (after.discountAmt ?? 0) ||
+    (before.roundingUnit ?? null) !== (after.roundingUnit ?? null);
 
   if (!discountChanged) return RATES_ONLY;
   return rateChanged ? "แก้อัตราและส่วนลด" : "แก้ส่วนลด";
@@ -216,6 +245,8 @@ function describe(
       return { kind: "created", title: "ผูกโครงการเข้ากับคำขอของลูกค้า", detail: null };
     case "CREATE_CUSTOMER_FROM_LEAD":
       return { kind: "customer", title: "สร้างบัญชีลูกค้าจากคำขอ", detail: str(details, "email") };
+    case "CREATE_CUSTOMER_FOR_PROJECT":
+      return { kind: "customer", title: "สร้างบัญชีลูกค้าให้โครงการ", detail: str(details, "email") };
     case "ISSUE_ACCESS_LINK":
       return { kind: "customer", title: "ออกลิงก์เข้าใช้งานให้ลูกค้า", detail: null };
     case "ACCESS_LINK_REDEEMED":
@@ -249,6 +280,19 @@ function describe(
 
     case "TRANSITION_QUOTE":
       return describeQuoteTransition(str(details, "to"), quoteLabel);
+
+    case "QUOTE_APPROVAL_REQUESTED":
+      return { kind: "quote", title: `ขออนุมัติ${quoteLabel}`, detail: null };
+    case "QUOTE_APPROVED":
+      return {
+        kind: "status",
+        title: `อนุมัติ${quoteLabel}`,
+        detail: details?.selfProposed === true ? "เจ้าของออกใบและอนุมัติเอง" : null,
+      };
+    case "QUOTE_APPROVAL_RETURNED":
+      return { kind: "status", title: `ส่ง${quoteLabel} กลับให้แก้`, detail: str(details, "note") };
+    case "QUOTE_APPROVAL_WITHDRAWN":
+      return { kind: "status", title: `ถอนคำขออนุมัติ${quoteLabel}`, detail: null };
 
     // ลูกค้าเปิดอ่านซ้ำได้เรื่อย ๆ — ไทม์ไลน์ของโครงการจึงเอาเฉพาะ "ครั้งแรก" (recordQuoteView
     // ติดธง details.firstView ไว้ให้) ไม่งั้นการเปิดอ่านจะกลบหมุดหมายของดีลจนอ่านไม่ออก
@@ -290,11 +334,30 @@ function describe(
   }
 }
 
+export const ACTIVITY_PAGE_SIZE = 15;
+
+// การเปิดดูซ้ำ/สลับชนิดไฟล์แนบไม่ขึ้นไทม์ไลน์ (ดู describe) — กรองที่ฐานข้อมูลด้วยเงื่อนไขเดียวกัน
+// ไม่งั้นนับยอดรวมเกิน และแต่ละหน้าได้ไม่ครบ 15 แถวเพราะถูกตัดทิ้งหลังดึงมาแล้ว
+const FIRST_VIEW_ONLY = ["CUSTOMER_OPEN_QUOTE", "CUSTOMER_OPEN_QUOTE_PDF", "CUSTOMER_DOWNLOAD_ATTACHMENT"];
+const CUSTOMER_VISIBILITY_ONLY = ["UPDATE_QUOTE_ATTACHMENT"];
+const ALWAYS_SHOWN = [...TIMELINE_ACTIONS].filter(
+  (a) => !FIRST_VIEW_ONLY.includes(a) && !CUSTOMER_VISIBILITY_ONLY.includes(a),
+);
+
+export interface ProjectActivityPage {
+  activity: ProjectActivityItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
 /**
- * รวมเหตุการณ์ทั้งหมดของโครงการ (รวมของใบเสนอราคา/สัญญา/เวอร์ชัน/ไฟล์แนบที่อยู่ใต้โครงการนี้)
- * เรียงใหม่สุดขึ้นก่อน
+ * เหตุการณ์ของโครงการ (รวมของใบเสนอราคา/สัญญา/เวอร์ชัน/ไฟล์แนบที่อยู่ใต้โครงการนี้)
+ * เรียงใหม่สุดขึ้นก่อน แบ่งหน้าละ 15 ที่ฐานข้อมูล — งานที่เดินมาหลายเดือนมีหลายร้อยเหตุการณ์
+ * ขอหน้าเกินหน้าสุดท้ายได้หน้าสุดท้าย
  */
-export async function getProjectActivity(projectId: string): Promise<ProjectActivityItem[]> {
+export async function getProjectActivity(projectId: string, requestedPage = 1): Promise<ProjectActivityPage> {
+  const empty = { activity: [], page: 1, pageSize: ACTIVITY_PAGE_SIZE, total: 0 };
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: {
@@ -304,7 +367,7 @@ export async function getProjectActivity(projectId: string): Promise<ProjectActi
       versions: { select: { id: true } },
     },
   });
-  if (!project) return [];
+  if (!project) return empty;
 
   const quoteIds = project.quotes.map((q) => q.id);
   const quoteNoById = new Map(project.quotes.map((q) => [q.id, q.quoteNo]));
@@ -328,9 +391,23 @@ export async function getProjectActivity(projectId: string): Promise<ProjectActi
     ...attachmentIds,
   ];
 
+  const where: Prisma.AuditLogWhereInput = {
+    entityId: { in: entityIds },
+    OR: [
+      { action: { in: ALWAYS_SHOWN } },
+      { action: { in: FIRST_VIEW_ONLY }, details: { path: ["firstView"], equals: true } },
+      { action: { in: CUSTOMER_VISIBILITY_ONLY }, details: { path: ["visibility"], equals: "CUSTOMER" } },
+    ],
+  };
+  const total = await prisma.auditLog.count({ where });
+  const lastPage = Math.max(1, Math.ceil(total / ACTIVITY_PAGE_SIZE));
+  const page = Math.min(Math.max(1, Math.floor(requestedPage) || 1), lastPage);
   const rows = await prisma.auditLog.findMany({
-    where: { entityId: { in: entityIds }, action: { in: [...TIMELINE_ACTIONS] } },
-    orderBy: { createdAt: "desc" },
+    where,
+    // id ต่อท้าย — เหตุการณ์เวลาเดียวกันต้องไม่สลับที่ข้ามหน้า
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: (page - 1) * ACTIVITY_PAGE_SIZE,
+    take: ACTIVITY_PAGE_SIZE,
     include: { user: { select: { fullName: true } } },
   });
 
@@ -348,5 +425,5 @@ export async function getProjectActivity(projectId: string): Promise<ProjectActi
       detail: described.detail,
     });
   }
-  return items;
+  return { activity: items, page, pageSize: ACTIVITY_PAGE_SIZE, total };
 }

@@ -1,6 +1,7 @@
 import { type ContractStructure, DEFAULT_CONTRACT_TEMPLATE } from "../../src/lib/contract-template";
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 /**
  * แม่แบบสัญญาที่แก้ถ้อยคำเองได้ + การแช่แข็งเนื้อสัญญาลงฉบับที่ออกไปแล้ว
@@ -105,9 +106,7 @@ describe("contract templates", () => {
     });
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
     const quoteId = quote.body.quote.id;
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
     await owner.agent
       .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
       .send({ toStatus: "ACCEPTED" });

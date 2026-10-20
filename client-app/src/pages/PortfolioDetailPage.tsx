@@ -6,6 +6,9 @@ import type { PortfolioDto, PortfolioType } from "@systemboq/shared-types";
 import { Reveal } from "../components/Reveal";
 import { getPortfolioItem } from "../lib/public-api";
 import { useParallax } from "../lib/use-parallax";
+import { NaturalImage } from "../components/NaturalImage";
+import { PortfolioDetailSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
 
 const TYPE_LABEL: Record<PortfolioType, string> = {
   DESIGN: "งานออกแบบ",
@@ -20,7 +23,26 @@ function CoverImage({ src, alt }: Readonly<{ src: string; alt: string }>) {
   // ค่าเบากว่าค่าเริ่มต้นของฮุก: กรอบปกสูงแค่ 320-460px (เตี้ยกว่าจอ) ถ้าเลื่อนแรงจะเห็นขอบว่าง
   // ที่หัว/ท้ายกรอบตอนสกรอลล์ — ใช้ระยะเลื่อน 0.06 คู่กับการขยายรูปเผื่อขอบ 1.16 จึงพอดีทุกขนาดจอ
   const ref = useParallax<HTMLImageElement>(0.06, 1.16);
-  return <img ref={ref} src={src} alt={alt} className="h-full w-full object-cover" />;
+  // แสงวิ่งรองใต้ปกระหว่างรอ แล้วจางเข้า (เดิมโผล่พรวดบนพื้นเทา) · ใช้ FadeImage ไม่ได้เพราะ parallax
+  // ต้องผูก ref กับ <img> ตัวนี้เอง · รูปในแคชอาจเสร็จก่อนผูก onLoad จึงเช็ค complete ซ้ำ
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    setDone(Boolean(ref.current?.complete));
+  }, [src, ref]);
+  return (
+    <>
+      {!done && <div aria-hidden className="skeleton absolute inset-0 rounded-none" />}
+      <img
+        ref={ref}
+        src={src}
+        alt={alt}
+        onLoad={() => setDone(true)}
+        onError={() => setDone(true)}
+        // จางเข้าด้วย opacity อย่างเดียว — .fade-image มี transition ของ transform ด้วย จะทำให้ parallax หน่วงตามนิ้ว
+        className={`h-full w-full object-cover transition-opacity duration-700 motion-reduce:transition-none ${done ? "opacity-100" : "opacity-0"}`}
+      />
+    </>
+  );
 }
 
 export function PortfolioDetailPage() {
@@ -37,8 +59,20 @@ export function PortfolioDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  usePageMeta(
+    loading ? undefined : (item?.title ?? "ไม่พบผลงาน"),
+    item
+      ? (item.description ??
+          `${item.title} · ผลงาน${item.type === "CONSTRUCTION" ? "ก่อสร้าง" : "ออกแบบ"}ของเรา ดูภาพงานจริงทั้งหมด`)
+      : undefined,
+  );
+
   if (loading) {
-    return <div className="min-h-[calc(100vh-4.5rem)] px-4 py-12 text-slate-400">กำลังโหลด...</div>;
+    return (
+      <div className="min-h-[calc(100vh-4.5rem)]">
+        <PortfolioDetailSkeleton />
+      </div>
+    );
   }
 
   if (notFound || !item) {
@@ -81,7 +115,7 @@ export function PortfolioDetailPage() {
             className="hero-item relative mt-4 overflow-hidden rounded-2xl bg-slate-100"
             style={{ animationDelay: "0.15s" }}
           >
-            <div className="h-80 overflow-hidden sm:h-115">
+            <div className="relative h-80 overflow-hidden sm:h-115">
               <CoverImage src={cover} alt={item.title} />
             </div>
             <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/25 to-transparent" />
@@ -123,13 +157,7 @@ export function PortfolioDetailPage() {
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {gallery.map((url, i) => (
               <Reveal key={url} delay={i * 90}>
-                <div className="overflow-hidden rounded-xl border border-slate-100">
-                  <img
-                    src={url}
-                    alt={item.title}
-                    className="w-full transition-transform duration-500 hover:scale-105"
-                  />
-                </div>
+                <NaturalImage src={url} alt={item.title} className="rounded-xl border border-slate-100" />
               </Reveal>
             ))}
           </div>

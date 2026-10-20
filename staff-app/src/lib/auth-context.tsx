@@ -32,12 +32,12 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
       .finally(() => setStatus("ready"));
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (username: string, password: string) => {
     const res = await apiFetch<{ user?: AuthenticatedUser; twoFactorRequired?: boolean }>(
       "/api/auth/staff/login",
       {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       },
     );
     if (res.twoFactorRequired) {

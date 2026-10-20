@@ -1,4 +1,4 @@
-import { GripVertical, ImageOff, Star, Trash2 } from "lucide-react";
+import { Check, GripVertical, ImageOff, Star, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -11,6 +11,7 @@ import { Layout } from "../components/Layout";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { ApiError } from "../lib/api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import {
@@ -22,6 +23,7 @@ import {
 } from "../lib/portfolio-api";
 import { rowNavClass, stopRowNav, useRowNav } from "../lib/row-nav";
 import { featuredStar, publishedBadgeClass } from "../lib/status-badge";
+import { TableSkeleton } from "../components/Skeleton";
 
 const TYPE_LABEL: Record<PortfolioType, string> = {
   DESIGN: "งานออกแบบ",
@@ -65,6 +67,9 @@ export function PortfolioPage() {
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // ขึ้นตัวแดงหลังกดบันทึกครั้งแรกเท่านั้น (เดิมกดบันทึกตอนไม่มีชื่อแล้วเงียบไปเฉย ๆ)
+  const [attempted, setAttempted] = useState(false);
+  const titleMissing = attempted && !form.title.trim();
   const [page, setPage] = useState(1);
 
   // ลำดับผลงานเด่น (id เรียงตามที่ลาก) + ตัวที่กำลังลาก
@@ -109,8 +114,18 @@ export function PortfolioPage() {
     refresh();
   }, []);
 
+  function openAddForm() {
+    setForm(EMPTY_FORM);
+    setAttempted(false);
+    setShowAddForm((v) => !v);
+  }
+
   async function submitCreate() {
-    if (!form.title.trim()) return;
+    setAttempted(true);
+    if (!form.title.trim()) {
+      document.getElementById("portfolio-title")?.focus();
+      return;
+    }
     try {
       await createPortfolioItem({
         title: form.title.trim(),
@@ -120,6 +135,7 @@ export function PortfolioPage() {
       });
       setForm(EMPTY_FORM);
       setShowAddForm(false);
+      toast.success(`เพิ่ม “${form.title.trim()}” แล้ว`);
       await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "เพิ่มผลงานไม่สำเร็จ");
@@ -149,11 +165,14 @@ export function PortfolioPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!(await confirm("ย้ายผลงานนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ย้ายไปถังขยะ" })))
+    if (!(await confirm("ย้ายผลงานนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ลบ" })))
       return;
     try {
       await deletePortfolioItem(id);
-      toast.success("ย้ายไปถังขยะแล้ว — กู้คืนได้ที่เมนูถังขยะ");
+      toast.undo("ย้ายผลงานไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("portfolio", id);
+        await refresh();
+      });
       await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ย้ายไปถังขยะไม่สำเร็จ");
@@ -180,7 +199,7 @@ export function PortfolioPage() {
     <Layout>
       <PageHeader
         title="ผลงาน"
-        action={<Button onClick={() => setShowAddForm((v) => !v)}>+ เพิ่มผลงาน</Button>}
+        action={<Button onClick={openAddForm}>+ เพิ่มผลงาน</Button>}
       />
 
       {/* ---------- โซนผลงานเด่นในหน้าบริการ ---------- */}
@@ -253,8 +272,8 @@ export function PortfolioPage() {
                       )}
                     </div>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => toggleFeatured(item)}>
-                    เอาออก
+                  <Button variant="dangerQuiet" size="sm" onClick={() => toggleFeatured(item)}>
+                    เอาออกจากหน้าบริการ
                   </Button>
                 </li>
               );
@@ -264,52 +283,76 @@ export function PortfolioPage() {
       </section>
 
       {showAddForm && (
-        <div className="mb-4 grid grid-cols-2 gap-2 border border-dashed border-slate-300 rounded-md p-3 bg-white">
+        <div className="mb-4 grid gap-4 rounded-lg border border-slate-200 bg-white p-4">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div>
+              <label htmlFor="portfolio-title" className="mb-1 block text-xs text-slate-700">
+                ชื่อผลงาน <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="portfolio-title"
+                autoFocus
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="เช่น บ้านเดี่ยว 2 ชั้น หมู่บ้านลัดดา"
+                aria-invalid={titleMissing || undefined}
+                className={`w-full rounded-md border px-2 py-1 text-sm ${titleMissing ? "border-red-400" : "border-slate-300"}`}
+              />
+              {titleMissing && <p className="mt-1 text-xs text-red-600">กรอกชื่อผลงาน</p>}
+            </div>
+            {/* มีแค่ 2 ตัวเลือก — ปุ่มสลับกดครั้งเดียว แทน dropdown ที่ต้องกดสองครั้ง */}
+            <div>
+              <span id="portfolio-type" className="mb-1 block text-xs text-slate-700">
+                ประเภท
+              </span>
+              <div role="radiogroup" aria-labelledby="portfolio-type" className="inline-flex rounded-md border border-slate-300 p-0.5">
+                {(Object.keys(TYPE_LABEL) as PortfolioType[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={form.type === t}
+                    onClick={() => setForm((f) => ({ ...f, type: t }))}
+                    className={`rounded px-3 py-1 text-sm transition-colors ${
+                      form.type === t ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {TYPE_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>ชื่อผลงาน</span>
-            <input
-              value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>ประเภท</span>
-            <select
-              value={form.type}
-              onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as PortfolioType }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            >
-              <option value="DESIGN">งานออกแบบ</option>
-              <option value="CONSTRUCTION">งานก่อสร้าง</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700 col-span-2">
-            <span>รายละเอียด</span>
+            <span>
+              รายละเอียด <span className="text-slate-400">(ไม่บังคับ)</span>
+            </span>
             <textarea
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              rows={2}
+              placeholder="พื้นที่ใช้สอย ทำเล จุดเด่นของงาน"
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              rows={3}
             />
           </label>
-          <div className="col-span-2">
-            <ImageUploadField
-              label="รูปภาพ"
-              value={form.images}
-              onChange={(v) => setForm((f) => ({ ...f, images: v }))}
-            />
-          </div>
-          <div className="col-span-2 flex gap-2">
-            <Button onClick={submitCreate}>บันทึก</Button>
+          <ImageUploadField
+            label="รูปภาพ"
+            cover
+            value={form.images}
+            onChange={(v) => setForm((f) => ({ ...f, images: v }))}
+          />
+          <div className="flex gap-2 border-t border-slate-100 pt-3">
+            <Button onClick={submitCreate}>
+              <Check size={14} /> บันทึก
+            </Button>
             <Button variant="ghost" onClick={() => setShowAddForm(false)}>
-              ยกเลิก
+              <X size={14} /> ยกเลิก
             </Button>
           </div>
         </div>
       )}
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && <TableSkeleton rows={6} cols={5} />}
       {error && <p className="text-red-600">{error}</p>}
       {!loading && !error && items.length === 0 && <p className="text-slate-500">ยังไม่มีผลงาน</p>}
 
@@ -320,7 +363,8 @@ export function PortfolioPage() {
       )}
 
       {items.length > 0 && (
-        <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
             <tr>
               <th className="px-3 py-2">ชื่อผลงาน</th>
@@ -370,7 +414,7 @@ export function PortfolioPage() {
                   <td className="px-3 py-2 whitespace-nowrap" onClick={stopRowNav}>
                     <div className="flex gap-2">
                       <Button
-                        variant={item.published ? "ghost" : "primary"}
+                        variant={item.published ? "dangerQuiet" : "ghost"}
                         size="sm"
                         onClick={() => togglePublish(item)}
                       >
@@ -386,6 +430,7 @@ export function PortfolioPage() {
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />

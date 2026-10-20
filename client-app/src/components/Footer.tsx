@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { getPublicSettings } from "../lib/public-api";
+import { cachedPublicSettings, getPublicSettings } from "../lib/public-api";
 import { lineHref as toLineHref, safeHttpUrl } from "../lib/safe-url";
+import { Skeleton } from "./Skeleton";
 import { FacebookIcon, LineIcon, YoutubeIcon } from "./SocialIcons";
 
 const ORG_LINKS = [
+  { to: "/about", label: "เกี่ยวกับเรา" },
   { to: "/house-designs", label: "แบบบ้าน" },
   { to: "/portfolio", label: "ผลงาน" },
   { to: "/contact", label: "ติดต่อเรา" },
@@ -26,13 +28,13 @@ function LinkColumn({ title, links }: Readonly<{ title: string; links: { to: str
   return (
     <div>
       <h4 className="text-white text-sm font-medium mb-3">{title}</h4>
-      {/* บนมือถือแต่ละลิงก์สูง 44px ตามเกณฑ์นิ้วมือ; บนเดสก์ท็อปกลับไปกระชับเหมือนเดิม */}
+      {/* มือถือแต่ละลิงก์สูง 44px ตามเกณฑ์นิ้วมือ · แท็บเล็ต 40px (เรียง 3 คอลัมน์แล้ว 44px ดูห่างเกิน) · จอใหญ่กระชับ */}
       <ul className="flex flex-col text-sm lg:gap-2">
         {links.map((link) => (
           <li key={link.to}>
             <Link
               to={link.to}
-              className="flex min-h-11 items-center text-slate-400 transition-colors hover:text-white lg:min-h-0"
+              className="flex min-h-11 items-center text-slate-400 transition-colors hover:text-white sm:min-h-10 lg:min-h-0"
             >
               {link.label}
             </Link>
@@ -76,14 +78,19 @@ function SocialLink({ href, label, children }: Readonly<{ href: string; label: s
 }
 
 export function Footer() {
-  const [settings, setSettings] = useState<Record<string, string>>({});
+  // เริ่มจากค่าที่เบราว์เซอร์จำไว้จากการเปิดครั้งก่อน · null = ยังไม่รู้ (เปิดเว็บครั้งแรก) → แสงวิ่ง
+  // ไม่ใช่ข้อความสำรอง — เดิมโชว์ "บริษัทรับออกแบบและสร้างบ้าน" / "ส่งข้อความถึงเรา" ระหว่างรอ
+  // เหมือนเป็นข้อมูลจริง แล้วค่อยสลับเป็นชื่อบริษัท · ข้อความสำรองเหลือไว้เฉพาะตอนโหลดไม่สำเร็จจริง
+  const [loaded, setLoaded] = useState<Record<string, string> | null>(cachedPublicSettings);
 
   useEffect(() => {
     getPublicSettings()
-      .then((res) => setSettings(res.settings))
-      .catch(() => undefined);
+      .then((res) => setLoaded(res.settings))
+      .catch(() => setLoaded((prev) => prev ?? {}));
   }, []);
 
+  const pending = loaded === null;
+  const settings = loaded ?? {};
   const companyName = settings.companyName || "บริษัทรับออกแบบและสร้างบ้าน";
   const year = new Date().getFullYear() + 543; // พ.ศ.
 
@@ -97,10 +104,21 @@ export function Footer() {
   return (
     <footer className="bg-[#000033] text-slate-300">
       {/* 4 คอลัมน์บนจอใหญ่ · 2 คอลัมน์บนแท็บเล็ต · เรียงลงมาบนมือถือ */}
-      <div className="max-w-5xl mx-auto px-4 py-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-        <div>
-          <h3 className="text-white font-semibold text-lg">{companyName}</h3>
-          <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+      {/* มือถือ: ชื่อบริษัทเต็มแถว → องค์กร|บริการ คู่กัน → ติดต่อเต็มแถว (เดิมเรียงลงทีละคอลัมน์ ยาวมาก)
+          แท็บเล็ต: ชื่อบริษัทเต็มแถว → 3 คอลัมน์ (เดิม 2×2 ช่องชื่อบริษัทสั้น เหลือที่ว่างใหญ่ข้างคอลัมน์องค์กร)
+          จอใหญ่: 4 คอลัมน์เหมือนเดิม */}
+      <div className="max-w-5xl mx-auto px-4 py-12 grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-3 sm:gap-x-8 lg:grid-cols-4">
+        <div className="col-span-2 sm:col-span-3 lg:col-span-1">
+          {pending ? (
+            // สูงเท่าบรรทัดชื่อจริง (text-lg) — ข้อมูลมาแล้วคอลัมน์ไม่ขยับ
+            <h3 className="flex h-7 items-center">
+              <span className="sr-only">กำลังโหลด</span>
+              <Skeleton className="on-dark h-5 w-56 max-w-full" />
+            </h3>
+          ) : (
+            <h3 className="text-white font-semibold text-lg">{companyName}</h3>
+          )}
+          <p className="text-sm text-slate-400 mt-2 max-w-md leading-relaxed">
             รับออกแบบและก่อสร้างบ้าน พร้อมประเมินราคาต้นทุนอย่างโปร่งใส
           </p>
         </div>
@@ -108,15 +126,22 @@ export function Footer() {
         <LinkColumn title="องค์กร" links={ORG_LINKS} />
         <LinkColumn title="บริการ" links={SERVICE_LINKS} />
 
-        <div>
+        <div className="col-span-2 sm:col-span-1">
           <h4 className="text-white text-sm font-medium mb-3">ติดต่อ</h4>
+          {pending && (
+            <div aria-hidden className="flex flex-col gap-3 pt-1">
+              <Skeleton className="on-dark h-3.5 w-40" />
+              <Skeleton className="on-dark h-3.5 w-52 max-w-full" />
+              <Skeleton className="on-dark h-3.5 w-full max-w-60" />
+            </div>
+          )}
           <ul className="flex flex-col gap-2 text-sm text-slate-400">
             {settings.companyPhone && (
               <li className="flex items-center">
                 โทร.{" "}
                 <a
                   href={`tel:${settings.companyPhone}`}
-                  className="ml-1 inline-flex min-h-11 items-center hover:text-white lg:min-h-0"
+                  className="ml-1 inline-flex min-h-11 items-center hover:text-white sm:min-h-10 lg:min-h-0"
                 >
                   {settings.companyPhone}
                 </a>
@@ -127,16 +152,16 @@ export function Footer() {
                 อีเมล{" "}
                 <a
                   href={`mailto:${email}`}
-                  className="ml-1 inline-flex min-h-11 items-center break-all hover:text-white lg:min-h-0"
+                  className="ml-1 inline-flex min-h-11 items-center break-all hover:text-white sm:min-h-10 lg:min-h-0"
                 >
                   {email}
                 </a>
               </li>
             )}
             {settings.companyAddress && <li className="leading-relaxed">{settings.companyAddress}</li>}
-            {!settings.companyPhone && !settings.companyAddress && !email && (
+            {!pending && !settings.companyPhone && !settings.companyAddress && !email && (
               <li>
-                <Link to="/contact" className="flex min-h-11 items-center hover:text-white lg:min-h-0">
+                <Link to="/contact" className="flex min-h-11 items-center hover:text-white sm:min-h-10 lg:min-h-0">
                   ส่งข้อความถึงเรา →
                 </Link>
               </li>
@@ -172,7 +197,9 @@ export function Footer() {
 
       <div className="border-t border-white/10">
         <div className="max-w-5xl mx-auto px-4 py-4 text-xs text-slate-500 text-center">
-          © {year} {companyName}. สงวนลิขสิทธิ์
+          {/* ระหว่างรอไม่ใส่ชื่อสำรองในบรรทัดลิขสิทธิ์ — ชื่อบริษัทจริงมาแล้วค่อยเติม
+              ชื่อที่ลงท้ายด้วยจุดอยู่แล้ว ("Co., Ltd.") ไม่เติมจุดซ้ำ — เดิมขึ้นเป็น "Ltd.." */}
+          © {year} {pending ? "" : `${companyName.endsWith(".") ? companyName : `${companyName}.`} `}สงวนลิขสิทธิ์
         </div>
       </div>
     </footer>

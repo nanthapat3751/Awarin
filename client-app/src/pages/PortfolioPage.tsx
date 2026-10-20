@@ -5,9 +5,13 @@ import type { PortfolioDto, PortfolioType } from "@systemboq/shared-types";
 
 import { CtaBanner } from "../components/CtaBanner";
 import { ImagePeek } from "../components/ImagePeek";
+import { Pagination } from "../components/Pagination";
 import { Reveal } from "../components/Reveal";
 import { cardGridClass } from "../lib/card-grid";
 import { listPortfolio } from "../lib/public-api";
+import { CardGridSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
+import { useUrlPage } from "../lib/use-url-page";
 
 const FILTERS: { label: string; value: PortfolioType | undefined }[] = [
   { label: "ทั้งหมด", value: undefined },
@@ -67,14 +71,21 @@ function PortfolioCard({ item }: Readonly<{ item: PortfolioDto }>) {
 }
 
 export function PortfolioPage() {
+  usePageMeta("ผลงาน", "ผลงานออกแบบและก่อสร้างบ้านที่ผ่านมาของเรา ดูภาพงานจริงทั้งงานออกแบบและงานก่อสร้าง");
   const [items, setItems] = useState<PortfolioDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<PortfolioType | undefined>(undefined);
-  const [page, setPage] = useState(1);
+  const { page, setPage, topRef } = useUrlPage();
+
+  function changeFilter(next: PortfolioType | undefined) {
+    if (next === filter) return;
+    setFilter(next);
+    // ตัวกรองใหม่ = ชุดใหม่ เริ่มหน้า 1 (ไม่เลื่อนจอ ไม่เพิ่มประวัติ)
+    setPage(1, { scroll: false });
+  }
 
   useEffect(() => {
     setLoading(true);
-    setPage(1);
     listPortfolio(filter)
       .then((res) => setItems(res.portfolio))
       .finally(() => setLoading(false));
@@ -103,7 +114,7 @@ export function PortfolioPage() {
             <button
               key={f.label}
               type="button"
-              onClick={() => setFilter(f.value)}
+              onClick={() => changeFilter(f.value)}
               className={`inline-flex min-h-11 items-center rounded-full border px-4 py-1 text-sm transition-colors lg:min-h-0 ${
                 filter === f.value
                   ? "border-brand bg-brand text-white"
@@ -115,11 +126,11 @@ export function PortfolioPage() {
           ))}
         </div>
 
-        {loading && <p className="text-slate-400">กำลังโหลด...</p>}
+        {loading && <CardGridSkeleton count={6} label="กำลังโหลดผลงาน..." />}
         {!loading && items.length === 0 && <p className="text-slate-400">ยังไม่มีผลงาน</p>}
 
         {pageItems.length > 0 && (
-          <div className={`grid gap-6 ${cardGridClass(pageItems.length)}`}>
+          <div ref={topRef} className={`grid gap-6 ${cardGridClass(pageItems.length)}`}>
             {pageItems.map((item, i) => (
               <Reveal key={item.id} className="h-full" delay={i * 90}>
                 <PortfolioCard item={item} />
@@ -128,41 +139,7 @@ export function PortfolioPage() {
           </div>
         )}
 
-        {pageCount > 1 && (
-          <nav className="mt-10 flex items-center justify-center gap-1" aria-label="แบ่งหน้า">
-            <button
-              type="button"
-              onClick={() => setPage(safePage - 1)}
-              disabled={safePage === 1}
-              aria-label="หน้าก่อนหน้า"
-              className="flex h-9 w-9 items-center justify-center rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              ‹
-            </button>
-            {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setPage(n)}
-                aria-current={n === safePage ? "page" : undefined}
-                className={`h-9 w-9 rounded text-sm ${
-                  n === safePage ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPage(safePage + 1)}
-              disabled={safePage === pageCount}
-              aria-label="หน้าถัดไป"
-              className="flex h-9 w-9 items-center justify-center rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              ›
-            </button>
-          </nav>
-        )}
+        <Pagination page={safePage} pageCount={pageCount} onChange={(n) => setPage(n)} className="mt-10" />
       </div>
 
       {/* ต่อจากตะแกรง — คนที่ดูผลงานจบแล้วมักอยากรู้ต่อว่า "แล้วรับทำอะไรบ้าง"

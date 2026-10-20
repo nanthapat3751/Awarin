@@ -1,5 +1,6 @@
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 describe("projects module", () => {
   let owner: Awaited<ReturnType<typeof createAndLoginOwner>>;
@@ -273,6 +274,45 @@ describe("projects module", () => {
       }
     });
 
+    it("แบ่งหน้าละ 15 ที่ฐานข้อมูล นับเฉพาะเหตุการณ์ที่ขึ้นไทม์ไลน์จริง", async () => {
+      const created = await owner.agent.post("/api/projects").send({ name: "โครงการทดสอบแบ่งหน้าไทม์ไลน์" });
+      const projectId = created.body.project.id as string;
+      createdProjectIds.push(projectId);
+
+      const base = Date.now() - 60 * 60_000;
+      const row = (action: string, i: number, details?: object) => ({
+        userId: owner.userId,
+        action,
+        entityType: "Project",
+        entityId: projectId,
+        createdAt: new Date(base - i * 1000),
+        ...(details ? { details } : {}),
+      });
+      await prisma.auditLog.createMany({
+        data: [
+          ...Array.from({ length: 19 }, (_, i) => row("SIGN_CONTRACT", i)),
+          // เปิดดูซ้ำ / สลับชนิดไฟล์ — ไม่ขึ้นไทม์ไลน์ ต้องไม่ถูกนับ
+          row("CUSTOMER_OPEN_QUOTE", 30, { firstView: false }),
+          row("CUSTOMER_OPEN_QUOTE", 31),
+          row("UPDATE_QUOTE_ATTACHMENT", 32, { visibility: "INTERNAL" }),
+          // ครั้งแรก / เปิดให้ลูกค้าเห็น — ขึ้น
+          row("CUSTOMER_OPEN_QUOTE", 33, { firstView: true }),
+          row("UPDATE_QUOTE_ATTACHMENT", 34, { visibility: "CUSTOMER" }),
+        ],
+      });
+
+      // 19 + 2 ที่ขึ้นจริง + "สร้างโครงการ" 1 = 22
+      const page1 = await owner.agent.get(`/api/projects/${projectId}/activity?page=1`);
+      expect(page1.body).toMatchObject({ page: 1, pageSize: 15, total: 22 });
+      expect(page1.body.activity).toHaveLength(15);
+      const page2 = await owner.agent.get(`/api/projects/${projectId}/activity?page=2`);
+      expect(page2.body.activity).toHaveLength(7);
+      const ids = [...page1.body.activity, ...page2.body.activity].map((a: { id: string }) => a.id);
+      expect(new Set(ids).size).toBe(22);
+      // ขอเกินหน้าสุดท้าย → หน้าสุดท้าย
+      expect((await owner.agent.get(`/api/projects/${projectId}/activity?page=9`)).body.page).toBe(2);
+    });
+
     it("บันทึกคำตอบของลูกค้าพร้อมเหตุผลลงไทม์ไลน์", async () => {
       const customer = await createAndLoginCustomer("test-activity-customer");
       const me = await customer.agent.get("/api/auth/me");
@@ -287,9 +327,7 @@ describe("projects module", () => {
         .post(`/api/projects/${projectId}/boq/items`)
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quote.body.quote.id);
       await customer.agent
         .post(`/api/my/quotes/${quote.body.quote.id}/respond`)
         .send({ action: "REJECT", note: "ราคาสูงเกินงบที่ตั้งไว้" });

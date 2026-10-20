@@ -11,7 +11,9 @@ import { ApiError } from "../lib/api";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import { deleteHouseDesign, getHouseDesign, updateHouseDesign } from "../lib/houseDesigns-api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { publishedBadgeClass } from "../lib/status-badge";
+import { DetailSkeleton } from "../components/Skeleton";
 
 interface FormState {
   name: string;
@@ -153,11 +155,15 @@ export function HouseDesignDetailPage() {
 
   async function handleDelete() {
     if (!id) return;
-    if (!(await confirm("ย้ายแบบบ้านนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ย้ายไปถังขยะ" })))
+    if (!(await confirm("ย้ายแบบบ้านนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ลบ" })))
       return;
     try {
       await deleteHouseDesign(id);
-      toast.success("ย้ายไปถังขยะแล้ว — กู้คืนได้ที่เมนูถังขยะ");
+      // กดเลิกทำแล้วพากลับมาหน้าเดิมของแบบบ้านนั้น ไม่ใช่ทิ้งไว้ที่หน้ารายการ
+      toast.undo("ย้ายแบบบ้านไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("houseDesign", id);
+        navigate(`/house-designs/${id}`);
+      });
       navigate("/house-designs");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ย้ายไปถังขยะไม่สำเร็จ");
@@ -167,7 +173,7 @@ export function HouseDesignDetailPage() {
   if (loading || !form) {
     return (
       <Layout>
-        <p className="text-slate-500">กำลังโหลด...</p>
+        <DetailSkeleton stats={0} />
       </Layout>
     );
   }
@@ -195,13 +201,13 @@ export function HouseDesignDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button
-            variant={design.published ? "ghost" : "primary"}
+            variant={design.published ? "dangerQuiet" : "brand"}
             size="sm"
             onClick={handleTogglePublish}
           >
             {design.published ? "ยกเลิกเผยแพร่" : "เผยแพร่"}
           </Button>
-          <Button variant="danger" size="sm" onClick={handleDelete}>
+          <Button variant="dangerQuiet" size="sm" onClick={handleDelete}>
             <Trash2 size={14} /> ลบ
           </Button>
         </div>
@@ -348,6 +354,7 @@ export function HouseDesignDetailPage() {
           <div className="col-span-2">
             <ImageUploadField
               label="ภาพภายนอก"
+              cover
               value={form.exteriorImages}
               onChange={(v) => setForm((f) => f && { ...f, exteriorImages: v })}
             />

@@ -22,6 +22,7 @@ import { PageHeader } from "../components/PageHeader";
 import { VariableField } from "../components/VariableField";
 import { VariableAutocomplete, VariableMenuButton, VariablePlacer } from "../components/VariablePicker";
 import { ApiError } from "../lib/api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { useConfirm } from "../lib/confirm-context";
 import {
   createContractTemplate,
@@ -32,6 +33,8 @@ import {
 } from "../lib/contract-templates-api";
 import { useToast } from "../lib/toast-context";
 import { rowKey, sameRowKey } from "../lib/row-keys";
+import { PanelSkeleton } from "../components/Skeleton";
+import { Tooltip } from "../components/Tooltip";
 
 /*
  * หน้านี้ใช้แนวทาง "แผ่นเอกสาร": ตัวสัญญาอยู่บนกระดาษแผ่นเดียวต่อเนื่อง ไม่ใช่การ์ดใบละช่อง
@@ -290,14 +293,18 @@ export function ContractTemplatesPage() {
   async function remove(t: ContractTemplateDto) {
     const ok = await confirm(
       `ย้าย "${t.name}" ไปถังขยะ? สัญญาที่ออกไปแล้วไม่ได้รับผลกระทบ เพราะเก็บถ้อยคำของตัวเองไว้แล้ว`,
-      { confirmLabel: "ย้ายไปถังขยะ", variant: "danger" },
+      { confirmLabel: "ลบ", variant: "danger" },
     );
     if (!ok) return;
     try {
       await deleteContractTemplate(t.id);
       setSelectedId(null);
       await refresh();
-      toast.success("ย้ายไปถังขยะแล้ว (กู้คืนได้ที่หน้าถังขยะ)");
+      toast.undo("ย้ายแม่แบบสัญญาไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("contractTemplate", t.id);
+        await refresh();
+        setSelectedId(t.id);
+      });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ลบไม่สำเร็จ");
     }
@@ -311,7 +318,7 @@ export function ContractTemplatesPage() {
       />
 
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-      {loading && <p className="text-sm text-slate-500">กำลังโหลด...</p>}
+      {loading && <PanelSkeleton lines={8} />}
 
       {!loading && form && (
         <>
@@ -490,6 +497,7 @@ export function ContractTemplatesPage() {
               vocab={vocab}
               textClassName={PAPER_BODY}
               value={form.structure.preamble}
+              placeholder="คลิกเพื่อพิมพ์ เช่น สัญญานี้ทำขึ้นระหว่าง {{ชื่อบริษัท}} ซึ่งต่อไปเรียกว่า “ผู้รับจ้าง” กับ … · พิมพ์ {{ เพื่อแทรกตัวแปร"
               onChange={(v) => patchStructure({ preamble: v })}
             />
 
@@ -518,7 +526,7 @@ export function ContractTemplatesPage() {
                     />
                     {/* ปุ่มจัดการโผล่ตอนชี้/โฟกัส — ของเดิมโชว์ตลอด 27 ปุ่มพร้อมกัน
                         รวมถังขยะแดง 9 อันเรียงลงมาข้างเนื้อสัญญา */}
-                    <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                    <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100">
                       <button
                         type="button"
                         onClick={() => moveClause(i, -1)}
@@ -537,15 +545,17 @@ export function ContractTemplatesPage() {
                       >
                         <ArrowDown size={15} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => removeClause(i)}
-                        disabled={form.structure.clauses.length <= 1}
-                        aria-label="ลบข้อนี้"
-                        className={`${GHOST_BTN} hover:bg-red-50 hover:text-red-600`}
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      <Tooltip label="ลบข้อนี้" side="top" align="end">
+                        <button
+                          type="button"
+                          onClick={() => removeClause(i)}
+                          disabled={form.structure.clauses.length <= 1}
+                          aria-label="ลบข้อนี้"
+                          className={`${GHOST_BTN} hover:bg-red-50 hover:text-red-600`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </Tooltip>
                     </div>
                   </div>
                   {/* ช่องเดียวที่ตารางงวดงานถูกวาดเป็นตารางจริง (ดู contract-pdf.ts) ช่องอื่นพิมพ์วงเล็บดิบ */}
@@ -582,6 +592,7 @@ export function ContractTemplatesPage() {
               vocab={vocab}
               textClassName={PAPER_BODY}
               value={form.structure.closing}
+              placeholder="คลิกเพื่อพิมพ์ เช่น คู่สัญญาได้อ่านและเข้าใจข้อความโดยตลอดแล้ว จึงได้ลงลายมือชื่อไว้เป็นสำคัญต่อหน้าพยาน"
               onChange={(v) => patchStructure({ closing: v })}
             />
 
@@ -607,7 +618,7 @@ export function ContractTemplatesPage() {
                 </Button>
               )}
               <Button variant="dangerQuiet" size="sm" onClick={() => remove(selected)}>
-                <Trash2 size={14} /> ย้ายไปถังขยะ
+                <Trash2 size={14} /> ลบ
               </Button>
             </div>
           )}

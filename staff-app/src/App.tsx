@@ -1,13 +1,16 @@
 import { Route, Routes } from "react-router-dom";
 
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AccountPage } from "./pages/AccountPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentPdfPage } from "./pages/DocumentPdfPage";
 import { HouseDesignDetailPage } from "./pages/HouseDesignDetailPage";
 import { HouseDesignsPage } from "./pages/HouseDesignsPage";
 import { LeadsPage } from "./pages/LeadsPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
@@ -18,6 +21,7 @@ import { CustomerFilePage } from "./pages/CustomerFilePage";
 import { CustomersPage } from "./pages/CustomersPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { SalesTaxReportPage } from "./pages/SalesTaxReportPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SiteImagesPage } from "./pages/SiteImagesPage";
 import { TemplateDetailPage } from "./pages/TemplateDetailPage";
@@ -30,6 +34,9 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* หน้าสาธารณะ: ลืมรหัสผ่าน → ลิงก์ในอีเมล → ตั้งรหัสใหม่ (ไม่ต้องล็อกอิน) */}
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
       <Route
         path="/"
         element={
@@ -88,6 +95,14 @@ function App() {
         }
       />
       <Route
+        path="/reports/sales-tax"
+        element={
+          <ProtectedRoute>
+            <SalesTaxReportPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/customers"
         element={
           <ProtectedRoute>
@@ -120,6 +135,22 @@ function App() {
         element={
           <ProtectedRoute>
             <DocumentPdfPage kind="contract" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projects/:id/contracts/:contractId/change-orders/:docId/pdf"
+        element={
+          <ProtectedRoute>
+            <DocumentPdfPage kind="changeOrder" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projects/:id/contracts/:contractId/documents/:docId/pdf"
+        element={
+          <ProtectedRoute>
+            <DocumentPdfPage kind="billing" />
           </ProtectedRoute>
         }
       />
@@ -216,6 +247,14 @@ function App() {
         element={
           <ProtectedRoute>
             <TrashPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <ProtectedRoute>
+            <AccountPage />
           </ProtectedRoute>
         }
       />

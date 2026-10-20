@@ -10,8 +10,10 @@ import {
 } from "../../lib/company-logo";
 import { companyLogoDataUri } from "../../lib/pdf/letterhead";
 import { requireAuth } from "../../middleware/auth";
+import { isValidPromptPayId, promptPayQrDataUrl } from "../../lib/promptpay";
 import { requireRole } from "../../middleware/rbac";
-import { updateSettingsSchema } from "./settings.schemas";
+import { getTakeoffRules, saveTakeoffRules } from "../../lib/takeoff-rules";
+import { takeoffRulesSchema, updateSettingsSchema } from "./settings.schemas";
 import { getAllSettings, getPublicSettings, SettingsError, updateSettings } from "./settings.service";
 
 export const settingsRouter = Router();
@@ -21,6 +23,19 @@ settingsRouter.use(requireAuth, requireRole("OWNER", "ADMIN"));
 settingsRouter.get("/", async (_req, res) => {
   const settings = await getAllSettings();
   res.json({ settings });
+});
+
+/**
+ * QR ทดสอบ 1 บาท — ให้เจ้าของสแกนด้วยแอปธนาคารของตัวเองก่อนใช้จริง ว่าชื่อผู้รับที่แอปแสดงถูกบัญชี
+ * เลขพร้อมเพย์ผิดหนึ่งหลัก = เงินลูกค้าเข้าบัญชีคนอื่น · รับเลขทาง body (ไม่ใส่ใน URL — เป็นเบอร์มือถือได้)
+ */
+settingsRouter.post("/promptpay-preview", async (req, res) => {
+  const promptPay = typeof req.body?.promptPay === "string" ? req.body.promptPay : "";
+  if (!isValidPromptPayId(promptPay)) {
+    res.status(400).json({ error: "พร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก (ขึ้นต้น 0) หรือเลขประจำตัวผู้เสียภาษี 13 หลัก" });
+    return;
+  }
+  res.json({ amount: 1, dataUrl: await promptPayQrDataUrl(promptPay, 1) });
 });
 
 settingsRouter.patch("/", async (req, res) => {
@@ -41,6 +56,21 @@ settingsRouter.patch("/", async (req, res) => {
   }
   const settings = await getAllSettings();
   res.json({ settings });
+});
+
+// ---------- ชุดกฎการถอดปริมาณ (ชุดเสนอราคา / ชุดสั่งตัด) ----------
+// อ่านได้ทุกคนฝั่งบริษัท (หน้าต่างคำนวณโครงสร้างต้องรู้ชุดเสนอราคา) · แก้ได้เฉพาะเจ้าของ
+settingsRouter.get("/takeoff-rules", async (_req, res) => {
+  res.json({ rules: await getTakeoffRules() });
+});
+
+settingsRouter.put("/takeoff-rules", requireRole("OWNER"), async (req, res) => {
+  const parsed = takeoffRulesSchema.safeParse(req.body?.rules);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ข้อมูลชุดกฎไม่ถูกต้อง", details: parsed.error.flatten() });
+    return;
+  }
+  res.json({ rules: await saveTakeoffRules(parsed.data, req.user!.id) });
 });
 
 // ---------- โลโก้บนเอกสาร ----------

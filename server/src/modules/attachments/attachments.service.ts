@@ -6,6 +6,7 @@ import { inlineViewableType, type AttachmentKind, type AttachmentVisibility } fr
 import { writeAuditLog } from "../../lib/audit-log";
 import { createNotification } from "../../lib/notifications";
 import { prisma } from "../../lib/prisma";
+import { isApprovalLocked } from "../../lib/quote-approval";
 
 // ไฟล์แนบเก็บใน dir แยกที่ "ไม่" ถูกเสิร์ฟแบบ static สาธารณะ (ต่างจาก uploads/ ของรูปภาพ) —
 // ทางเดียวที่จะได้ไฟล์คือผ่าน route ที่ตรวจสิทธิ์ ป้องกันไฟล์ราคา/สัญญาหลุดผ่านลิงก์ตรง
@@ -60,6 +61,25 @@ export function parseVisibility(value: unknown): AttachmentVisibility {
     : "INTERNAL";
 }
 
+/**
+ * อ่านค่าสำหรับ PATCH — **ไม่ส่งมา = ไม่แตะช่องนั้น**
+ *
+ * ต่างจาก parseKind/parseVisibility ที่เติมค่าปริยายให้เสมอ (ใช้กับฟอร์มอัปโหลดที่ส่งมาครบทุกช่อง) —
+ * เอาตัวนั้นมาใช้กับ PATCH ทำให้หน้าเว็บที่ส่งมาแต่ visibility ไปรีเซ็ตชนิดไฟล์เป็น OTHER ทุกครั้ง
+ * ค่าที่ส่งมาแต่ผิดรูปแบบจะตอบ 400 ไม่เดาให้ — การเดาเงียบ ๆ ทำให้ไฟล์เปลี่ยนสถานะโดยไม่มีใครสั่ง
+ */
+export function parseKindPatch(value: unknown): AttachmentKind | undefined {
+  if (value === undefined) return undefined;
+  if (!KINDS.has(value as string)) throw new AttachmentError("ชนิดไฟล์แนบไม่ถูกต้อง", 400);
+  return value as AttachmentKind;
+}
+
+export function parseVisibilityPatch(value: unknown): AttachmentVisibility | undefined {
+  if (value === undefined) return undefined;
+  if (!VISIBILITIES.has(value as string)) throw new AttachmentError("สิทธิ์การมองเห็นไม่ถูกต้อง", 400);
+  return value as AttachmentVisibility;
+}
+
 type AttachmentRow = {
   id: string;
   quoteId: string;
@@ -103,13 +123,31 @@ async function loadQuoteOrThrow(projectId: string, quoteId: string) {
   return quote;
 }
 
+/**
+ * ใบที่ขอ/ได้อนุมัติแล้ว (ยังไม่ส่ง) ห้ามแก้ไฟล์ที่ลูกค้าจะเห็น — ของที่ผู้อนุมัติเซ็นรับรองต้องเป็นของที่
+ * ถึงมือลูกค้าจริง · ไฟล์ภายใน (INTERNAL) แก้ได้ตามปกติ ลูกค้าไม่เห็นอยู่แล้ว
+ */
+async function assertCustomerFilesEditable(quoteId: string, touchesCustomer: boolean): Promise<void> {
+  if (!touchesCustomer) return;
+  const quote = await prisma.quote.findUniqueOrThrow({
+    where: { id: quoteId },
+    select: { status: true, _count: { select: { signers: true } } },
+  });
+  if (isApprovalLocked(quote.status, quote._count.signers)) {
+    throw new AttachmentError(
+      "ใบนี้ขออนุมัติแล้ว แก้ไฟล์ที่ลูกค้าเห็นไม่ได้ — ถอนคำขออนุมัติก่อน แล้วค่อยแก้",
+      409,
+    );
+  }
+}
+
 async function loadAttachmentOrThrow(projectId: string, quoteId: string, attachmentId: string) {
-  await loadQuoteOrThrow(projectId, quoteId);
+  const quote = await loadQuoteOrThrow(projectId, quoteId);
   const attachment = await prisma.quoteAttachment.findUnique({ where: { id: attachmentId } });
   if (attachment?.quoteId !== quoteId) {
     throw new AttachmentError("ไม่พบไฟล์แนบที่ระบุ", 404);
   }
-  return attachment;
+  return { attachment, quote };
 }
 
 export async function listAttachmentsForQuotes(quoteIds: string[]) {
@@ -143,6 +181,30 @@ export async function deleteAttachmentFilesForQuote(quoteId: string) {
   }
 }
 
+/**
+ * แจ้งลูกค้าว่ามีเอกสารใหม่ให้เปิดดู — ใช้ร่วมกันทั้งตอนแนบไฟล์ใหม่และตอนพลิกไฟล์เดิมเป็น "ให้ลูกค้าเห็น"
+ * (ฝั่งลูกค้ามันคือเอกสารที่เพิ่งโผล่มาเหมือนกัน จึงใช้ข้อความเดียวกัน ความต่างของสองทางเป็นเรื่องภายในของเรา)
+ *
+ * เงียบเมื่อลูกค้าเปิดลิงก์ไม่ได้ — ใบที่ยังเป็นร่าง และโครงการที่อยู่ในถังขยะ ทั้งสองกรณี
+ * /api/my/quotes/:id ตอบ 404 การแจ้งจึงพาไปหน้าที่เปิดไม่ได้ (ไฟล์ที่แนบไว้ตอนร่างจะถึงมือลูกค้าตอนกดส่งใบเสนอราคาอยู่ดี)
+ */
+async function notifyCustomerOfVisibleFile(
+  quote: { id: string; projectId: string; status: string },
+  fileName: string,
+): Promise<void> {
+  if (quote.status === "DRAFT") return;
+  const project = await prisma.project.findUnique({
+    where: { id: quote.projectId },
+    select: { customerId: true, name: true, deletedAt: true },
+  });
+  if (!project?.customerId || project.deletedAt !== null) return;
+  await createNotification({
+    userId: project.customerId,
+    message: `ทีมงานแนบเอกสาร "${fileName}" ในใบเสนอราคาของโครงการ "${project.name}"`,
+    link: `/my/quotes/${quote.id}`,
+  });
+}
+
 export async function createAttachment(input: {
   projectId: string;
   quoteId: string;
@@ -151,7 +213,8 @@ export async function createAttachment(input: {
   visibility: AttachmentVisibility;
   uploadedById: string;
 }) {
-  await loadQuoteOrThrow(input.projectId, input.quoteId);
+  const quote = await loadQuoteOrThrow(input.projectId, input.quoteId);
+  await assertCustomerFilesEditable(input.quoteId, input.visibility === "CUSTOMER");
 
   // เพดานต่อใบเสนอราคา (ตรวจ ณ ตอนแนบ — ไฟล์ที่เขียนลงดิสก์ไปแล้วจะถูก route ลบทิ้งถ้า throw ที่นี่)
   const existing = await prisma.quoteAttachment.findMany({
@@ -199,17 +262,7 @@ export async function createAttachment(input: {
 
   // แนบไฟล์ที่ลูกค้าเห็นได้ = มีของใหม่ให้เขาเปิดดู ต้องบอก (ไฟล์ INTERNAL ไม่ต้อง ลูกค้าไม่มีสิทธิ์เห็น)
   if (attachment.visibility === "CUSTOMER") {
-    const project = await prisma.project.findUnique({
-      where: { id: input.projectId },
-      select: { customerId: true, name: true },
-    });
-    if (project?.customerId) {
-      await createNotification({
-        userId: project.customerId,
-        message: `ทีมงานแนบเอกสาร "${attachment.fileName}" ในใบเสนอราคาของโครงการ "${project.name}"`,
-        link: `/my/quotes/${input.quoteId}`,
-      });
-    }
+    await notifyCustomerOfVisibleFile(quote, attachment.fileName);
   }
 
   return toAttachmentDto(attachment);
@@ -222,7 +275,12 @@ export async function updateAttachment(
   patch: { kind?: AttachmentKind; visibility?: AttachmentVisibility },
   actorId: string,
 ) {
-  await loadAttachmentOrThrow(projectId, quoteId, attachmentId);
+  const { attachment: current, quote } = await loadAttachmentOrThrow(projectId, quoteId, attachmentId);
+  await assertCustomerFilesEditable(
+    quoteId,
+    current.visibility === "CUSTOMER" || patch.visibility === "CUSTOMER",
+  );
+  // undefined = ไม่แตะช่องนั้น (prisma ข้ามค่า undefined ให้เอง) — route จึงต้องไม่เติมค่าปริยายมาให้
   const updated = await prisma.quoteAttachment.update({
     where: { id: attachmentId },
     data: { kind: patch.kind, visibility: patch.visibility },
@@ -236,6 +294,13 @@ export async function updateAttachment(
     details: { quoteId, kind: updated.kind, visibility: updated.visibility },
   });
 
+  // เปิดไฟล์เดิมให้ลูกค้าเห็น = ลูกค้าได้เอกสารเพิ่มจริง ต้องบอกเหมือนตอนแนบไฟล์ใหม่
+  // เทียบค่าก่อน/หลังจริง ไม่ใช่ดูแค่ค่าที่ส่งมา — กดแก้อย่างอื่นบนไฟล์ที่เป็น CUSTOMER อยู่แล้วต้องไม่แจ้งซ้ำ
+  // พลิกกลับเป็น INTERNAL ไม่แจ้ง — ไฟล์แค่หายไปจากหน้าลูกค้า การประกาศว่าเอาเอกสารคืนสร้างคำถามมากกว่าคำตอบ (AuditLog บันทึกไว้แล้ว)
+  if (current.visibility !== "CUSTOMER" && updated.visibility === "CUSTOMER") {
+    await notifyCustomerOfVisibleFile(quote, updated.fileName);
+  }
+
   return toAttachmentDto(updated);
 }
 
@@ -245,7 +310,8 @@ export async function deleteAttachment(
   attachmentId: string,
   actorId: string,
 ) {
-  const attachment = await loadAttachmentOrThrow(projectId, quoteId, attachmentId);
+  const { attachment } = await loadAttachmentOrThrow(projectId, quoteId, attachmentId);
+  await assertCustomerFilesEditable(quoteId, attachment.visibility === "CUSTOMER");
   await prisma.quoteAttachment.delete({ where: { id: attachmentId } });
 
   // ลบไฟล์จริงบนดิสก์ด้วย (best-effort — ถ้าไฟล์หายไปแล้วก็ไม่ต้องขวางการลบ record)
@@ -310,7 +376,7 @@ export async function getStaffAttachmentFile(
   quoteId: string,
   attachmentId: string,
 ): Promise<ResolvedFile> {
-  const a = await loadAttachmentOrThrow(projectId, quoteId, attachmentId);
+  const { attachment: a } = await loadAttachmentOrThrow(projectId, quoteId, attachmentId);
   return resolveFile(a.storedName, a.fileName, a.mimeType);
 }
 

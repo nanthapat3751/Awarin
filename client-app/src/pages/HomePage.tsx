@@ -1,33 +1,44 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { resolveSiteImage, type HouseDesignDto } from "@systemboq/shared-types";
+import { resolveSiteImage, resolveSiteImageSlot, type HouseDesignDto, type SiteImageKey } from "@systemboq/shared-types";
 
 import { CtaBanner } from "../components/CtaBanner";
 import { Reveal } from "../components/Reveal";
+import { ServiceTile } from "../components/ServiceTile";
 import { SpecularButton } from "../components/SpecularButton";
+import { setHeroLoading } from "../lib/hero-loading";
 import { useParallax } from "../lib/use-parallax";
-import { getPublicSettings, listFeaturedHouseDesigns, listHouseDesigns } from "../lib/public-api";
+import {
+  cachedPublicSettings,
+  getPublicSettings,
+  listFeaturedHouseDesigns,
+} from "../lib/public-api";
+import { HouseSpecLine } from "../components/HouseSpecChips";
+import { FadeImage } from "../components/FadeImage";
+import { CardGridSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
 
-// หัวข้อสั้น + คำขยายหนึ่งบรรทัด คั่นด้วยเส้นบาง ๆ — เดิมเป็นบรรทัดเดียวนำด้วยเครื่องหมายถูก
+// จุดขาย 4 ข้อของส่วน "ทำไมต้องเลือกเรา" (ชุดใหม่ 14 ต.ค. 2026 — ชุดเดิมซ้ำกับ "ขั้นตอนการสร้างบ้าน" 3 ใน 4 ข้อ
+// ห้ามเขียนเป็นขั้นตอนอีก: ส่วนนี้ = สิ่งที่ลูกค้าได้ · ขั้นตอน = ทำอะไรก่อนหลัง · ทุกข้อต้องเป็นสิ่งที่ระบบ/บริษัททำจริง) — หัวข้อสั้น + คำขยายหนึ่งบรรทัด เดิมเป็นบรรทัดเดียวนำด้วยเครื่องหมายถูก
 // ซึ่งไม่ได้บอกอะไร (เครื่องหมายถูกมีความหมายเมื่อคู่กับกากบาทในตารางเทียบแพ็กเกจเท่านั้น
 // ที่นี่ทุกข้อเป็นถูกหมด) และเป็นจุดเดียวในเว็บทั้งฝั่งลูกค้าที่ใช้สัญลักษณ์นี้
 const HIGHLIGHTS = [
   {
-    title: "ประเมินราคาด้วยระบบ BOQ",
-    desc: "แจกแจงค่าวัสดุและค่าแรงเป็นรายการ ให้เห็นต้นทุนก่อนตัดสินใจ",
+    title: "ราคาแยกทุกรายการ ไม่ใช่ราคาเหมา",
+    desc: "เปิดดูทุกบรรทัดของใบเสนอราคาได้เองในพื้นที่ลูกค้า ก่อนตัดสินใจ",
   },
   {
-    title: "มีแบบบ้านให้เลือก หรือออกแบบใหม่",
-    desc: "เลือกจากแบบมาตรฐานที่มีอยู่ หรือเขียนแบบใหม่ตามที่ดินและงบประมาณ",
+    title: "ทีมวิศวกรดูแลงานเอง",
+    desc: "บริษัทก่อตั้งโดยทีมวิศวกร ดูแลทั้งงานออกแบบและงานก่อสร้าง",
   },
   {
-    title: "ดูแลครบตั้งแต่ออกแบบจนส่งมอบ",
-    desc: "ทีมงานเดียวรับผิดชอบทั้งงานออกแบบและงานก่อสร้าง",
+    title: "งานเพิ่ม-ลดต้องผ่านคุณก่อน",
+    desc: "ทุกการเปลี่ยนแปลงคิดราคาจาก BOQ เดิม และต้องอนุมัติก่อนเริ่มทำ",
   },
   {
-    title: "ติดตามงานและราคาได้ตลอดโครงการ",
-    desc: "เข้าดูใบเสนอราคา สัญญา และสถานะงานได้จากหน้าเว็บ",
+    title: "จ่ายตามงวดงาน ติดตามได้ออนไลน์",
+    desc: "เรียกเก็บเมื่องานถึงงวด ดูงวดเงิน ใบเสร็จ และแจ้งโอนได้จากหน้าเว็บ",
   },
 ];
 
@@ -95,18 +106,11 @@ function BuildServiceIcon() {
   );
 }
 // รูปสายฟ้าชุดเดียวกับ ElectricIcon ในหน้าบริการ — การ์ดใบนี้พาไปที่ส่วนงานระบบของหน้านั้น
+// (ไอคอนบริการ 3 ตัวนี้ขึ้นเฉพาะการ์ดที่ยังไม่มีรูป เป็นลายจางบนพื้นน้ำเงิน)
 function EngineeringServiceIcon() {
   return (
     <svg {...iconProps}>
       <polygon points="13 2 4 14 11 14 11 22 20 10 13 10 13 2" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg {...iconProps} className="w-8 h-8">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
   );
 }
@@ -116,27 +120,34 @@ function PlusIcon() {
    แต่ละใบพาไปที่หัวข้อของตัวเองโดยตรงด้วย hash (ScrollOnNavigate ใน App.tsx เลื่อนให้เอง)
 
    "ประเมินราคาโปร่งใส" ไม่ได้เป็นการ์ด เพราะเป็นวิธีทำงานที่ครอบทุกบริการ ไม่ใช่บริการข้อที่สี่
-   — ย้ายไปอยู่ในคำโปรยใต้หัวข้อส่วนแทน */
-const SERVICES = [
+   — ย้ายไปอยู่ในคำโปรยใต้หัวข้อส่วนแทน
+   รูปของแต่ละใบตั้งได้จากหน้า "คลังรูปเว็บไซต์" (imageKey) ว่างไว้ = ยืมรูปจากหน้าบริการ ดู SITE_IMAGE_SLOTS */
+const SERVICES: {
+  title: string;
+  desc: string;
+  to: string;
+  imageKey: SiteImageKey;
+  Icon: () => React.JSX.Element;
+}[] = [
   {
     title: "งานออกแบบ",
     desc: "เริ่มจากความต้องการของคุณ แปลงเป็นแบบที่ก่อสร้างได้จริง พร้อมแบบมาตรฐานให้เลือก",
     to: "/services#design",
-    linkLabel: "เพิ่มเติม",
+    imageKey: "siteHomeServiceDesign",
     Icon: DesignServiceIcon,
   },
   {
     title: "งานก่อสร้าง",
     desc: "ควบคุมงานตามแบบและมาตรฐาน แบ่งเป็น 3 ขั้นตอน ตรวจสอบได้ทุกช่วง",
     to: "/services#construction",
-    linkLabel: "เพิ่มเติม",
+    imageKey: "siteHomeServiceBuild",
     Icon: BuildServiceIcon,
   },
   {
     title: "งานระบบวิศวกรรม",
     desc: "ระบบไฟฟ้า ประปา-สุขาภิบาล ปรับอากาศ และห้องปลอดเชื้อ รองรับทั้งบ้านและงานอาคาร",
     to: "/services#engineering",
-    linkLabel: "เพิ่มเติม",
+    imageKey: "siteHomeServiceEngineering",
     Icon: EngineeringServiceIcon,
   },
 ];
@@ -160,13 +171,24 @@ const STEPS = [
   },
 ];
 
+/** รูป hero สำรอง (ยังไม่ได้ตั้งจากคลังรูป) — WebP ย่อจาก web12.jpg 670 KB เหลือราว 240 KB */
+const HERO_FALLBACK = "/web12.webp";
+/** รูปช้ากว่านี้ ข้อความ hero ขึ้นก่อนเลย ไม่ให้คนนั่งดูพื้นว่าง */
+const HERO_TEXT_MAX_WAIT_MS = 800;
+/** รูปมาเร็วกว่านี้ (อยู่ในแคช) = โผล่ทันที ไม่ต้องจางเข้า */
+const HERO_INSTANT_MS = 150;
+
 export function HomePage() {
-  const [companyName, setCompanyName] = useState("บริษัทรับออกแบบและสร้างบ้าน");
-  // รูปที่พนักงานตั้งไว้จากหน้า "คลังรูปเว็บไซต์" — ว่าง = ใช้รูปเริ่มต้นตามเดิม
-  const [siteImages, setSiteImages] = useState<Record<string, string>>({});
-  const [designs, setDesigns] = useState<HouseDesignDto[]>([]);
-  // แบบบ้านแนะนำที่ staff เลือก (โชว์เท่าที่เลือก) — แยกจาก designs ที่ใช้เป็นรูปพื้นหลังส่วนเกี่ยวกับเรา
+  usePageMeta(null);
+  // ค่าตั้งจากการเปิดเว็บครั้งก่อน — รู้ทันทีว่า hero ใช้รูปไหน ไม่ต้องรอเครือข่าย
+  const [cached] = useState(cachedPublicSettings);
+  const [companyName, setCompanyName] = useState(cached?.companyName || "บริษัทรับออกแบบและสร้างบ้าน");
+  // รูปที่พนักงานตั้งไว้จากหน้า "คลังรูปเว็บไซต์" · null = ยังไม่รู้ค่าตั้ง (ครั้งแรกที่เปิดเว็บ)
+  // ต้องรอรู้ก่อนค่อยเลือกรูป hero ไม่งั้นโหลดรูปสำรองไปก่อนแล้วสลับเป็นรูปที่ตั้งไว้ = โหลดสองรอบ + ภาพกระพริบ
+  const [siteImages, setSiteImages] = useState<Record<string, string> | null>(cached);
+  // แบบบ้านแนะนำที่ staff เลือก (โชว์เท่าที่เลือก)
   const [featured, setFeatured] = useState<HouseDesignDto[]>([]);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
 
   useEffect(() => {
     getPublicSettings()
@@ -174,44 +196,130 @@ export function HomePage() {
         if (res.settings.companyName) setCompanyName(res.settings.companyName);
         setSiteImages(res.settings);
       })
-      .catch(() => undefined);
-    listHouseDesigns()
-      .then((res) => setDesigns(res.houseDesigns))
-      .catch(() => undefined);
+      // ขอไม่สำเร็จ = ใช้ของเดิมในเครื่อง หรือรูปสำรอง (อย่าค้างแสงวิ่งไว้ตลอดไป)
+      .catch(() => setSiteImages((prev) => prev ?? {}));
     listFeaturedHouseDesigns()
       .then((res) => setFeatured(res.houseDesigns))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setFeaturedLoading(false));
   }, []);
   // parallax เบา ๆ ที่รูป hero (section มี overflow-hidden อยู่แล้ว รูปถูก scale เผื่อขอบในฮุก)
   const heroImgRef = useParallax<HTMLImageElement>();
-  const heroImage = resolveSiteImage(siteImages.siteHeroHome, "/web12.jpg");
-  // ลำดับของภาพส่วนเกี่ยวกับเรา: รูปที่พนักงานตั้งไว้ > รูปแบบบ้านหลังแรกที่มีภาพ > รูปสำรอง
-  const aboutImage = resolveSiteImage(
-    siteImages.siteAboutHome,
-    designs.find((d) => d.exteriorImages?.[0])?.exteriorImages?.[0] ?? "/web12.jpg",
-  );
-  const showViewAllCard = featured.length > 0 && featured.length < 3;
-  const featuredCardCount = featured.length + (showViewAllCard ? 1 : 0);
-  const featuredGridCols = featuredCardCount >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2";
+  const [heroFailed, setHeroFailed] = useState(false);
+  const heroImage =
+    siteImages === null ? null : heroFailed ? HERO_FALLBACK : resolveSiteImage(siteImages.siteHeroHome, HERO_FALLBACK);
+
+  // ลำดับการโหลด hero ให้เหมือนส่วนอื่นของเว็บ: แสงวิ่ง (โทนเข้ม) ระหว่างรอ → รูปจางเข้า → ข้อความลอยขึ้น
+  const mountedAt = useRef(performance.now());
+  const [heroLoaded, setHeroLoaded] = useState(false);
+  const [heroInstant, setHeroInstant] = useState(false);
+  const [heroTextReady, setHeroTextReady] = useState(false);
+  function markHeroLoaded() {
+    setHeroInstant(performance.now() - mountedAt.current < HERO_INSTANT_MS);
+    setHeroLoaded(true);
+    setHeroTextReady(true);
+  }
+  useEffect(() => {
+    const timer = setTimeout(() => setHeroTextReady(true), HERO_TEXT_MAX_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  // ระหว่างรอรูป hero เป็นพื้นขาว (แสงวิ่งสีอ่อนเหมือนส่วนอื่นของเว็บ) แล้วค่อยเปลี่ยนเป็นพื้นมืดตอนรูปขึ้น
+  // บอกแถบเมนูด้วย ให้เป็นแถบขาวทึบระหว่างนี้ · ออกจากหน้านี้ = ล้างค่า ไม่ให้ค้างไปหน้าอื่น
+  const heroLight = !heroLoaded;
+  useEffect(() => {
+    if (!heroLight) {
+      setHeroLoading(false);
+      return;
+    }
+    // หน่วงเท่าแสงวิ่ง (0.15 วิ) — รูปในแคชขึ้นก่อนนั้น แถบเมนูจะไม่กะพริบขาวแว้บเดียว
+    const t = setTimeout(() => setHeroLoading(true), 150);
+    return () => clearTimeout(t);
+  }, [heroLight]);
+  useEffect(() => () => setHeroLoading(false), []);
+  // รูปในแคชอาจโหลดเสร็จก่อน React ผูก onLoad — เช็คเองอีกรอบทุกครั้งที่เปลี่ยนรูป
+  useEffect(() => {
+    const img = heroImgRef.current;
+    if (heroImage && img?.complete && img.naturalWidth > 0) markHeroLoaded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markHeroLoaded เปลี่ยนทุกเรนเดอร์ แต่ทำงานเหมือนเดิม
+  }, [heroImage, heroImgRef]);
+
+  // คอลัมน์ตามจำนวนแบบ (ตั้งแนะนำได้ 1–6) ให้ไม่มีช่องโหว่ท้ายแถว: 1 = ใบเดียวไม่ยืดสุดจอ ·
+  // 2/4 = สองคอลัมน์ · 3/5/6 = สามคอลัมน์จอใหญ่ (5 เหลือหนึ่งช่องก็ยังน้อยกว่าแบบอื่น)
+  let featuredGridCols = "sm:grid-cols-2 lg:grid-cols-3";
+  if (featured.length === 1) featuredGridCols = "max-w-2xl";
+  else if (featured.length === 2 || featured.length === 4) featuredGridCols = "sm:grid-cols-2";
 
   return (
     <div>
       {/* Hero */}
-      <section className="relative min-h-screen bg-black text-white overflow-hidden flex items-center">
+      <section
+        // เปลี่ยนเฉพาะสีพื้นแบบค่อย ๆ — สีตัวอักษรสลับทันที ไม่งั้นข้อความที่ลอยขึ้นตอนรูปขึ้นจะเป็นสีเข้มแล้วค่อยจางเป็นขาว
+        className={`relative min-h-screen overflow-hidden flex items-center transition-[background-color] duration-700 motion-reduce:transition-none ${
+          heroLight ? "bg-white text-slate-900" : "bg-black text-white"
+        } ${heroTextReady ? "" : "hero-pending"}`}
+      >
+        {/* ระหว่างรอรูป: พื้นขาว + ก้อนเทาแสงวิ่งวางตรงตำแหน่งเนื้อหาจริง แบบเดียวกับส่วนอื่นของเว็บ
+            (ชื่อบริษัท · หัวข้อ 2 บรรทัด · คำอธิบาย · ปุ่ม · กล่องเริ่มต้นโครงการมุมขวาล่าง) โผล่หลัง 0.15 วิ
+            รูปในแคชจะไม่เห็นเลย · เดิมเป็นก้อนเดียวโทนเข้มเต็มจอ ผู้ใช้ขอให้เหมือนหน้าอื่น
+            ก้อนข้อความหายเมื่อข้อความจริงพร้อม (รูปช้าเกิน HERO_TEXT_MAX_WAIT_MS ข้อความจะขึ้นเป็นสีเข้มบนพื้นขาว
+            แทนที่ก้อน ไม่ซ้อนกัน) ส่วนก้อนกล่องมุมขวาล่างหายพร้อมกันเพราะกล่องจริงก็ขึ้นพร้อมข้อความ */}
+        {heroLight && !heroTextReady && (
+          <div aria-hidden className="skeleton-group absolute inset-0 flex items-center">
+            <div className="w-full max-w-5xl mx-auto px-4 py-24 flex flex-col items-start gap-5">
+              <div className="skeleton h-4 w-44" />
+              <div className="flex w-full flex-col gap-3">
+                <div className="skeleton h-8 sm:h-12 w-[min(40rem,90%)]" />
+                <div className="skeleton h-8 sm:h-12 w-[min(20rem,60%)]" />
+              </div>
+              <div className="flex w-full flex-col gap-2">
+                <div className="skeleton h-4 w-[min(36rem,95%)]" />
+                {/* จอกว้างคำอธิบายจริงอยู่บรรทัดเดียว */}
+                <div className="skeleton h-4 w-[min(26rem,70%)] sm:hidden" />
+              </div>
+              <div className="skeleton mt-2 h-11 w-32 rounded-lg" />
+            </div>
+            <div className="skeleton absolute bottom-0 right-0 h-40 sm:h-56 w-[82%] sm:w-136 rounded-none" />
+          </div>
+        )}
         <img
           ref={heroImgRef}
-          src={heroImage}
+          src={heroImage ?? undefined}
           alt=""
           aria-hidden
-          className="absolute inset-0 w-full h-full object-cover"
+          fetchPriority="high"
+          onLoad={markHeroLoaded}
+          onError={() => {
+            // รูปที่ตั้งไว้เปิดไม่ได้ (ไฟล์หาย) → ตกไปรูปสำรอง · รูปสำรองเองก็พัง = เลิกรอ เหลือพื้นดำ
+            if (heroImage !== HERO_FALLBACK) setHeroFailed(true);
+            else markHeroLoaded();
+          }}
+          className={`absolute inset-0 w-full h-full object-cover ${
+            heroInstant ? "" : "transition-opacity duration-700 ease-out motion-reduce:transition-none"
+          } ${heroLoaded ? "opacity-100" : "opacity-0"}`}
         />
-        <div className="absolute inset-0 bg-black/25" />
-        <div className="relative w-full max-w-5xl mx-auto px-4 py-24 flex flex-col items-start gap-5 [text-shadow:0_2px_10px_rgba(0,0,0,0.6)]">
+        <div
+          className={`absolute inset-0 bg-black/25 ${
+            heroInstant ? "" : "transition-opacity duration-700 motion-reduce:transition-none"
+          } ${heroLight ? "opacity-0" : "opacity-100"}`}
+        />
+        <div
+          className={`relative w-full max-w-5xl mx-auto px-4 py-24 flex flex-col items-start gap-5 ${
+            heroLight ? "" : "[text-shadow:0_2px_10px_rgba(0,0,0,0.6)]"
+          }`}
+        >
           <p
-            className="hero-item text-sm tracking-wide text-slate-300 uppercase"
+            className={`hero-item text-sm tracking-wide uppercase ${heroLight ? "text-slate-500" : "text-slate-300"}`}
             style={{ animationDelay: "0.05s" }}
           >
-            {companyName}
+            {/* ยังไม่รู้ค่าตั้ง (เปิดเว็บครั้งแรก + API ช้ากว่าข้อความ hero) = แสงวิ่ง ไม่ใช่ชื่อสำรอง
+                "บริษัทรับออกแบบและสร้างบ้าน" ที่จะสลับเป็นชื่อจริงทีหลัง · ชื่อสำรองเหลือไว้ตอนโหลดไม่สำเร็จ */}
+            {siteImages === null ? (
+              <span className={`skeleton block h-4 w-44 ${heroLight ? "" : "on-dark"}`}>
+                <span className="sr-only">กำลังโหลด</span>
+              </span>
+            ) : (
+              companyName
+            )}
           </p>
           <h1
             className="hero-item text-3xl sm:text-5xl font-semibold leading-tight max-w-2xl"
@@ -219,11 +327,11 @@ export function HomePage() {
           >
             บริการออกแบบและรับเหมาก่อสร้างบ้าน
           </h1>
-          <p className="hero-item text-slate-200 max-w-xl" style={{ animationDelay: "0.34s" }}>
+          <p className={`hero-item max-w-xl ${heroLight ? "text-slate-600" : "text-slate-200"}`} style={{ animationDelay: "0.34s" }}>
             เริ่มต้นโครงการบ้านของคุณไปด้วยกัน พร้อมประเมินราคาต้นทุนอย่างโปร่งใสทุกรายการ
           </p>
           <div className="hero-item flex flex-wrap gap-3 mt-2" style={{ animationDelay: "0.48s" }}>
-            <SpecularButton href="#about">ดูเพิ่มเติม</SpecularButton>
+            <SpecularButton href="#why-us">ดูเพิ่มเติม</SpecularButton>
           </div>
         </div>
 
@@ -246,11 +354,15 @@ export function HomePage() {
         {/* ลูกศรเปล่า ๆ ไม่มีกรอบ — ความชัดมาจากเงาที่ตัวเส้นเอง (drop-shadow เกาะรูปทรง
             ไม่ใช่กล่อง) จึงอ่านออกทั้งบนใบไม้สว่างและบนพื้นมืด โดยไม่ต้องมีอะไรมาครอบ
             เดิมเป็น text-white/70 ไม่มีเงา วัดคอนทราสต์ได้ 4.37:1 จมหายไปกับสวนในรูป
-            (รูป hero พนักงานเปลี่ยนเองได้จากหน้าคลังรูป จึงห้ามฝากความชัดไว้กับว่ารูปมืดพอไหม) */}
+            (รูป hero พนักงานเปลี่ยนเองได้จากหน้าคลังรูป จึงห้ามฝากความชัดไว้กับว่ารูปมืดพอไหม)
+            ตำแหน่ง: กล่อง "เริ่มต้นโครงการ" กว้าง 82% (มือถือ) / 544px (sm+) ชิดขวา — จอแคบกว่า ~1090px มันทับกลางจอ
+            ลูกศรกลางจอจึงถูกบังและกดแล้วไปหน้าติดต่อแทน · ต่ำกว่า xl ย้ายไปชิดซ้ายแนวเดียวกับตัวหนังสือ hero */}
         <a
-          href="#about"
+          href="#why-us"
           aria-label="เลื่อนลงดูเพิ่มเติม"
-          className="absolute bottom-4 left-1/2 flex h-11 w-11 -translate-x-1/2 items-center justify-center text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)] transition-opacity hover:opacity-80 animate-bounce"
+          className={`absolute bottom-4 left-2 z-20 flex h-11 w-11 items-center justify-center xl:left-1/2 xl:-translate-x-1/2 transition-opacity hover:opacity-80 animate-bounce ${
+            heroLight ? "text-slate-400" : "text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]"
+          }`}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -267,133 +379,130 @@ export function HomePage() {
         </a>
       </section>
 
-      {/* About */}
-      <section id="about" className="scroll-mt-20 bg-white">
-        <div className="grid grid-cols-1 md:grid-cols-2 md:items-stretch">
-          {/* full-bleed image on the left */}
-          <div className="h-64 md:h-auto md:min-h-96">
-            <img src={aboutImage} alt="ผลงานบ้านของเรา" className="w-full h-full object-cover" />
-          </div>
-          {/* text on the right */}
-          <div className="flex items-center px-4 py-14 md:py-20 md:px-12 lg:px-16">
-            <Reveal className="max-w-xl">
-              <p className="text-sm font-semibold text-brand uppercase tracking-wide mb-2">
-                เกี่ยวกับเรา
-              </p>
-              <h2 className="text-2xl sm:text-3xl font-semibold text-black leading-snug mb-4">
-                รับออกแบบและสร้างบ้าน ที่ให้คุณเห็นราคาจริงทุกขั้นตอน
+      {/* ทำไมต้องเลือกเรา (ผู้ใช้เลือกแบบ A 14 ต.ค. 2026) — เดิมเป็น "เกี่ยวกับเรา" ย่อ + รูปซ้าย ซ้ำกับหน้า /about ที่มีในเมนูแล้ว
+          เหลือเฉพาะจุดขาย 4 ข้อ ไม่มีรูป ไม่มีไอคอน ไม่มีตัวเลขสถิติ (ดู HIGHLIGHTS) · id "why-us" = ปลายทางปุ่ม "ดูเพิ่มเติม" ใน hero */}
+      <section id="why-us" className="scroll-mt-20 bg-white">
+        <div className="max-w-7xl mx-auto px-4 py-20">
+          <Reveal className="grid gap-4 lg:grid-cols-12 lg:items-end lg:gap-12">
+            <div className="lg:col-span-5">
+              <p className="mb-2 text-sm font-semibold text-brand">ทำไมต้องเลือกเรา</p>
+              <h2 className="text-2xl sm:text-3xl font-semibold leading-snug text-black">
+                เห็นราคาจริงทุกรายการ
+                {/* ขึ้นบรรทัดใหม่ทุกจอ — ปล่อยตัดเองบนมือถือจะได้ "…รายการ ก่อน / ตัดสินใจสร้าง" */}
+                <span className="block">ก่อนตัดสินใจสร้าง</span>
               </h2>
-              <p className="text-slate-600 leading-relaxed">
-                {companyName} รับออกแบบและรับเหมาก่อสร้างบ้านครบวงจร ตั้งแต่เลือกแบบ ประเมินราคา
-                ไปจนถึงส่งมอบ เราเชื่อว่าบ้านที่ดีเริ่มจากความเข้าใจตรงกันเรื่องราคา
-                ลูกค้าจึงเห็นต้นทุนทุกรายการตั้งแต่ก่อนเริ่มงาน
-              </p>
-              <ul className="mt-8 divide-y divide-slate-200">
-                {HIGHLIGHTS.map((h) => (
-                  <li key={h.title} className="py-4 first:pt-0">
-                    <p className="font-medium text-slate-900">{h.title}</p>
-                    <p className="mt-1 text-sm leading-relaxed text-slate-600">{h.desc}</p>
-                  </li>
-                ))}
-              </ul>
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* Services */}
-      <section className="bg-slate-50 border-y border-slate-100">
-        {/* เต็มความกว้างจอ ไม่มีเพดานความกว้างเหมือนส่วนอื่น — ระยะขอบซ้ายขวาไล่ตามขนาดจอ */}
-        <div className="w-full px-4 py-20 sm:px-8 lg:px-12 2xl:px-20">
-          <Reveal>
-            <h2 className="text-2xl sm:text-3xl font-semibold text-black text-center mb-2">
-              บริการของเรา
-            </h2>
-            <p className="text-slate-500 text-center mb-12">
-              ออกแบบ ก่อสร้าง และงานระบบวิศวกรรม พร้อมประเมินราคาอย่างโปร่งใสทุกโครงการ
+            </div>
+            <p className="leading-relaxed text-slate-600 lg:col-span-7">
+              ทุกโครงการเริ่มจากใบประเมินราคาที่แยกค่าวัสดุและค่าแรงเป็นรายการ คุณจึงรู้ว่าเงินแต่ละบาทไปอยู่ตรงไหน
+              ตั้งแต่ก่อนเริ่มงาน แล้วติดตามต่อได้จนส่งมอบ
             </p>
           </Reveal>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {SERVICES.map((s, i) => (
-              <Reveal key={s.title} delay={i * 90} className="h-full">
-                {/* กดได้ทั้งใบ: ชื่อบริการเป็นลิงก์จริง แล้วขยายพื้นที่กดคลุมการ์ดด้วย after: —
-                    โปรแกรมอ่านหน้าจอได้ยิน "งานออกแบบ, ลิงก์" แทน "เพิ่มเติม" สามครั้งที่ไม่รู้ว่าไปไหน
-                    และยังลากเลือกข้อความ/คลิกกลางเปิดแท็บใหม่ได้ ต่างจากการห่อทั้งการ์ดด้วย <a> */}
-                <div className="group relative bg-white border border-slate-200 rounded-xl p-6 h-full flex flex-col gap-4 hover:shadow-md hover:-translate-y-0.5 transition-all motion-reduce:transition-none motion-reduce:hover:translate-y-0 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-brand has-[a:focus-visible]:ring-offset-2">
-                  <span className="w-12 h-12 rounded-lg bg-brand/10 text-brand flex items-center justify-center">
-                    <s.Icon />
-                  </span>
-                  <h3 className="text-lg font-semibold text-black transition-colors group-hover:text-brand">
-                    <Link
-                      to={s.to}
-                      className="after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none"
-                    >
-                      {s.title}
-                    </Link>
-                  </h3>
-                  <p className="text-sm text-slate-500 leading-relaxed flex-1">{s.desc}</p>
-                  {/* ตัวบอกว่ากดได้ ไม่ใช่ลิงก์แยก (ลิงก์จริงคือชื่อบริการด้านบน) */}
-                  <span aria-hidden="true" className="text-sm font-medium text-brand inline-flex items-center gap-1">
-                    {s.linkLabel}
-                    <span className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none">→</span>
-                  </span>
-                </div>
+          {/* แต่ละข้อมีเส้นบนของตัวเอง — จอแคบเรียงลงเป็นแถว จอกว้างเป็น 4 คอลัมน์ ไม่ต้องคุมเส้นคั่นแนวตั้งตามจำนวนคอลัมน์ */}
+          <div className="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+            {HIGHLIGHTS.map((h, i) => (
+              <Reveal key={h.title} delay={i * 90} className="border-t border-slate-200 pt-5">
+                <p className="text-sm tabular-nums text-slate-400">{String(i + 1).padStart(2, "0")}</p>
+                <h3 className="mt-3 font-medium text-slate-900">{h.title}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">{h.desc}</p>
               </Reveal>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Featured house designs */}
-      {featured.length > 0 && (
+      {/* Services — รูปเต็มใบ ตัวหนังสือทับ (ผู้ใช้เลือกแบบ B จาก 5 แบบ 11 ต.ค. 2026 ไม่เอาปุ่ม "ดูบริการทั้งหมด")
+          พื้นแถบชุดเดียวกับส่วนท้ายหน้าแบบบ้าน/ผลงาน (bg-slate-50 + border-y slate-100) ห้ามคิดค่าใหม่
+          ความกว้าง max-w-7xl เท่าส่วนแบบบ้านแนะนำด้านล่าง ขอบซ้ายหัวข้อจะตรงแนวกัน */}
+      <section id="services" className="scroll-mt-20 bg-slate-50 border-y border-slate-100">
+        <div className="max-w-7xl mx-auto px-4 py-20">
+          <Reveal>
+            <h2 className="text-2xl sm:text-3xl font-semibold text-black mb-2">บริการของเรา</h2>
+            <p className="text-slate-500 mb-10">
+              ออกแบบ ก่อสร้าง และงานระบบวิศวกรรม พร้อมประเมินราคาอย่างโปร่งใสทุกโครงการ
+            </p>
+          </Reveal>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {SERVICES.map((s, i) => (
+              <Reveal key={s.title} delay={i * 90}>
+                <ServiceTile
+                  title={s.title}
+                  desc={s.desc}
+                  to={s.to}
+                  Icon={s.Icon}
+                  image={siteImages === null ? null : resolveSiteImageSlot(siteImages, s.imageKey)}
+                />
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* แบบบ้านแนะนำ (ผู้ใช้เลือกแบบ A 14 ต.ค. 2026) — หัวข้อชิดซ้าย + "ดูแบบบ้านทั้งหมด →" ที่หัว แทนการ์ดเส้นประ
+          ที่ดูเหมือนช่องว่าง · การ์ดรูปใหญ่ + สเปก (ตร.ม./ชั้น/ห้องนอน/ห้องน้ำ) ให้เทียบแบบได้โดยไม่ต้องกดเข้าไป
+          ระหว่างโหลดโชว์หัวข้อจริง + การ์ดโครงร่าง (ไม่งั้นการ์ดโผล่ทีหลังดันเนื้อหาข้างล่างกระโดด)
+          โหลดแล้วไม่มีแบบแนะนำ = ซ่อนทั้งส่วน */}
+      {(featuredLoading || featured.length > 0) && (
         <section className="bg-white">
           <div className="max-w-7xl mx-auto px-4 py-20">
-            <Reveal>
-              <h2 className="text-2xl sm:text-3xl font-semibold text-black text-center mb-2">
-                แบบบ้านแนะนำ
-              </h2>
-              <p className="text-slate-500 text-center mb-12">
-                เลือกแบบที่ใช่สำหรับคุณ หรือดูแบบทั้งหมดของเรา
-              </p>
+            <Reveal className="mb-10 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-semibold text-black mb-2">แบบบ้านแนะนำ</h2>
+                <p className="text-slate-500">เลือกแบบที่ใช่สำหรับคุณ หรือดูแบบทั้งหมดของเรา</p>
+              </div>
+              <Link
+                to="/house-designs"
+                className="group inline-flex min-h-11 items-center gap-1 text-sm font-medium text-brand"
+              >
+                ดูแบบบ้านทั้งหมด
+                <span aria-hidden className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none">
+                  →
+                </span>
+              </Link>
             </Reveal>
-            <div className={`grid grid-cols-1 ${featuredGridCols} gap-6`}>
+            {featuredLoading && (
+              <CardGridSkeleton
+                count={2}
+                gridClass="grid-cols-1 sm:grid-cols-2"
+                imageClass="aspect-[16/10]"
+                lines={2}
+                label="กำลังโหลดแบบบ้านแนะนำ..."
+              />
+            )}
+            <div className={`grid grid-cols-1 gap-6 ${featuredGridCols}`}>
               {featured.map((d, i) => (
                 <Reveal key={d.id} delay={i * 90} className="h-full">
                   <Link
                     to={`/house-designs/${d.id}`}
-                    className="group h-full flex flex-col border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow"
+                    className="group flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
                   >
                     {d.exteriorImages?.[0] ? (
-                      <div className="overflow-hidden">
-                        <img
-                          src={d.exteriorImages[0]}
-                          alt={d.name}
-                          className="w-full h-56 object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      </div>
+                      // แสงวิ่งรองใต้รูประหว่างรอ แล้วจางเข้า — เดิมรูปโผล่พรวดหลังการ์ดขึ้นแล้ว
+                      <FadeImage
+                        src={d.exteriorImages[0]}
+                        alt={d.name}
+                        lazy
+                        className="aspect-[16/10]"
+                        imgClassName="group-hover:scale-105"
+                      />
                     ) : (
-                      <div className="w-full h-56 bg-slate-100 flex items-center justify-center text-slate-300 text-sm">
+                      <div className="flex aspect-[16/10] items-center justify-center bg-slate-100 text-sm text-slate-300">
                         ไม่มีรูปภาพ
                       </div>
                     )}
-                    <div className="p-4">
-                      <h3 className="font-semibold text-black">{d.name}</h3>
-                      {d.area && <p className="text-sm text-slate-500 mt-1">{d.area} ตร.ม.</p>}
+                    <div className="flex flex-1 flex-col p-5">
+                      <h3 className="text-lg font-semibold text-black">{d.name}</h3>
+                      <HouseSpecLine d={d} />
+                      {/* ขึ้นตลอด (ไม่ใช่เฉพาะตอนชี้) — จอสัมผัสไม่มีสถานะชี้ ต้องเห็นว่ากดได้ */}
+                      <span className="mt-auto inline-flex items-center gap-1 pt-4 text-sm font-medium text-brand">
+                        ดูรายละเอียด
+                        <span aria-hidden className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none">
+                          →
+                        </span>
+                      </span>
                     </div>
                   </Link>
                 </Reveal>
               ))}
-              {showViewAllCard && (
-                <Reveal delay={featured.length * 90} className="h-full">
-                  <Link
-                    to="/house-designs"
-                    className="h-full border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center gap-2 text-brand hover:border-brand hover:bg-brand/5 transition-colors min-h-56"
-                  >
-                    <PlusIcon />
-                    <span className="font-medium">ดูแบบบ้านทั้งหมด</span>
-                  </Link>
-                </Reveal>
-              )}
             </div>
           </div>
         </section>

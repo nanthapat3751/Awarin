@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { imageListSchema } from "../../lib/image-url-schema";
+
 // สเปกบ้าน: จำนวนเต็มไม่ติดลบ + เพดานกัน typo (ชั้นสูงสุด 50, ห้อง 0–50)
 const floorsField = z.number().int().min(1).max(50);
 const roomsField = z.number().int().min(0).max(50);
@@ -17,9 +19,9 @@ export const createHouseDesignSchema = z.object({
   floors: floorsField.optional(),
   bedrooms: roomsField.optional(),
   bathrooms: roomsField.optional(),
-  exteriorImages: z.array(z.string().url()).optional(),
-  interiorImages: z.array(z.string().url()).optional(),
-  plans: z.array(z.string().url()).optional(),
+  exteriorImages: imageListSchema.optional(),
+  interiorImages: imageListSchema.optional(),
+  plans: imageListSchema.optional(),
   published: z.boolean().optional(),
 });
 
@@ -34,9 +36,9 @@ export const updateHouseDesignSchema = z.object({
   floors: floorsField.nullable().optional(),
   bedrooms: roomsField.nullable().optional(),
   bathrooms: roomsField.nullable().optional(),
-  exteriorImages: z.array(z.string().url()).optional(),
-  interiorImages: z.array(z.string().url()).optional(),
-  plans: z.array(z.string().url()).optional(),
+  exteriorImages: imageListSchema.optional(),
+  interiorImages: imageListSchema.optional(),
+  plans: imageListSchema.optional(),
   published: z.boolean().optional(),
   // เปิด/ปิดการแสดงในโซนแบบบ้านแนะนำของหน้าแรก
   featured: z.boolean().optional(),

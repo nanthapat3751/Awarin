@@ -13,9 +13,22 @@ import type { ReactNode } from "react";
  *
  * รายละเอียด CSS อยู่ที่ .collapsible ใน index.css
  */
-export function Collapsible({ open, children }: Readonly<{ open: boolean; children: ReactNode }>) {
+export function Collapsible({
+  open,
+  flush = false,
+  children,
+}: Readonly<{
+  open: boolean;
+  /**
+   * ตอนพับ ตัวครอบติดลบ margin-bottom 1rem ไว้หักช่องว่าง gap-4 ของฟอร์ม (ไม่งั้นมีช่องว่างโหว่)
+   * ที่ไม่ได้อยู่ในกล่อง gap ให้ใส่ flush — ไม่งั้นมันดึงขอบล่างของกล่องแม่ขึ้นมาทับเนื้อหาข้างบน
+   * (การ์ดสัญญา: ปุ่ม "ดูรายละเอียดงวด" ชิดขอบล่าง)
+   */
+  flush?: boolean;
+  children: ReactNode;
+}>) {
   return (
-    <div className={open ? "collapsible is-open" : "collapsible"}>
+    <div className={`collapsible${open ? " is-open" : ""}${flush ? " collapsible--flush" : ""}`}>
       <div inert={!open}>{children}</div>
     </div>
   );

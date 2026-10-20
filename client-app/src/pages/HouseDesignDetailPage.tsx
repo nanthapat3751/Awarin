@@ -3,40 +3,36 @@ import { Link, useParams } from "react-router-dom";
 
 import type { HouseDesignDto } from "@systemboq/shared-types";
 
-import { HouseSpecChipsLarge } from "../components/HouseSpecChips";
+import { FadeImage } from "../components/FadeImage";
+import { HouseSpecList } from "../components/HouseSpecChips";
+import { NaturalImage } from "../components/NaturalImage";
 import { Reveal } from "../components/Reveal";
-import { getHouseDesign, getPublicSettings } from "../lib/public-api";
-import { lineHref as toLineHref } from "../lib/safe-url";
+import { getHouseDesign } from "../lib/public-api";
+import { HouseDesignDetailSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
 
-function PhoneIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-4 w-4"
-      aria-hidden
-    >
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-    </svg>
-  );
+/** ป้ายเหนือชื่อแบบบ้าน จากจำนวนชั้นที่กรอกไว้ — ไม่กรอก = ไม่มีป้าย (ไม่เดา) */
+function houseFloorsEyebrow(d: HouseDesignDto): string {
+  if (d.floors == null || d.floors < 1) return "";
+  return d.floors === 1 ? "แบบบ้านชั้นเดียว" : `แบบบ้าน ${d.floors} ชั้น`;
 }
 
-function LineIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden>
-      <path d="M12 3C6.48 3 2 6.58 2 11c0 2.53 1.5 4.78 3.86 6.25-.13.9-.6 2.2-.7 2.53-.13.42.16.42.33.31.13-.09 2.02-1.34 2.86-1.9.5.07 1.02.1 1.55.1 5.52 0 10-3.58 10-8S17.52 3 12 3z" />
-    </svg>
-  );
+/** คำอธิบายหน้าเมื่อแบบบ้านไม่มีคำบรรยาย: "บ้านพักอาศัย 2 ชั้น · 2 ชั้น 4 ห้องนอน 3 ห้องน้ำ พื้นที่ใช้สอย 220 ตร.ม. ..." */
+function designSummary(d: HouseDesignDto): string {
+  const spec = [
+    d.floors ? `${d.floors} ชั้น` : null,
+    d.bedrooms ? `${d.bedrooms} ห้องนอน` : null,
+    d.bathrooms ? `${d.bathrooms} ห้องน้ำ` : null,
+    d.area ? `พื้นที่ใช้สอย ${Number(d.area).toLocaleString("th-TH")} ตร.ม.` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `${d.name}${spec ? ` · ${spec}` : ""} ดูภาพและแปลน ปรับแบบได้ และขอประเมินราคาก่อสร้างฟรี`;
 }
 
 export function HouseDesignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [design, setDesign] = useState<HouseDesignDto | null>(null);
-  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   // รูปที่กำลังแสดงในแกลเลอรีหลัก (index ในลิสต์รูปภาพถ่ายจริง)
@@ -53,15 +49,17 @@ export function HouseDesignDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  useEffect(() => {
-    getPublicSettings()
-      .then((res) => setSettings(res.settings))
-      .catch(() => undefined);
-  }, []);
+  // ชื่อแท็บ/ผลค้นหา = ชื่อแบบบ้านจริง · ไม่มีคำบรรยาย = ประกอบจากสเปก (คนค้นหาอยากรู้ขนาดก่อนกดเข้า)
+  usePageMeta(
+    loading ? undefined : (design?.name ?? "ไม่พบแบบบ้าน"),
+    design ? (design.description ?? designSummary(design)) : undefined,
+  );
 
   if (loading) {
     return (
-      <div className="min-h-[calc(100vh-4.5rem)] px-4 py-12 text-slate-400">กำลังโหลด...</div>
+      <div className="min-h-[calc(100vh-4.5rem)]">
+        <HouseDesignDetailSkeleton />
+      </div>
     );
   }
 
@@ -75,7 +73,7 @@ export function HouseDesignDetailPage() {
 
   // แกลเลอรีหลัก = ภาพถ่ายจริง (ภายนอก + ภายใน) — แปลนบ้านแยกโชว์ด้านล่างเพราะเป็นภาพเชิงเทคนิค
   const photos = [...(design.exteriorImages ?? []), ...(design.interiorImages ?? [])];
-  const lineHref = toLineHref(settings.companyLine);
+  const eyebrow = houseFloorsEyebrow(design);
 
   return (
     <div className="min-h-[calc(100vh-4.5rem)]">
@@ -105,15 +103,14 @@ export function HouseDesignDetailPage() {
           <div className="lg:col-span-2">
             {photos.length > 0 ? (
               <>
-                <div
-                  className="hero-item group h-72 overflow-hidden rounded-xl bg-slate-100 sm:h-105"
-                  style={{ animationDelay: "0.14s" }}
-                >
-                  <img
+                <div className="hero-item group" style={{ animationDelay: "0.14s" }}>
+                  {/* key = เปลี่ยนรูปแล้วเริ่มใหม่: แสงวิ่ง → จางเข้า (แทน img-swap เดิม) */}
+                  <FadeImage
                     key={photos[active]}
                     src={photos[active]}
                     alt={design.name}
-                    className="img-swap h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    className="h-72 rounded-xl sm:h-105"
+                    imgClassName="group-hover:scale-105"
                   />
                 </div>
                 {photos.length > 1 && (
@@ -133,7 +130,7 @@ export function HouseDesignDetailPage() {
                             : "border-transparent opacity-60 hover:opacity-100"
                         }`}
                       >
-                        <img src={url} alt="" className="h-full w-full object-cover" />
+                        <FadeImage src={url} alt="" className="h-full w-full" />
                       </button>
                     ))}
                   </div>
@@ -165,13 +162,7 @@ export function HouseDesignDetailPage() {
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {design.plans.map((url, i) => (
                     <Reveal key={url} delay={i * 90}>
-                      <div className="overflow-hidden rounded-lg border border-slate-200">
-                        <img
-                          src={url}
-                          alt="แปลนบ้าน"
-                          className="w-full transition-transform duration-500 hover:scale-105"
-                        />
-                      </div>
+                      <NaturalImage src={url} alt="แปลนบ้าน" className="rounded-lg border border-slate-200" />
                     </Reveal>
                   ))}
                 </div>
@@ -185,40 +176,20 @@ export function HouseDesignDetailPage() {
               className="hero-item rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6"
               style={{ animationDelay: "0.3s" }}
             >
-              <h1 className="text-xl font-semibold text-slate-800">{design.name}</h1>
-              <HouseSpecChipsLarge d={design} />
-
-              <div className="my-4 border-t border-slate-100" />
+              {/* แบบ B ใบสเปก (ผู้ใช้เลือก 16 ต.ค. 2569): ป้ายประเภท · ชื่อ · รายการสเปก · ปุ่มหลัก
+                  (ปุ่มคู่ โทร/ส่งข้อความ ผู้ใช้สั่งถอดออก — เบอร์โทรอยู่ที่ฟุตเตอร์และหน้าติดต่อเรา) */}
+              {eyebrow && <p className="text-xs font-semibold tracking-wide text-brand">{eyebrow}</p>}
+              <h1 className={`${eyebrow ? "mt-1" : ""} text-xl font-semibold text-slate-800`}>{design.name}</h1>
+              <HouseSpecList d={design} />
 
               <Link
                 to={`/contact?houseDesignId=${design.id}`}
-                className="flex w-full items-center justify-center rounded-lg bg-brand px-4 py-3 font-medium text-white transition-colors hover:bg-brand-dark"
+                className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-brand px-4 text-center font-medium text-white transition-colors hover:bg-brand-dark"
               >
                 สนใจแบบนี้ · ขอประเมินราคา
               </Link>
 
-              {settings.companyPhone && (
-                <a
-                  href={`tel:${settings.companyPhone}`}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-brand hover:text-brand"
-                >
-                  <PhoneIcon /> โทร {settings.companyPhone}
-                </a>
-              )}
-              {settings.companyLine && (
-                <a
-                  href={lineHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-emerald-500 hover:text-emerald-600"
-                >
-                  <LineIcon /> แชทผ่าน LINE
-                </a>
-              )}
-
-              <p className="mt-3 text-center text-xs text-slate-400">
-                ทีมงานยินดีให้คำปรึกษาฟรี ไม่มีค่าใช้จ่าย
-              </p>
+              <p className="mt-3 text-center text-xs text-slate-400">ทีมงานยินดีให้คำปรึกษาฟรี ไม่มีค่าใช้จ่าย</p>
             </div>
           </aside>
         </div>

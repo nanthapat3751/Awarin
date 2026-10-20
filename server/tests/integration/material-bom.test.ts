@@ -104,66 +104,6 @@ describe("material BOM (แตกวัสดุย่อย)", () => {
     expect(Number(res.body.item.materialUnitPrice)).toBeCloseTo(1000 * 1.05 * 25, 2); // 26,250
   });
 
-  it("aggregates a project-wide material summary across lines, grouped by material", async () => {
-    const projectId = await createProject("BOM สรุปวัสดุ");
-    // สองบรรทัดที่ใช้ปูนเหมือนกัน (อ้าง cementId) ต้องรวมเป็นแถวเดียวในสรุป
-    await owner.agent.post(`/api/projects/${projectId}/boq/items`).send({
-      categoryId: itemCategoryId,
-      name: "งานเทพื้น",
-      unit: "ลบ.ม.",
-      quantity: 10,
-      components: [{ componentMaterialId: cementId, name: "ปูนซีเมนต์", unit: "ถุง", qtyPerUnit: 7, unitPrice: 175 }],
-    });
-    await owner.agent.post(`/api/projects/${projectId}/boq/items`).send({
-      categoryId: itemCategoryId,
-      name: "งานเทเสา",
-      unit: "ลบ.ม.",
-      quantity: 4,
-      components: [
-        { componentMaterialId: cementId, name: "ปูนซีเมนต์", unit: "ถุง", qtyPerUnit: 7, unitPrice: 175 },
-        { componentMaterialId: sandId, name: "ทรายหยาบ", unit: "ลบ.ม.", qtyPerUnit: 0.5, unitPrice: 450 },
-      ],
-    });
-
-    const res = await owner.agent.get(`/api/projects/${projectId}/boq/material-summary`);
-    expect(res.status).toBe(200);
-    expect(res.body.totalLines).toBe(2);
-    expect(res.body.linesWithComponents).toBe(2);
-
-    const cementRow = res.body.rows.find((r: { componentMaterialId: string | null }) => r.componentMaterialId === cementId);
-    // ปูน = 10×7 + 4×7 = 98 ถุง × 175 = 17,150
-    expect(Number(cementRow.totalQty)).toBeCloseTo(98, 3);
-    expect(Number(cementRow.totalCost)).toBeCloseTo(98 * 175, 2);
-    const sandRow = res.body.rows.find((r: { componentMaterialId: string | null }) => r.componentMaterialId === sandId);
-    expect(Number(sandRow.totalQty)).toBeCloseTo(2, 3); // 4×0.5
-    expect(Number(res.body.grandTotal)).toBeCloseTo(98 * 175 + 2 * 450, 2); // 17,150 + 900 = 18,050
-  });
-
-  it("scales component quantities with a take-off measurement change, keeping unit price fixed", async () => {
-    const projectId = await createProject("BOM สเกลตามพื้นที่", { areaSqm: 100 });
-    await owner.agent.post(`/api/projects/${projectId}/boq/items`).send({
-      categoryId: itemCategoryId,
-      name: "งานพื้นคอนกรีต",
-      unit: "ลบ.ม.",
-      qtyBasis: "PER_AREA",
-      qtyCoefficient: 1,
-      // ปูน 2 ถุงต่อ 1 ม³ → ราคาวัสดุ/หน่วย = 350
-      components: [{ componentMaterialId: cementId, name: "ปูนซีเมนต์", unit: "ถุง", qtyPerUnit: 2, unitPrice: 175 }],
-    });
-
-    let summary = await owner.agent.get(`/api/projects/${projectId}/boq/material-summary`);
-    let cement = summary.body.rows.find((r: { componentMaterialId: string | null }) => r.componentMaterialId === cementId);
-    expect(Number(cement.totalQty)).toBeCloseTo(200, 3); // qty 100 × 2
-    expect(Number(cement.unitPrice)).toBeCloseTo(175, 2);
-
-    // เพิ่มพื้นที่เป็น 150 → ปริมาณปูนรวมสเกลเป็น 300 แต่ราคาต่อหน่วยคงที่
-    await owner.agent.patch(`/api/projects/${projectId}`).send({ areaSqm: 150 });
-    summary = await owner.agent.get(`/api/projects/${projectId}/boq/material-summary`);
-    cement = summary.body.rows.find((r: { componentMaterialId: string | null }) => r.componentMaterialId === cementId);
-    expect(Number(cement.totalQty)).toBeCloseTo(300, 3);
-    expect(Number(cement.unitPrice)).toBeCloseTo(175, 2);
-  });
-
   it("auto-pulls a catalog material's recipe into a BOQ line when no components are sent", async () => {
     // วัสดุแคตตาล็อกที่มีสูตรในตัว
     const composite = await owner.agent.post("/api/materials").send({

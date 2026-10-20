@@ -1,14 +1,16 @@
 import { looksLikeEmail } from "@systemboq/shared-types";
-import { Check, Eye, EyeOff, ImageUp, Lock, X } from "lucide-react";
+import { ImageUp, Lock, X } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 
 import { BackupSettings } from "../components/BackupSettings";
 import { Button, buttonClasses } from "../components/Button";
 import { Layout } from "../components/Layout";
+import { IpCheckSettings } from "../components/IpCheckSettings";
+import { MailSettings } from "../components/MailSettings";
+import { TakeoffRulesSettings } from "../components/TakeoffRulesSettings";
 import { PageHeader } from "../components/PageHeader";
-import { TwoFactorSettings } from "../components/TwoFactorSettings";
-import { apiFetch, ApiError } from "../lib/api";
+import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth-context";
 import { resizeLogo } from "../lib/logo-resize";
 import { useToast } from "../lib/toast-context";
@@ -20,12 +22,19 @@ import {
   updateSettings,
   uploadDocumentLogo,
 } from "../lib/settings-api";
+import { PromptPayTest } from "../components/PromptPayTest";
+import { DetailSkeleton } from "../components/Skeleton";
+import { ScrollableTabBar } from "../components/ScrollableTabBar";
 
 interface FormState {
   companyName: string;
   companyAddress: string;
+  companyNameEn: string;
+  companyAddressEn: string;
   companyPhone: string;
   companyTaxId: string;
+  companyVatRegistered: boolean;
+  companyBranch: string;
   companyEmail: string;
   companyFacebook: string;
   companyYoutube: string;
@@ -38,6 +47,8 @@ interface FormState {
   paymentAccountNo: string;
   paymentPromptPay: string;
   quoteValidityDays: string;
+  /** เงินประกันผลงานตั้งต้นของสัญญาใหม่ (%) — ว่าง = ไม่มี */
+  retentionPercent: string;
   quoteTerms: string;
   overheadProfitPercent: string;
   overheadPercent: string;
@@ -47,8 +58,12 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   companyName: "",
   companyAddress: "",
+  companyNameEn: "",
+  companyAddressEn: "",
   companyPhone: "",
   companyTaxId: "",
+  companyVatRegistered: false,
+  companyBranch: "สำนักงานใหญ่",
   companyEmail: "",
   companyFacebook: "",
   companyYoutube: "",
@@ -61,6 +76,7 @@ const EMPTY_FORM: FormState = {
   paymentAccountNo: "",
   paymentPromptPay: "",
   quoteValidityDays: "",
+  retentionPercent: "",
   quoteTerms: "",
   overheadProfitPercent: "",
   overheadPercent: "",
@@ -71,7 +87,10 @@ const EMPTY_FORM: FormState = {
 const TEXT_KEYS = [
   "companyName",
   "companyAddress",
+  "companyNameEn",
+  "companyAddressEn",
   "companyPhone",
+  "companyBranch",
   "companyEmail",
   "companyFacebook",
   "companyYoutube",
@@ -120,26 +139,22 @@ type LogoChange =
   | { kind: "reset" }
   | null;
 
-interface PasswordFormState {
-  currentPassword: string;
-  newPassword: string;
-  confirmPassword: string;
-}
-
-const EMPTY_PASSWORD_FORM: PasswordFormState = {
-  currentPassword: "",
-  newPassword: "",
-  confirmPassword: "",
-};
-
 // แท็บแบ่งหมวดการตั้งค่า -- ลดการเลื่อนหน้ายาว และแยกเรื่อง "แสดงบนเว็บลูกค้า" กับ "ภายใน"
-// และ "ความปลอดภัย" ออกจากกันชัดเจน
+// และ "การสำรองข้อมูล" ออกจากกันชัดเจน
 const TABS = [
   { id: "company", label: "ข้อมูลบริษัท" },
   // ของที่พิมพ์ลงเอกสารที่ส่งลูกค้า นอกเหนือจากชื่อ/ที่อยู่ — โลโก้ คนเซ็น และบัญชีที่ให้โอนเข้า
   { id: "documents", label: "เอกสารและการรับเงิน" },
   { id: "pricing", label: "อัตราราคา" },
-  { id: "security", label: "ความปลอดภัย" },
+  // ชุดกฎการคิดเหล็กของตัวคิดชิ้นส่วนโครงสร้าง (เสนอราคา / สั่งตัด) — ทุกคนเห็น แก้ได้เฉพาะเจ้าของ
+  { id: "takeoff", label: "ถอดปริมาณ" },
+  // รหัสผ่านกับการยืนยัน 2 ชั้นย้ายไปหน้า "บัญชีของฉัน" (/account) แล้ว เพราะเป็นเรื่องของแต่ละคน
+  // ไม่ใช่การตั้งค่าบริษัท — ที่เหลือตรงนี้คือการสำรองข้อมูล ซึ่งเป็นของเจ้าของระบบเท่านั้น
+  { id: "backup", label: "สำรองข้อมูล", ownerOnly: true },
+  // การเชื่อมต่อส่งเมลอยู่ใน server/.env — แท็บนี้มีไว้ตรวจว่าเมลถึงลูกค้าจริงไหม ไม่ได้แก้ค่า
+  { id: "mail", label: "การส่งอีเมล", ownerOnly: true },
+  // ตรวจว่า IP ที่บันทึกในแฟ้มลูกค้าเป็นของคนใช้งานจริง (หลัง proxy/Docker) — เจ้าของเท่านั้น เหมือนการเห็น IP
+  { id: "network", label: "การรับ IP", ownerOnly: true },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -261,48 +276,6 @@ function digitCount(value: string): number {
   return value.replace(/\D/g, "").length;
 }
 
-// ช่องกรอกรหัสผ่านที่มีปุ่มตาโชว์/ซ่อน + รองรับ autocomplete ของ password manager และมี hint
-// (เงื่อนไข/สถานะ) ต่อท้ายได้
-function PasswordField({
-  label,
-  value,
-  onChange,
-  autoComplete,
-  hint,
-}: Readonly<{
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  autoComplete: string;
-  hint?: ReactNode;
-}>) {
-  const [show, setShow] = useState(false);
-  return (
-    <label className={FIELD}>
-      {label}
-      <div className="relative">
-        <input
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          autoComplete={autoComplete}
-          className={`${INPUT} w-full pr-8`}
-        />
-        <button
-          type="button"
-          onClick={() => setShow((s) => !s)}
-          tabIndex={-1}
-          aria-label={show ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-500"
-        >
-          {show ? <EyeOff size={15} /> : <Eye size={15} />}
-        </button>
-      </div>
-      {hint}
-    </label>
-  );
-}
-
 /** ปุ่มแท็บ: แท็บที่เปิดอยู่ขีดเส้นใต้สีแบรนด์ */
 function tabButtonProps(active: boolean): { className: string; style?: CSSProperties } {
   if (active) {
@@ -312,27 +285,6 @@ function tabButtonProps(active: boolean): { className: string; style?: CSSProper
     };
   }
   return { className: "px-4 py-2 text-sm text-slate-500 border-b-2 border-transparent hover:text-slate-800" };
-}
-
-function PasswordLengthHint({ ok }: Readonly<{ ok: boolean }>) {
-  return (
-    <span className={`flex items-center gap-1 text-xs ${ok ? "text-emerald-600" : "text-slate-400"}`}>
-      {ok ? <Check size={12} /> : <span className="inline-block w-3 text-center">•</span>}
-      <span>อย่างน้อย 8 ตัวอักษร</span>
-    </span>
-  );
-}
-
-function PasswordMatchHint({ match }: Readonly<{ match: boolean }>) {
-  return match ? (
-    <span className="flex items-center gap-1 text-xs text-emerald-600">
-      <Check size={12} /> รหัสผ่านตรงกัน
-    </span>
-  ) : (
-    <span className="flex items-center gap-1 text-xs text-red-600">
-      <X size={12} /> รหัสผ่านไม่ตรงกัน
-    </span>
-  );
 }
 
 // ครบหรือว่างทั้งหมด — บัญชีครึ่ง ๆ กลาง ๆ ไม่ถูกพิมพ์ลงเอกสารเลย (เซิร์ฟเวอร์ปฏิเสธด้วย)
@@ -354,7 +306,15 @@ function isAccountNo(v: string): boolean {
 }
 
 function isPromptPay(v: string): boolean {
-  return DIGITS_AND_SEPARATORS.test(v) && [10, 13].includes(digitCount(v));
+  if (!DIGITS_AND_SEPARATORS.test(v)) return false;
+  const digits = v.replace(/\D/g, "");
+  // เบอร์มือถือต้องขึ้นต้น 0 — ไม่งั้นสร้าง QR พร้อมเพย์ไม่ได้
+  return digits.length === 13 || (digits.length === 10 && digits.startsWith("0"));
+}
+
+function isRetentionPct(v: string): boolean {
+  const n = Number(v);
+  return /^\d+(\.\d+)?$/.test(v.trim()) && n > 0 && n <= 20;
 }
 
 function isValidityDays(v: string): boolean {
@@ -365,6 +325,8 @@ function isValidityDays(v: string): boolean {
 function validateForm(form: FormState) {
   // เว้นว่างได้ แต่ถ้ากรอกต้องเป็นตัวเลข 13 หลัก — เลขนี้ถูกพิมพ์ลงหัวเอกสารที่ส่งลูกค้าจริง
   const taxIdInvalid = filledButInvalid(form.companyTaxId, (v) => taxIdDigits(v).length === 13);
+  // เปิดสวิตช์ VAT ได้ต่อเมื่อเลขผู้เสียภาษีครบ 13 หลัก (เซิร์ฟเวอร์ตรวจซ้ำอีกชั้น)
+  const vatToggleReady = taxIdDigits(form.companyTaxId).length === 13;
   const emailInvalid = filledButInvalid(form.companyEmail, looksLikeEmail);
 
   // ค่าดำเนินการมากกว่าอัตรารวม = กำไรติดลบ เป็นการกรอกผิดเสมอ กันไว้ตั้งแต่ปุ่มบันทึก
@@ -385,22 +347,25 @@ function validateForm(form: FormState) {
   const bankMissing = bankStarted ? BANK_REQUIRED_FIELDS.filter((f) => form[f.key].trim() === "") : [];
 
   const validityInvalid = filledButInvalid(form.quoteValidityDays, isValidityDays);
+  const retentionInvalid = filledButInvalid(form.retentionPercent, isRetentionPct);
 
   const invalidTabs = new Set<TabId>();
   if (taxIdInvalid || emailInvalid) invalidTabs.add("company");
-  if (accountNoInvalid || promptPayInvalid || bankMissing.length > 0 || validityInvalid) {
+  if (accountNoInvalid || promptPayInvalid || bankMissing.length > 0 || validityInvalid || retentionInvalid) {
     invalidTabs.add("documents");
   }
   if (overheadOverTotal) invalidTabs.add("pricing");
 
   return {
     taxIdInvalid,
+    vatToggleReady,
     emailInvalid,
     overheadOverTotal,
     accountNoInvalid,
     promptPayInvalid,
     bankMissing,
     validityInvalid,
+    retentionInvalid,
     invalidTabs,
   };
 }
@@ -434,11 +399,12 @@ function overheadSplitHintOf(form: FormState): string {
 }
 
 export function SettingsPage() {
-  // บัญชีที่ล็อกอินอยู่ — ใช้โชว์ในแผงขวาของแท็บความปลอดภัย
   // แท็บผูกกับ ?tab= เพื่อให้ลิงก์จากที่อื่น (เช่น เมนูผู้ใช้ -> การยืนยัน 2 ชั้น) เปิดตรงแท็บได้เลย
   const [searchParams, setSearchParams] = useSearchParams();
   const tabInUrl = searchParams.get("tab");
   const isTabId = (v: string | null): v is TabId => TABS.some((t) => t.id === v);
+  // แท็บ "ความปลอดภัย" เดิมถูกแยกออกไป — ลิงก์เก่าที่ยังค้างอยู่ในแจ้งเตือน/บุ๊กมาร์กต้องไม่พาไปหน้าว่าง
+  const legacySecurityTab = tabInUrl === "security";
   const [activeTab, setActiveTab] = useState<TabId>(isTabId(tabInUrl) ? tabInUrl : "company");
   useEffect(() => {
     if (isTabId(tabInUrl)) setActiveTab(tabInUrl);
@@ -464,11 +430,6 @@ export function SettingsPage() {
   const [logoError, setLogoError] = useState<string | null>(null);
   const [preparingLogo, setPreparingLogo] = useState(false);
 
-  const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [passwordSavedMessage, setPasswordSavedMessage] = useState<string | null>(null);
-
   async function refresh() {
     setLoading(true);
     setError(null);
@@ -477,6 +438,9 @@ export function SettingsPage() {
       const next = Object.fromEntries(
         (Object.keys(EMPTY_FORM) as (keyof FormState)[]).map((key) => [key, res.settings[key] ?? ""]),
       ) as unknown as FormState;
+      // ค่าตั้งเก็บเป็นข้อความทั้งหมด — สองช่องนี้ไม่ใช่ข้อความในฟอร์ม
+      next.companyVatRegistered = res.settings.companyVatRegistered === "true";
+      next.companyBranch = res.settings.companyBranch?.trim() || "สำนักงานใหญ่";
       setForm(next);
       setLoadedForm(next);
       setLogo({ logo: logoRes.logo, custom: logoRes.custom });
@@ -515,10 +479,13 @@ export function SettingsPage() {
       const payload: Parameters<typeof updateSettings>[0] = {
         ...Object.fromEntries(TEXT_KEYS.map((key) => [key, form[key].trim()])),
         companyTaxId: formatTaxId(form.companyTaxId),
+        companyVatRegistered: form.companyVatRegistered,
       };
       // ว่าง = ไม่กำหนดยืนราคา ต้องส่ง null ไปล้าง (ไม่ใช่เงียบ ไม่งั้นค่าเก่าค้าง)
       payload.quoteValidityDays =
         form.quoteValidityDays.trim() === "" ? null : Number(form.quoteValidityDays);
+      // ว่าง = สัญญาใหม่ไม่มีเงินประกันผลงาน — ต้องส่ง null ไปล้าง
+      payload.retentionPercent = form.retentionPercent.trim() === "" ? null : Number(form.retentionPercent);
       // ADMIN ไม่ส่งอัตรากำไรเลย — ช่องถูกล็อกอยู่แล้ว ส่งไปก็เป็นแค่ค่าเดิม
       if (isOwner) {
         const overhead = Number(form.overheadProfitPercent);
@@ -547,33 +514,6 @@ export function SettingsPage() {
     }
   }
 
-  async function submitChangePassword() {
-    setPasswordError(null);
-    setPasswordSavedMessage(null);
-
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setPasswordError("รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน");
-      return;
-    }
-
-    setChangingPassword(true);
-    try {
-      await apiFetch("/api/auth/change-password", {
-        method: "POST",
-        body: JSON.stringify({
-          currentPassword: passwordForm.currentPassword,
-          newPassword: passwordForm.newPassword,
-        }),
-      });
-      setPasswordForm(EMPTY_PASSWORD_FORM);
-      setPasswordSavedMessage("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว · อุปกรณ์อื่นถูกออกจากระบบแล้ว");
-    } catch (err) {
-      setPasswordError(err instanceof ApiError ? err.message : "เปลี่ยนรหัสผ่านไม่สำเร็จ");
-    } finally {
-      setChangingPassword(false);
-    }
-  }
-
   // ยังไม่ได้บันทึก = ค่าปัจจุบันต่างจากที่โหลดมา หรือเลือกโลโก้ค้างไว้ (ฟอร์มใช้ร่วมกันทุกแท็บ
   // ปุ่มบันทึกก็ส่งทุกแท็บพร้อมกัน ตัวเทียบจึงเป็นก้อนเดียว)
   const formDirty = (Object.keys(form) as (keyof FormState)[]).some((k) => form[k] !== loadedForm[k]);
@@ -581,12 +521,14 @@ export function SettingsPage() {
 
   const {
     taxIdInvalid,
+    vatToggleReady,
     emailInvalid,
     overheadOverTotal,
     accountNoInvalid,
     promptPayInvalid,
     bankMissing,
     validityInvalid,
+    retentionInvalid,
     invalidTabs,
   } = validateForm(form);
   const cannotSave = saving || preparingLogo || !dirty || invalidTabs.size > 0;
@@ -641,15 +583,15 @@ export function SettingsPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  // สถานะสด ๆ ของฟอร์มรหัสผ่าน ใช้ทั้งแสดง hint และคุมปุ่มให้กดได้ต่อเมื่อผ่านเงื่อนไข
-  const newPasswordLongEnough = passwordForm.newPassword.length >= 8;
-  const confirmTouched = passwordForm.confirmPassword.length > 0;
-  const passwordsMatch = passwordForm.newPassword === passwordForm.confirmPassword;
+  // เจ้าของที่มาจากแจ้งเตือนสำรองข้อมูลเก่า → แท็บสำรองข้อมูล · คนอื่น → รหัสผ่าน/2FA ที่ย้ายไปแล้ว
+  if (legacySecurityTab) {
+    return <Navigate to={isOwner ? "/settings?tab=backup" : "/account"} replace />;
+  }
 
   if (loading) {
     return (
       <Layout>
-        <p className="text-slate-500">กำลังโหลด...</p>
+        <DetailSkeleton stats={0} />
       </Layout>
     );
   }
@@ -659,22 +601,26 @@ export function SettingsPage() {
       <PageHeader title="ตั้งค่าระบบ" />
       {error && <p className="text-red-600 mb-4">{error}</p>}
 
-      {/* แถบแท็บ */}
-      <div className="border-b border-slate-200 mb-5 flex gap-1">
-        {TABS.map((t) => {
+      {/* แถบแท็บ — ชื่อแท็บห้ามตกบรรทัด (iPad แนวตั้งเคยแตกเป็น "ข้อมูล / บริษัท") ล้นจอแล้วเลื่อนข้างพร้อมปุ่ม ‹ › */}
+      <ScrollableTabBar id="settings-tabs" ariaLabel="หมวดการตั้งค่า" selectedKey={activeTab} className="mb-5 h-10">
+        {TABS.filter((t) => !("ownerOnly" in t) || isOwner).map((t) => {
           const active = activeTab === t.id;
+          const { className, style } = tabButtonProps(active);
           return (
             <button
               key={t.id}
               type="button"
+              role="tab"
+              aria-selected={active}
               onClick={() => goToTab(t.id)}
-              {...tabButtonProps(active)}
+              className={`${className} shrink-0 whitespace-nowrap`}
+              style={style}
             >
               {t.label}
             </button>
           );
         })}
-      </div>
+      </ScrollableTabBar>
 
       {activeTab === "company" && (
         <div className={COL}>
@@ -696,6 +642,29 @@ export function SettingsPage() {
               <textarea
                 value={form.companyAddress}
                 onChange={(e) => setForm((f) => ({ ...f, companyAddress: e.target.value }))}
+                className={INPUT}
+                rows={2}
+              />
+            </label>
+            {/* หัวใบแจ้งหนี้/ใบเสร็จตามแบบฟอร์มของบริษัทมีชื่อ/ที่อยู่อังกฤษด้วย — ว่างไว้ = ไม่พิมพ์บรรทัดนั้น */}
+            <label className={FIELD}>
+              <span>
+                ชื่อบริษัท (ภาษาอังกฤษ) <span className="font-normal text-slate-400">· ใบแจ้งหนี้/ใบเสร็จ</span>
+              </span>
+              <input
+                value={form.companyNameEn}
+                onChange={(e) => setForm((f) => ({ ...f, companyNameEn: e.target.value }))}
+                className={INPUT}
+                placeholder="Awarin Engineering Co., Ltd."
+              />
+            </label>
+            <label className={FIELD}>
+              <span>
+                ที่อยู่ (ภาษาอังกฤษ) <span className="font-normal text-slate-400">· ใบแจ้งหนี้/ใบเสร็จ</span>
+              </span>
+              <textarea
+                value={form.companyAddressEn}
+                onChange={(e) => setForm((f) => ({ ...f, companyAddressEn: e.target.value }))}
                 className={INPUT}
                 rows={2}
               />
@@ -737,6 +706,49 @@ export function SettingsPage() {
                   </FieldError>
                 )}
               </label>
+            </div>
+
+            {/* ภาษีมูลค่าเพิ่ม — ตัวนี้เป็นตัวตัดสินว่าใบเสร็จออกเป็นใบกำกับภาษีได้หรือไม่
+                ระบบไม่เดาจากการมีเลขผู้เสียภาษี เพราะนิติบุคคลทุกรายมีเลขนี้อยู่แล้ว */}
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <label className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand/30 disabled:opacity-50"
+                  checked={form.companyVatRegistered}
+                  disabled={!vatToggleReady}
+                  onChange={(e) => setForm((f) => ({ ...f, companyVatRegistered: e.target.checked }))}
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">จดทะเบียนภาษีมูลค่าเพิ่ม (VAT) แล้ว</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    เปิดไว้ = ใบเสร็จที่ออกให้ลูกค้าจะเป็น "ใบเสร็จรับเงิน/ใบกำกับภาษี" และเข้ารายงานภาษีขาย ·
+                    ใบที่ออกไปแล้วไม่เปลี่ยนตามการแก้ช่องนี้
+                  </span>
+                  {!vatToggleReady && (
+                    <span className="mt-1 block text-xs text-amber-700">
+                      กรอกเลขประจำตัวผู้เสียภาษีให้ครบ 13 หลักก่อน จึงจะเปิดได้
+                    </span>
+                  )}
+                </span>
+              </label>
+
+              {form.companyVatRegistered && (
+                <label className={`${FIELD} mt-3 max-w-xs`}>
+                  <span>สถานประกอบการที่พิมพ์บนใบกำกับภาษี</span>
+                  <input
+                    value={form.companyBranch}
+                    onChange={(e) => setForm((f) => ({ ...f, companyBranch: e.target.value }))}
+                    className={inputClass(form.companyBranch.trim() === "")}
+                    placeholder="สำนักงานใหญ่"
+                  />
+                  {form.companyBranch.trim() === "" ? (
+                    <FieldError>ระบุ "สำนักงานใหญ่" หรือ "สาขาที่ 00001"</FieldError>
+                  ) : (
+                    <span className="text-xs text-slate-400">ใบกำกับภาษีต้องระบุว่าออกจากสำนักงานใหญ่หรือสาขาไหน</span>
+                  )}
+                </label>
+              )}
             </div>
           </div>
 
@@ -842,7 +854,7 @@ export function SettingsPage() {
                         setLogoError(null);
                         logoSecondaryAction.run();
                       }}
-                      className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+                      className="link-pill text-xs font-medium text-brand"
                     >
                       {logoSecondaryAction.label}
                     </button>
@@ -947,10 +959,13 @@ export function SettingsPage() {
                   inputMode="numeric"
                 />
                 {promptPayInvalid && (
-                  <FieldError>ต้องเป็นเลข 13 หลัก หรือเบอร์มือถือ 10 หลัก</FieldError>
+                  <FieldError>ต้องเป็นเลข 13 หลัก หรือเบอร์มือถือ 10 หลักที่ขึ้นต้นด้วย 0</FieldError>
                 )}
               </label>
             </div>
+            {form.paymentPromptPay.trim() !== "" && !promptPayInvalid && (
+              <PromptPayTest promptPay={form.paymentPromptPay} accountName={form.paymentAccountName} />
+            )}
             {bankMissing.length > 0 && (
               <p className="text-xs text-red-600">
                 กรอกให้ครบ: {bankMissing.map((m) => m.label).join(" · ")} — หรือเว้นว่างทั้งหมด
@@ -1000,6 +1015,39 @@ export function SettingsPage() {
                 placeholder={"ชำระมัดจำ 30% เมื่อเซ็นสัญญา\nราคานี้ไม่รวมค่าขออนุญาตก่อสร้าง\nรับประกันงานโครงสร้าง 1 ปีนับจากวันส่งมอบ"}
               />
               <span className="text-xs text-slate-500">บรรทัดละข้อ — เอกสารใส่เลขข้อให้เอง</span>
+            </label>
+          </div>
+
+          {/* ค่าตั้งต้นของสัญญาใหม่ — ตรึงลงสัญญาตอนออก แก้ได้ในสัญญาแต่ละฉบับจนกว่าจะลงนาม */}
+          <div className={CARD}>
+            <CardHead
+              title="สัญญา"
+              desc="ค่าตั้งต้นของสัญญาที่ออกใหม่ — แก้ได้ในสัญญาแต่ละฉบับจนกว่าจะลงนาม สัญญาที่ออกไปแล้วไม่เปลี่ยนตาม"
+            />
+            <label className={FIELD}>
+              <span>เงินประกันผลงาน</span>
+              <span className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  value={form.retentionPercent}
+                  onChange={(e) => setForm((f) => ({ ...f, retentionPercent: e.target.value }))}
+                  className={`${inputClass(retentionInvalid)} w-24 tabular-nums`}
+                  placeholder="ไม่มี"
+                />
+                <span className="text-sm text-slate-600">% ของยอดแต่ละงวด (รวม VAT)</span>
+              </span>
+              {retentionInvalid ? (
+                <FieldError>ใส่ได้มากกว่า 0 ถึง 20%</FieldError>
+              ) : (
+                <span className="text-xs text-slate-500">
+                  {form.retentionPercent.trim() === ""
+                    ? "เว้นว่าง = สัญญาใหม่ไม่มีเงินประกันผลงาน"
+                    : "ผู้ว่าจ้างกันไว้ทุกงวดแล้วคืนเมื่อพ้นระยะรับประกันผลงาน — พิมพ์ใต้ตารางงวดในสัญญา"}
+                </span>
+              )}
             </label>
           </div>
 
@@ -1083,61 +1131,23 @@ export function SettingsPage() {
         </div>
       )}
 
-      {activeTab === "security" && (
+      {activeTab === "takeoff" && <TakeoffRulesSettings isOwner={isOwner} />}
+
+      {activeTab === "backup" && isOwner && (
         <div className={COL}>
-          <div className={CARD}>
-            <CardHead
-              title="เปลี่ยนรหัสผ่าน"
-              desc="รหัสผ่านสำหรับเข้าสู่ระบบฝั่งบริษัท — เมื่อเปลี่ยนแล้วอุปกรณ์อื่นจะถูกออกจากระบบทั้งหมด"
-            />
-            {passwordError && <p className="text-red-600 text-sm">{passwordError}</p>}
+          <BackupSettings />
+        </div>
+      )}
 
-            <PasswordField
-              label="รหัสผ่านปัจจุบัน"
-              value={passwordForm.currentPassword}
-              onChange={(v) => setPasswordForm((f) => ({ ...f, currentPassword: v }))}
-              autoComplete="current-password"
-            />
+      {activeTab === "mail" && isOwner && (
+        <div className={COL}>
+          <MailSettings />
+        </div>
+      )}
 
-            <PasswordField
-              label="รหัสผ่านใหม่"
-              value={passwordForm.newPassword}
-              onChange={(v) => setPasswordForm((f) => ({ ...f, newPassword: v }))}
-              autoComplete="new-password"
-              hint={<PasswordLengthHint ok={newPasswordLongEnough} />}
-            />
-
-            <PasswordField
-              label="ยืนยันรหัสผ่านใหม่"
-              value={passwordForm.confirmPassword}
-              onChange={(v) => setPasswordForm((f) => ({ ...f, confirmPassword: v }))}
-              autoComplete="new-password"
-              hint={confirmTouched ? <PasswordMatchHint match={passwordsMatch} /> : undefined}
-            />
-
-            <div className="flex items-center gap-3 mt-2">
-              <Button
-                onClick={submitChangePassword}
-                disabled={
-                  changingPassword ||
-                  !passwordForm.currentPassword ||
-                  !newPasswordLongEnough ||
-                  !confirmTouched ||
-                  !passwordsMatch
-                }
-              >
-                เปลี่ยนรหัสผ่าน
-              </Button>
-              {passwordSavedMessage && (
-                <span className="text-sm text-emerald-600">{passwordSavedMessage}</span>
-              )}
-            </div>
-          </div>
-
-          <TwoFactorSettings />
-
-          {/* สำรองข้อมูล — เรื่องของเจ้าของระบบเท่านั้น (เซิร์ฟเวอร์ก็ตอบ 403 กับ ADMIN) */}
-          {isOwner && <BackupSettings />}
+      {activeTab === "network" && isOwner && (
+        <div className={COL}>
+          <IpCheckSettings />
         </div>
       )}
     </Layout>

@@ -1,5 +1,6 @@
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginAdmin, createAndLoginOwner, createCustomerDirect } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // entry แบบ ESM ของ Puppeteer โหลดใต้ ts-jest ไม่ได้ (เหตุผลเดียวกับ myQuotes.test.ts) — ไฟล์นี้ไม่ได้ทดสอบ PDF
 jest.mock("../../src/lib/pdf/quote-pdf", () => ({
@@ -169,9 +170,7 @@ describe("BOQ review: catalog price drift + version compare", () => {
   it("เวอร์ชันส่งเป็นใบเสนอราคาแล้ว → อัปเดตแตกเวอร์ชันใหม่ ใบที่ส่งไปไม่เปลี่ยน · เทียบเวอร์ชันเห็นตรงกัน", async () => {
     const { projectId, tileId, concreteId: lineId } = await setupProject();
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-    const sent = await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    const sent = await sendQuote(owner.agent, projectId, quote.body.quote.id);
     expect(sent.status).toBe(200);
     const v1 = await prisma.projectVersion.findFirstOrThrow({ where: { projectId, versionNo: 1 } });
 

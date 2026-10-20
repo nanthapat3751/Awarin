@@ -1,6 +1,8 @@
 import {
+  AREA_RANGES,
   EMAIL_ERROR_MESSAGE,
   looksLikeEmail,
+  type AreaRange,
   GENERAL_INQUIRY_SERVICE_TYPE,
   NAME_MAX_LENGTH,
   SERVICE_TYPES,
@@ -10,10 +12,12 @@ import {
   validateFullName,
 } from "@systemboq/shared-types";
 import { useEffect, useState, type SubmitEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { AuthShell } from "../components/AuthShell";
+import type { RegisterPrefill } from "../components/RegisterForm";
 import { Collapsible } from "../components/Collapsible";
+import { DateInput } from "../components/DateInput";
 import { Reveal } from "../components/Reveal";
 import {
   CalendarIcon,
@@ -25,13 +29,26 @@ import {
 } from "../components/FieldIcons";
 import { FloatingField } from "../components/FloatingField";
 import { FacebookIcon, LineIcon, YoutubeIcon } from "../components/SocialIcons";
+import { Skeleton, SkeletonGroup } from "../components/Skeleton";
 import { TurnstileWidget } from "../components/TurnstileWidget";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth-context";
-import { createLead, getPublicSettings } from "../lib/public-api";
+import { cachedPublicSettings, createLead, getPublicSettings } from "../lib/public-api";
 import { lineHref as toLineHref, safeHttpUrl } from "../lib/safe-url";
+import { usePageMeta } from "../lib/page-meta";
+
+/** หลังส่งคำขอ — ลำดับงานจริงของบริษัท (ขั้นที่ 3 = ลิงก์ "พื้นที่ลูกค้า" ที่พนักงานออกให้เมื่อมีใบเสนอราคา) */
+const NEXT_STEPS = [
+  { title: "ทีมงานติดต่อกลับ", desc: "ทางโทรศัพท์หรืออีเมลที่ให้ไว้ เพื่อคุยรายละเอียดงาน" },
+  { title: "ประเมินราคาและทำใบเสนอราคา", desc: "แยกค่าวัสดุและค่าแรงทุกรายการ" },
+  { title: "รับลิงก์เข้า “พื้นที่ลูกค้า”", desc: "ดูใบเสนอราคา อนุมัติ และติดตามสัญญากับงวดเงินออนไลน์" },
+];
 
 export function ContactPage() {
+  usePageMeta(
+    "ติดต่อเรา",
+    "ขอคำปรึกษาหรือประเมินราคาสร้างบ้านฟรี กรอกแบบฟอร์มแล้วทีมงานติดต่อกลับ หรือดูที่ตั้งสำนักงานและช่องทางติดต่อ",
+  );
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const houseDesignId = searchParams.get("houseDesignId") ?? undefined;
@@ -51,6 +68,10 @@ export function ContactPage() {
   // ข้อมูลโครงการเบื้องต้น (ถ้าลูกค้าทราบ) — ช่วยให้พนักงานเริ่มงานได้เร็วขึ้น ทุกช่อง optional
   const [siteAddress, setSiteAddress] = useState("");
   const [projectArea, setProjectArea] = useState("");
+  // ช่วงพื้นที่ (บังคับเลือกช่วง/ยังไม่ทราบ หรือพิมพ์ตัวเลข อย่างใดอย่างหนึ่ง) — เลือกอย่างหนึ่งแล้วอีกอย่างถูกล้าง
+  const [areaRange, setAreaRange] = useState<AreaRange | null>(null);
+  // กดส่งโดยยังไม่ได้บอกขนาดพื้นที่ — ขึ้นแดงที่กลุ่มปุ่ม
+  const [areaMissing, setAreaMissing] = useState(false);
   const [desiredStart, setDesiredStart] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -65,7 +86,9 @@ export function ContactPage() {
   useEffect(() => {
     if (user) {
       setName(user.fullName);
-      setEmail(user.email);
+      // ?? "" เป็นแค่การกันชนิดข้อมูล — คอลัมน์อีเมลเป็น null ได้ตั้งแต่ฝั่งพนักงานย้ายไปใช้ชื่อผู้ใช้
+      // แต่บัญชีลูกค้าทุกใบยังต้องมีอีเมลเสมอ (บังคับที่ชั้นแอป) จึงไม่มีเคสจริงที่ว่าง
+      setEmail(user.email ?? "");
     }
   }, [user]);
 
@@ -109,6 +132,13 @@ export function ContactPage() {
       setError(EMAIL_ERROR_MESSAGE);
       return;
     }
+    // งานออกแบบ/ก่อสร้างต้องบอกขนาดพื้นที่อย่างใดอย่างหนึ่ง — "ยังไม่ทราบ" ก็นับ (ไม่บังคับเดาตัวเลข)
+    if (showProjectInfo && !areaValid && areaRange === null) {
+      setAreaMissing(true);
+      setError(AREA_REQUIRED_MESSAGE);
+      document.querySelector<HTMLInputElement>('input[name="areaRange"]')?.focus();
+      return;
+    }
     if (!turnstileToken) {
       setError("กรุณายืนยันว่าคุณไม่ใช่บอทก่อนส่งคำขอ");
       return;
@@ -126,6 +156,7 @@ export function ContactPage() {
         // แนบข้อมูลโครงการเบื้องต้นเฉพาะงานก่อสร้าง/ออกแบบ และเฉพาะช่องที่กรอกจริง
         siteAddress: showProjectInfo && siteAddress.trim() !== "" ? siteAddress.trim() : undefined,
         areaSqm: showProjectInfo && areaValid ? parsedArea : undefined,
+        areaRange: showProjectInfo && !areaValid && areaRange ? areaRange : undefined,
         desiredStartDate: showProjectInfo && desiredStart !== "" ? desiredStart : undefined,
         turnstileToken,
       });
@@ -161,11 +192,51 @@ export function ContactPage() {
               <path className="success-mark" d="M15 27l7.5 7.5L37 20" />
             </svg>
             <h1 className="text-2xl font-semibold text-slate-800">ส่งคำขอเรียบร้อยแล้ว</h1>
-            <p className="text-slate-500 mt-2">ทีมงานจะติดต่อกลับโดยเร็วที่สุด ขอบคุณที่สนใจบริการของเรา</p>
-            {/* ข้อความ just-in-time: บอกล่วงหน้าว่าบัญชี + ลิงก์ติดตามงานจะตามมาเมื่อมีใบเสนอราคา */}
-            <p className="mt-4 rounded-md bg-brand/5 px-4 py-3 text-sm leading-relaxed text-slate-600">
-              เมื่อมีใบเสนอราคา เราจะส่งลิงก์ให้คุณเข้าดูรายละเอียดและติดตามสถานะงานได้
-            </p>
+            <p className="text-slate-500 mt-1">ขอบคุณที่สนใจบริการของเรา</p>
+            {/* ขั้นตอนต่อไป (ผู้ใช้เลือกแบบ B 14 ต.ค. 2026 แทนป็อปอัพ) — บอกว่าหลังจากนี้จะเกิดอะไร
+                และ "พื้นที่ลูกค้า" (ชื่อเดียวกับปุ่มบนแถบเมนู) มาถึงมือตอนไหน */}
+            <div className="mt-6 text-left">
+              <p className="text-sm font-semibold text-slate-900">ขั้นตอนต่อไป</p>
+              <ol className="mt-3 flex flex-col gap-4">
+                {NEXT_STEPS.map((step, i) => (
+                  <li key={step.title} className="flex gap-3">
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm tabular-nums ${
+                        i === 0 ? "bg-brand text-white" : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {i + 1}
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{step.title}</p>
+                      <p className="text-sm leading-relaxed text-slate-500">{step.desc}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            {/* สมัครไว้ก่อน (ไม่บังคับ) — เฉพาะคนที่ยังไม่เข้าระบบ · ใช้อีเมลเดียวกับคำขอ ตอนบริษัทออกลิงก์
+                ระบบจะผูกบัญชีนี้ให้เอง (issueCustomerAccessLink จับคู่ตามอีเมล) ใบเสนอราคาจึงเข้าบัญชีนี้ */}
+            {!user && (
+              <div className="mt-6 rounded-lg bg-brand/5 px-4 py-3 text-left text-sm text-slate-600">
+                <p>
+                  อยากเตรียมบัญชีไว้ก่อน?{" "}
+                  <Link
+                    to="/register"
+                    state={{ prefill: { fullName: normalizeFullName(name), email: normalizedEmail, phone } satisfies RegisterPrefill }}
+                    className="font-medium text-brand hover:underline"
+                  >
+                    สมัครด้วยอีเมลนี้ →
+                  </Link>
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  ไม่บังคับ — ใบเสนอราคาจะเข้าบัญชีนี้เองเมื่อพร้อม · มีบัญชีแล้ว?{" "}
+                  <Link to="/login" className="font-medium text-brand hover:underline">
+                    เข้าสู่ระบบ
+                  </Link>
+                </p>
+              </div>
+            )}
           </div>
         </AuthShell>
         <MapBand office={office} />
@@ -277,7 +348,7 @@ export function ContactPage() {
                   <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-slate-50/70 p-4">
                     <p className="text-xs font-medium text-slate-500">
                       ข้อมูลโครงการเบื้องต้น{" "}
-                      <span className="font-normal text-slate-400">(ถ้าทราบ — ไม่บังคับ)</span>
+                      <span className="font-normal text-slate-400">(ช่องอื่นกรอกถ้าทราบ)</span>
                     </p>
                     <FloatingField
                       id="siteAddress"
@@ -287,35 +358,47 @@ export function ContactPage() {
                       onChange={(e) => setSiteAddress(e.target.value)}
                       maxLength={1000}
                     />
+                    <AreaRangePicker
+                      value={areaRange}
+                      missing={areaMissing}
+                      onChange={(next) => {
+                        setAreaRange(next);
+                        setProjectArea("");
+                        setAreaMissing(false);
+                      }}
+                    />
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <FloatingField
                         id="projectArea"
-                        label="พื้นที่โดยประมาณ (ตร.ม.)"
+                        label="หรือพิมพ์ตัวเลขถ้าทราบ (ตร.ม.)"
                         icon={<RulerIcon />}
                         inputMode="decimal"
                         value={projectArea}
-                        // ฟอร์มสาธารณะจึงไม่เข้มงวด: รับเฉพาะตัวเลข/จุดทศนิยม
-                        onChange={(e) => setProjectArea(e.target.value.replace(/[^\d.]/g, ""))}
+                        // ฟอร์มสาธารณะจึงไม่เข้มงวด: รับเฉพาะตัวเลข/จุดทศนิยม · พิมพ์แล้วช่วงที่เลือกไว้ถูกล้าง
+                        onChange={(e) => {
+                          const next = e.target.value.replace(/[^\d.]/g, "");
+                          setProjectArea(next);
+                          if (next !== "") {
+                            setAreaRange(null);
+                            setAreaMissing(false);
+                          }
+                        }}
                       />
                       {/* ช่องวันที่ใช้เลย์เอาต์เดียวกับ select ด้านบน (label ลอยบน + ไอคอนซ้าย) */}
                       <div className="relative">
-                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                          <CalendarIcon />
-                        </span>
                         <label
                           htmlFor="desiredStart"
                           className="pointer-events-none absolute left-10 top-2 z-10 text-xs text-slate-500"
                         >
                           ช่วงที่อยากเริ่มก่อสร้าง
                         </label>
-                        <input
+                        {/* วว/ดด/ปปปป เสมอ — ช่องวันที่ของเบราว์เซอร์ขึ้นเดือนก่อนในเครื่องที่ตั้งภาษาอังกฤษ */}
+                        <DateInput
                           id="desiredStart"
-                          type="date"
                           value={desiredStart}
-                          onChange={(e) => setDesiredStart(e.target.value)}
-                          className={`field-glow w-full rounded border border-slate-300 bg-white pl-10 pr-3 pt-6 pb-2 focus:border-brand focus:outline-none ${
-                            desiredStart ? "text-slate-800" : "text-slate-400"
-                          }`}
+                          onChange={setDesiredStart}
+                          icon={<CalendarIcon />}
+                          className="field-glow w-full rounded border border-slate-300 bg-white pl-10 pr-3 pt-6 pb-2 text-slate-800 placeholder:text-slate-400 focus:border-brand focus:outline-none"
                         />
                       </div>
                     </div>
@@ -378,6 +461,8 @@ type OfficeInfoData = {
   /** คำค้นที่เข้ารหัสแล้วสำหรับเล็งแผนที่ — ว่างเมื่อยังไม่มีที่อยู่ในหน้าตั้งค่า */
   mapQuery: string;
   settings: Record<string, string>;
+  /** ยังไม่รู้ค่าตั้งเลย (เปิดเว็บครั้งแรก + API ยังไม่ตอบ) → คอลัมน์ขวาและแผนที่เป็นแสงวิ่ง */
+  pending: boolean;
 };
 
 /**
@@ -385,13 +470,18 @@ type OfficeInfoData = {
  * (ก่อนหน้านี้การ์ดที่อยู่ยิง getPublicSettings เองซ้ำกับที่ฟุตเตอร์ยิงอยู่แล้ว)
  */
 function useOfficeInfo(): OfficeInfoData {
-  const [settings, setSettings] = useState<Record<string, string>>({});
+  // เริ่มจากค่าที่จำไว้จากการเปิดครั้งก่อน · null = ยังไม่รู้ — เดิมเริ่มจาก {} คอลัมน์ที่อยู่กับแถบแผนที่
+  // จึงไม่มีเลยตอนแรก แล้วค่อยโผล่มาดันเลย์เอาต์ · โหลดไม่สำเร็จ = ถือว่าไม่มีข้อมูล (ไม่ให้แสงวิ่งค้าง)
+  const [loaded, setLoaded] = useState<Record<string, string> | null>(cachedPublicSettings);
 
   useEffect(() => {
     getPublicSettings()
-      .then((res) => setSettings(res.settings))
-      .catch(() => undefined);
+      .then((res) => setLoaded(res.settings))
+      .catch(() => setLoaded((prev) => prev ?? {}));
   }, []);
+
+  const pending = loaded === null;
+  const settings = loaded ?? {};
 
   const address = settings.companyAddress?.trim() ?? "";
   const phone = settings.companyPhone?.trim() ?? "";
@@ -405,7 +495,7 @@ function useOfficeInfo(): OfficeInfoData {
   // ถ้าวันหนึ่งหมุดเพี้ยน ให้แก้ที่ชื่อ/ที่อยู่ในหน้าตั้งค่าให้ตรงกับที่จดไว้บน Google Business
   const mapQuery = address ? encodeURIComponent(`${companyName} ${address}`) : "";
 
-  return { address, phone, email, companyName, mapQuery, settings };
+  return { address, phone, email, companyName, mapQuery, settings, pending };
 }
 
 /**
@@ -418,7 +508,27 @@ function useOfficeInfo(): OfficeInfoData {
  * PUBLIC_SETTING_KEYS ฝั่งเซิร์ฟเวอร์และหน้าตั้งค่าก่อน
  */
 function OfficeInfo({ office }: Readonly<{ office: OfficeInfoData }>) {
-  const { address, phone, email, companyName, mapQuery, settings } = office;
+  const { address, phone, email, companyName, mapQuery, settings, pending } = office;
+
+  if (pending) {
+    // ทรงเดียวกับคอลัมน์จริง (หัวข้อ · ที่อยู่สองบรรทัด · เบอร์ · อีเมล · ปุ่ม Google Maps)
+    return (
+      <div className="lg:col-span-2 lg:self-start">
+        <SkeletonGroup label="กำลังโหลดที่อยู่สำนักงาน" className="lg:border-l lg:border-slate-200 lg:pl-12">
+          <Skeleton className="h-6 w-36" />
+          <div className="mt-5 flex flex-col gap-4">
+            {["w-4/5", "w-2/3", "w-1/2"].map((w) => (
+              <div key={w} className="flex items-center gap-3">
+                <Skeleton className="h-5 w-5 shrink-0 rounded-full" />
+                <Skeleton className={`h-4 ${w}`} />
+              </div>
+            ))}
+          </div>
+          <Skeleton className="mt-5 h-11 w-36 rounded-lg" />
+        </SkeletonGroup>
+      </div>
+    );
+  }
 
   // กรอง href ให้เหลือเฉพาะ http/https จริง (กัน javascript:/data: → stored XSS) เหมือนฟุตเตอร์
   const facebookHref = safeHttpUrl(settings.companyFacebook);
@@ -551,7 +661,19 @@ function OfficeInfo({ office }: Readonly<{ office: OfficeInfoData }>) {
  * loading="lazy" — โหลดตอนเลื่อนมาถึง ไม่ต้องกดปุ่มอะไรก่อน แต่ก็ไม่ถ่วงตอนเปิดหน้าแรก
  */
 function MapBand({ office }: Readonly<{ office: OfficeInfoData }>) {
-  const { mapQuery, companyName } = office;
+  const { mapQuery, companyName, pending } = office;
+  // แสงวิ่งรองใต้แผนที่จน Google Maps วาดเสร็จ (เดิมเป็นช่องเทาเปล่าระหว่างรอ)
+  const [mapReady, setMapReady] = useState(false);
+  if (pending) {
+    // ยังไม่รู้ว่ามีที่อยู่ไหม — จองแถบไว้ก่อน (บริษัทส่วนใหญ่มีที่อยู่) ไม่ให้แผนที่โผล่มาดันฟุตเตอร์ทีหลัง
+    return (
+      <section className="w-full border-t border-slate-200">
+        <SkeletonGroup label="กำลังโหลดแผนที่">
+          <Skeleton className="h-64 w-full rounded-none sm:h-80 lg:h-[420px]" />
+        </SkeletonGroup>
+      </section>
+    );
+  }
   if (!mapQuery) return null;
 
   return (
@@ -561,15 +683,70 @@ function MapBand({ office }: Readonly<{ office: OfficeInfoData }>) {
           จอเตี้ยกว่านี้ถึงจะเผยตอนเลื่อนมาถึง — หน่วงไว้จึงได้ลำดับบนลงล่างทั้งสองกรณี
           (loading="lazy" ของ iframe ดูระยะจากจอ ไม่ได้ดู opacity การหน่วงตรงนี้จึงไม่กันแผนที่โหลด) */}
       <Reveal delay={200}>
-        <iframe
-          title={`แผนที่ ${companyName}`}
-          src={`https://www.google.com/maps?q=${mapQuery}&hl=th&z=16&output=embed`}
-          className="block h-64 w-full border-0 sm:h-80 lg:h-[420px]"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-          allowFullScreen
-        />
+        <div className="relative h-64 sm:h-80 lg:h-[420px]">
+          {!mapReady && <div aria-hidden className="skeleton absolute inset-0 rounded-none" />}
+          <iframe
+            title={`แผนที่ ${companyName}`}
+            src={`https://www.google.com/maps?q=${mapQuery}&hl=th&z=16&output=embed`}
+            onLoad={() => setMapReady(true)}
+            className={`relative block h-full w-full border-0 transition-opacity duration-700 motion-reduce:transition-none ${
+              mapReady ? "opacity-100" : "opacity-0"
+            }`}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            allowFullScreen
+          />
+        </div>
       </Reveal>
     </section>
+  );
+}
+
+const AREA_REQUIRED_MESSAGE = "กรุณาเลือกขนาดพื้นที่โดยประมาณ หรือเลือก “ยังไม่ทราบ”";
+
+/**
+ * ขนาดพื้นที่โดยประมาณ — แตะเลือกช่วงครั้งเดียว ไม่ต้องรู้ตัวเลขจริง (ผู้ใช้เลือก 16 ต.ค.)
+ * เป็น radio จริงที่ซ่อนตัวไว้ใต้ป้ายมน: คีย์บอร์ด (ลูกศร/Tab) และโปรแกรมอ่านหน้าจอใช้ได้ตามปกติ
+ */
+function AreaRangePicker({
+  value,
+  missing,
+  onChange,
+}: Readonly<{ value: AreaRange | null; missing: boolean; onChange: (next: AreaRange) => void }>) {
+  return (
+    <fieldset aria-describedby={missing ? "areaRange-error" : undefined}>
+      <legend className="mb-2 text-sm text-slate-700">
+        ขนาดพื้นที่ใช้สอยโดยประมาณ <span className="text-red-600">*</span>
+      </legend>
+      <div className="flex flex-wrap gap-2">
+        {AREA_RANGES.map((r) => {
+          const checked = value === r.value;
+          let tone = "border-slate-300 bg-white text-slate-700 hover:border-slate-400";
+          if (checked) tone = "border-brand bg-brand text-white";
+          else if (missing) tone = "border-red-300 bg-white text-slate-700 hover:border-red-400";
+          return (
+            <label
+              key={r.value}
+              className={`inline-flex min-h-11 cursor-pointer items-center rounded-full border px-3.5 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/40 lg:min-h-9 ${tone}`}
+            >
+              <input
+                type="radio"
+                name="areaRange"
+                value={r.value}
+                checked={checked}
+                onChange={() => onChange(r.value)}
+                className="sr-only"
+              />
+              {r.label}
+            </label>
+          );
+        })}
+      </div>
+      {missing && (
+        <p id="areaRange-error" className="mt-1.5 text-xs text-red-600">
+          {AREA_REQUIRED_MESSAGE}
+        </p>
+      )}
+    </fieldset>
   );
 }

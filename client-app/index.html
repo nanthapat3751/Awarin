@@ -2,9 +2,62 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
+    <!-- ไอคอนแท็บ: ย่อแยกทีละขนาดจากโลโก้ต้นฉบับ + เพิ่มความคม (ขนาดเล็กไม่เบลอ) · เบราว์เซอร์เลือกขนาดที่ตรงจอเอง -->
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png" />
+    <!-- หน้าจอโฮมมือถือ (iPhone ไม่รองรับพื้นโปร่งใส จึงเป็นพื้นขาว) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>บริษัทรับออกแบบและสร้างบ้าน</title>
+    <!-- ค่าตั้งต้นก่อนโค้ดหน้าเว็บทำงาน — แต่ละหน้าตั้งชื่อแท็บ/คำอธิบายของตัวเองทับ (ดู src/lib/page-meta.ts) -->
+    <title>Awarin Engineering · รับออกแบบและก่อสร้างบ้าน</title>
+    <meta
+      name="description"
+      content="รับออกแบบและก่อสร้างบ้านครบวงจร ดูแบบบ้านพร้อมสเปก ผลงานที่ผ่านมา และขอประเมินราคาก่อสร้างฟรี พร้อมใบเสนอราคาแจกแจงทุกรายการ"
+    />
+    <meta name="theme-color" content="#1a237e" />
+
+    <!-- การ์ดตอนแชร์ลิงก์ลง LINE / Facebook — โปรแกรมพวกนี้ไม่รันโค้ดหน้าเว็บ จึงเห็นค่าชุดนี้ทุกหน้า
+         โดเมนในสองบรรทัด og:url/og:image ถูกแทนด้วย VITE_SITE_URL ตอน build (ดู vite.config.ts) เพราะ og:image ต้องเป็น URL เต็ม -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="th_TH" />
+    <meta property="og:site_name" content="Awarin Engineering" />
+    <meta property="og:title" content="Awarin Engineering · รับออกแบบและก่อสร้างบ้าน" />
+    <meta
+      property="og:description"
+      content="ดูแบบบ้านพร้อมสเปก ผลงานที่ผ่านมา และขอประเมินราคาก่อสร้างฟรี พร้อมใบเสนอราคาแจกแจงทุกรายการ"
+    />
+    <meta property="og:url" content="__SITE_URL__/" />
+    <meta property="og:image" content="__SITE_URL__/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Awarin Engineering รับออกแบบและก่อสร้างบ้าน" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- หน้าแรก: เริ่มโหลดรูป hero ทันทีที่เปิดหน้า ไม่ต้องรอโค้ดหน้าเว็บ (ราว 1 วิบนเน็ตมือถือ)
+         ทำเฉพาะเมื่อเคยเปิดเว็บแล้ว (มีค่าตั้งจำไว้ในเครื่อง — คีย์เดียวกับ src/lib/public-api.ts) จึงรู้แน่ว่าใช้รูปไหน
+         ครั้งแรกไม่ preload: ถ้าเดาเป็นรูปสำรองแต่พนักงานตั้งรูปไว้ จะเสียเน็ตโหลดรูปที่ไม่ได้ใช้
+         เงื่อนไข URL ต้องตรงกับ isSafeImageUrl ใน shared-types (กันค่าแปลก ๆ ในเครื่องถูกเอาไปโหลด) -->
+    <script>
+      (function () {
+        if (location.pathname !== "/") return;
+        try {
+          var s = JSON.parse(localStorage.getItem("awarin:public-settings") || "null");
+          if (!s || typeof s !== "object") return;
+          var v = typeof s.siteHeroHome === "string" ? s.siteHeroHome.trim() : "";
+          var src = /^https?:\/\//i.test(v) || /^\/[^/\\]/.test(v) ? v : "/web12.webp";
+          var link = document.createElement("link");
+          link.rel = "preload";
+          link.as = "image";
+          link.href = src;
+          link.setAttribute("fetchpriority", "high");
+          document.head.appendChild(link);
+        } catch (e) {
+          /* โหมดส่วนตัว/บล็อกที่เก็บข้อมูล — หน้าเว็บโหลดรูปเองตามปกติ */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -3,14 +3,17 @@ import { AlertTriangle, Check, Lock, Plus, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../lib/api";
-import { listInstallments, updateInstallments } from "../lib/contracts-api";
+import { listInstallments, setRetention, updateInstallments } from "../lib/contracts-api";
 import { useToast } from "../lib/toast-context";
 import { Button } from "./Button";
 import { rowKey, sameRowKey } from "../lib/row-keys";
+import { PanelSkeleton } from "./Skeleton";
+import { roundTo } from "@systemboq/shared-types";
+import { Tooltip } from "./Tooltip";
 
 const INPUT = "border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-800";
 
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+const round2 = (n: number) => roundTo(n, 2);
 const money = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -60,6 +63,10 @@ export function ContractInstallmentsEditor({
    */
   const [target, setTarget] = useState(0);
   const [savedPrintsTable, setSavedPrintsTable] = useState(true);
+  /** เงินประกันผลงาน % — ค่าที่บันทึกแล้ว กับค่าที่กำลังพิมพ์ */
+  const [savedRetention, setSavedRetention] = useState(contract.retentionPct == null ? "" : String(Number(contract.retentionPct)));
+  const [retention, setRetentionInput] = useState(savedRetention);
+  const [savingRetention, setSavingRetention] = useState(false);
   const printsTable = bodyHasTable ?? savedPrintsTable;
 
   useEffect(() => {
@@ -136,7 +143,24 @@ export function ContractInstallmentsEditor({
     }
   }
 
-  if (loading) return <p className="text-sm text-slate-500">กำลังโหลดงวดเงิน...</p>;
+  const retentionPct = retention.trim() === "" ? null : Number(retention);
+  const retentionInvalid = retentionPct != null && (!Number.isFinite(retentionPct) || retentionPct < 0 || retentionPct > 20);
+
+  async function saveRetention() {
+    if (retentionInvalid) return;
+    setSavingRetention(true);
+    try {
+      await setRetention(projectId, contract.id, { pct: retentionPct });
+      setSavedRetention(retention.trim());
+      toast.success(retentionPct ? `ตั้งเงินประกันผลงาน ${retentionPct}% แล้ว` : "สัญญานี้ไม่มีเงินประกันผลงาน");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSavingRetention(false);
+    }
+  }
+
+  if (loading) return <PanelSkeleton label="กำลังโหลดงวดเงิน..." />;
 
   return (
     <div className="flex flex-col gap-3">
@@ -194,14 +218,16 @@ export function ContractInstallmentsEditor({
                 : "—"}
             </span>
             {!locked && rows.length > 1 && (
-              <button
-                type="button"
-                aria-label="ลบงวดนี้"
-                onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}
-                className="rounded-md p-1.5 text-red-600 hover:bg-red-50"
-              >
-                <Trash2 size={15} />
-              </button>
+              <Tooltip label="ลบงวดนี้" side="top" align="end">
+                <button
+                  type="button"
+                  aria-label="ลบงวดนี้"
+                  onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}
+                  className="rounded-md p-1.5 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </Tooltip>
             )}
           </div>
         ))}
@@ -243,6 +269,44 @@ export function ContractInstallmentsEditor({
           >
             <Plus size={14} /> เพิ่มงวด
           </Button>
+        </div>
+      )}
+
+      {/*
+        เงินประกันผลงานเป็นเงื่อนไขของการจ่ายแต่ละงวด จึงอยู่ใต้ตารางงวด ไม่ใช่ในหน้าตั้งค่า
+        ตั้งแล้วสัญญาพิมพ์ "หักเงินประกันผลงาน x% · โอนสุทธิ" ใต้ทุกงวด
+      */}
+      {!locked && (
+        <div className="flex flex-col gap-1.5 border-t border-slate-200 pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor={`retention-${contract.id}`} className="text-sm text-slate-700">
+              เงินประกันผลงาน
+            </label>
+            <input
+              id={`retention-${contract.id}`}
+              type="number"
+              step="0.5"
+              min="0"
+              max="20"
+              placeholder="ไม่มี"
+              className={`${INPUT} w-20 text-right tabular-nums`}
+              value={retention}
+              onChange={(e) => setRetentionInput(e.target.value)}
+            />
+            <span className="text-sm text-slate-500">% ของยอดแต่ละงวด (รวม VAT)</span>
+            {retention.trim() !== savedRetention && (
+              <Button size="sm" variant="ghost" disabled={savingRetention || retentionInvalid} onClick={() => void saveRetention()}>
+                <Check size={14} /> บันทึก
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            {retentionInvalid
+              ? "ใส่ได้ 0–20%"
+              : retentionPct
+                ? `ผู้ว่าจ้างกันไว้ทุกงวด รวม ${money(round2((target * retentionPct) / 100))} บาท แล้วคืนเมื่อพ้นระยะรับประกันผลงาน — พิมพ์ใต้ตารางงวดในสัญญา`
+                : "เว้นว่าง = สัญญานี้ไม่มีเงินประกันผลงาน"}
+          </p>
         </div>
       )}
     </div>

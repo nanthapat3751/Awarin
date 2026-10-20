@@ -7,6 +7,7 @@ import type {
   CustomerSortField,
   CustomerType,
   ProjectCustomerActivityDto,
+  CustomerDirectoryView,
 } from "@systemboq/shared-types";
 
 import { apiFetch, downloadFile } from "./api";
@@ -45,6 +46,8 @@ export interface DirectoryQuery {
   pageSize?: number;
   sort?: CustomerSortField;
   dir?: "asc" | "desc";
+  /** ค่าเริ่มต้น = บัญชีที่ยืนยันแล้ว · "unverified" = สมัครแล้วยังไม่ยืนยันอีเมล */
+  view?: CustomerDirectoryView;
 }
 
 function directoryQueryString(query: DirectoryQuery): string {
@@ -54,6 +57,7 @@ function directoryQueryString(query: DirectoryQuery): string {
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.sort) params.set("sort", query.sort);
   if (query.dir) params.set("dir", query.dir);
+  if (query.view === "unverified") params.set("view", "unverified");
   const s = params.toString();
   return s ? `?${s}` : "";
 }

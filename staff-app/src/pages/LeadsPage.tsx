@@ -1,25 +1,37 @@
 import { Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
-import { GENERAL_INQUIRY_SERVICE_TYPE, type LeadDto, type LeadStatus } from "@systemboq/shared-types";
+import {
+  areaRangeLabel,
+  GENERAL_INQUIRY_SERVICE_TYPE,
+  type LeadDto,
+  type LeadListPageDto,
+  type LeadStatus,
+} from "@systemboq/shared-types";
 
 import { Button, buttonClasses } from "../components/Button";
 import { Layout } from "../components/Layout";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
+import { PeriodPicker } from "../components/PeriodPicker";
+import { StatusChips } from "../components/StatusChips";
 import { SearchInput } from "../components/SearchInput";
 import { ApiError } from "../lib/api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import {
   createProjectFromLead,
   deleteLead,
-  listLeads,
+  listLeadsPage,
   replyToLead,
   updateLeadStatus,
 } from "../lib/leads-api";
 import { badgeClass, type BadgeColor } from "../lib/status-badge";
+import { useListParams } from "../lib/use-list-params";
+import { TableSkeleton } from "../components/Skeleton";
+import { RowMenu } from "../components/RowMenu";
 
 const STATUS_LABEL: Record<LeadStatus, string> = {
   NEW: "ใหม่",
@@ -38,8 +50,6 @@ const STATUS_COLOR: Record<LeadStatus, BadgeColor> = {
 };
 
 const ALL_STATUSES: LeadStatus[] = ["NEW", "CONTACTED", "QUOTED", "CLOSED", "REJECTED"];
-
-const PAGE_SIZE = 15;
 
 // กำหนดส่วนต่าง ๆ เองแทนค่าเริ่มต้นตาม locale ซึ่งจะต่อวินาทีมาด้วย -- พนักงานต้องการแค่วันที่
 // และเวลาถึงระดับนาทีพอ
@@ -67,9 +77,23 @@ function leadProjectInfo(lead: LeadDto): string[] {
   const parts: string[] = [];
   if (lead.siteAddress) parts.push(`ที่ตั้ง: ${lead.siteAddress}`);
   if (lead.areaSqm) parts.push(`~${Number(lead.areaSqm).toLocaleString("th-TH")} ตร.ม.`);
+  // ช่วงที่ลูกค้าเลือก ("ยังไม่ทราบ" ไม่ต้องเขียน — ป้ายเตือนบอกอยู่แล้ว)
+  else if (lead.areaRange && lead.areaRange !== "UNKNOWN") parts.push(`พื้นที่ ${areaRangeLabel(lead.areaRange)}`);
   if (lead.desiredStartDate) parts.push(`อยากเริ่ม ${formatDateOnly(lead.desiredStartDate)}`);
   return parts;
 }
+
+/**
+ * งานออกแบบ/ก่อสร้างที่ยังไม่มีตัวเลขพื้นที่จริง (เลือกช่วง/ยังไม่ทราบ/คำขอเก่า) และยังไม่ได้สร้างโครงการ
+ * — ช่วงไม่ถูกเติมลงโครงการ พนักงานต้องถามตัวเลขจริงตอนโทรกลับ (พื้นที่โครงการขับการถอดปริมาณ BOQ)
+ */
+function needsAreaAsk(lead: LeadDto): boolean {
+  return lead.serviceType !== GENERAL_INQUIRY_SERVICE_TYPE && !lead.areaSqm && !lead.projectId;
+}
+
+// สั้นพอให้อยู่บรรทัดเดียวในคอลัมน์ข้อความ · คำอธิบายเต็มอยู่ใน title (ชี้ค้าง) และในหน้าต่างตอบกลับ
+const AREA_ASK_LABEL = "ถามพื้นที่ตอนโทรกลับ";
+const AREA_ASK_DETAIL = "ยังไม่มีตัวเลขพื้นที่จริง — ถามลูกค้าตอนโทรกลับ แล้วกรอกในหน้าโครงการ";
 
 /** ช่อง "โครงการ" ของคำขอ: สอบถามทั่วไป = ไม่มี · เป็นโครงการแล้ว = ลิงก์ไป · ยังไม่เป็น = ปุ่มสร้าง */
 function LeadProjectCell({
@@ -82,22 +106,23 @@ function LeadProjectCell({
   }
   if (lead.projectId) {
     return (
-      <Link to={`/projects/${lead.projectId}`} className={buttonClasses("primary", "sm")}>
+      <Link to={`/projects/${lead.projectId}`} className={`${buttonClasses("ghost", "sm")} whitespace-nowrap`}>
         ไปที่โครงการ
       </Link>
     );
   }
   return (
-    <Button size="sm" disabled={creating} onClick={onCreate}>
+    <Button size="sm" disabled={creating} onClick={onCreate} className="whitespace-nowrap">
       สร้างโครงการ
     </Button>
   );
 }
 
 export function LeadsPage() {
-  const [leads, setLeads] = useState<LeadDto[]>([]);
+  const [data, setData] = useState<LeadListPageDto | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creatingProjectFor, setCreatingProjectFor] = useState<string | null>(null);
@@ -105,44 +130,29 @@ export function LeadsPage() {
   const [replyingLead, setReplyingLead] = useState<LeadDto | null>(null);
   const [replyText, setReplyText] = useState("");
   const [savingReply, setSavingReply] = useState(false);
-  const [page, setPage] = useState(1);
-  // ตัวกรอง: สถานะ + ค้นหาข้อความ (ชื่อ/เบอร์/อีเมล/บริการ/ข้อความ) — ทำฝั่ง client เพราะโหลดมาครบแล้ว
-  const [statusFilter, setStatusFilter] = useState<LeadStatus | "ALL">("ALL");
-  const [search, setSearch] = useState("");
+  // ตัวกรอง (คำค้น/สถานะ/ช่วงเวลา/หน้า) อยู่ใน URL — ค้นหา กรอง นับ และแบ่งหน้าทำที่เซิร์ฟเวอร์ หน้าละ 15
+  const list = useListParams(ALL_STATUSES);
+  const { query } = list;
+  // การ poll ทุก 30 วินาทีต้องขอ "หน้าที่กำลังดูอยู่" เสมอ ไม่ใช่ค่าตอนตั้งตัวจับเวลา
+  const queryRef = useRef(query);
+  queryRef.current = query;
 
-  // นับจำนวนต่อสถานะจากชุดเต็ม (ไว้โชว์บนปุ่มกรอง)
-  const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: leads.length };
-    for (const s of ALL_STATUSES) counts[s] = 0;
-    for (const l of leads) counts[l.status] = (counts[l.status] ?? 0) + 1;
-    return counts;
-  }, [leads]);
-
-  const filteredLeads = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return leads.filter((l) => {
-      if (statusFilter !== "ALL" && l.status !== statusFilter) return false;
-      if (!q) return true;
-      const haystack = [l.name, l.phone, l.email ?? "", l.serviceType, l.message ?? ""]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [leads, statusFilter, search]);
-
-  // จำนวนหน้าวิ่งตามผลการกรอง สังเกตว่ารายการเรียงใหม่สุดก่อน และการ poll ทุก 30 วินาทีจะเติมด้าน
-  // หน้าเท่านั้น พนักงานที่กำลังอ่านหน้า 3 จึงยังเห็นแถวเดิม
-  const pageCount = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-  const pageStart = (safePage - 1) * PAGE_SIZE;
-  const pageLeads = filteredLeads.slice(pageStart, pageStart + PAGE_SIZE);
+  const leads = data?.leads ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 15;
+  const page = data?.page ?? 1;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const pageStart = (page - 1) * pageSize;
+  const filtering = Boolean(list.q || list.status || list.period);
 
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      const res = await listLeads();
-      setLeads(res.leads);
+      const res = await listLeadsPage(queryRef.current);
+      setData(res);
+      // ขอหน้าเกินมา (เช่น ลบแถวสุดท้ายของหน้าท้าย) เซิร์ฟเวอร์ให้หน้าสุดท้าย — ให้ URL ตามด้วย
+      if (res.page !== queryRef.current.page) list.setPage(res.page);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "โหลดข้อมูลไม่สำเร็จ");
     } finally {
@@ -152,27 +162,22 @@ export function LeadsPage() {
 
   async function silentRefresh() {
     try {
-      const res = await listLeads();
-      setLeads(res.leads);
+      setData(await listLeadsPage(queryRef.current));
     } catch {
       // เงียบไว้ -- การ poll เบื้องหลังที่ล้มเหลวไม่ควรรบกวนส่วนที่เหลือของหน้า
     }
   }
 
   useEffect(() => {
-    refresh();
-  }, []);
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
   useEffect(() => {
     const timer = setInterval(silentRefresh, 30_000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // กันกรณีที่แถวหายไป (เปลี่ยนตัวกรองสถานะที่อื่น หรือลบ) แล้วหน้าปัจจุบันไม่มีอยู่แล้ว
-  useEffect(() => {
-    if (page !== safePage) setPage(safePage);
-  }, [page, safePage]);
 
   // กล่องตอบกลับเปิดอยู่ → Esc ปิดได้เหมือนกล่องยืนยัน
   useEffect(() => {
@@ -183,11 +188,6 @@ export function LeadsPage() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [replyingLead]);
-
-  // เปลี่ยนตัวกรอง/คำค้น → กลับไปหน้าแรกเสมอ (ไม่งั้นอาจค้างอยู่หน้าที่ไม่มีผลลัพธ์)
-  useEffect(() => {
-    setPage(1);
-  }, [statusFilter, search]);
 
   async function handleStatusChange(id: string, status: LeadStatus) {
     try {
@@ -213,13 +213,16 @@ export function LeadsPage() {
   async function handleDelete(lead: LeadDto) {
     const ok = await confirm(
       `ย้ายคำขอจาก "${lead.name}" ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ`,
-      { confirmLabel: "ย้ายไปถังขยะ", variant: "danger" },
+      { confirmLabel: "ลบ", variant: "danger" },
     );
     if (!ok) return;
     setDeletingId(lead.id);
     try {
       await deleteLead(lead.id);
-      toast.success("ย้ายไปถังขยะแล้ว — กู้คืนได้ที่เมนูถังขยะ");
+      toast.undo("ย้ายคำขอไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("lead", lead.id);
+        await refresh();
+      });
       await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ลบคำขอไม่สำเร็จ");
@@ -251,80 +254,79 @@ export function LeadsPage() {
     <Layout>
       <PageHeader title="คำขอจากลูกค้า" />
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
-      {error && <p className="text-red-600">{error}</p>}
-      {!loading && !error && leads.length === 0 && <p className="text-slate-500">ยังไม่มีคำขอ</p>}
+      <div className="mb-3 flex flex-wrap gap-2">
+        {/* ค้นหา ชื่อ/เบอร์/อีเมล/บริการ/ข้อความ */}
+        <SearchInput
+          value={list.searchInput}
+          onChange={list.setSearchInput}
+          placeholder="ค้นหาชื่อ / เบอร์ / อีเมล / ข้อความ"
+          className="min-w-60 flex-1"
+        />
+        <PeriodPicker value={list.period} onChange={list.setPeriod} noun="คำขอ" />
+      </div>
+      <StatusChips
+        statuses={ALL_STATUSES}
+        labels={STATUS_LABEL}
+        counts={data?.counts}
+        value={list.status}
+        onChange={list.setStatus}
+      />
 
-      {leads.length > 0 && (
-        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* กรองตามสถานะ (พร้อมจำนวน) */}
-          <div className="flex flex-wrap gap-1.5">
-            {(["ALL", ...ALL_STATUSES] as const).map((s) => {
-              const active = statusFilter === s;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatusFilter(s)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    active
-                      ? "bg-brand text-white"
-                      : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                  }`}
-                >
-                  {s === "ALL" ? "ทั้งหมด" : STATUS_LABEL[s]}
-                  <span className={active ? "ml-1 text-white/80" : "ml-1 text-slate-400"}>
-                    {statusCounts[s] ?? 0}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {/* ค้นหา ชื่อ/เบอร์/อีเมล/ข้อความ */}
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            placeholder="ค้นหาชื่อ / เบอร์ / อีเมล / ข้อความ"
-            className="w-full sm:w-64"
-          />
-        </div>
+      {loading && !data && <TableSkeleton rows={8} cols={7} />}
+      {error && <p className="text-red-600">{error}</p>}
+      {data && !error && leads.length === 0 && (
+        <p className="text-slate-500">{filtering ? "ไม่พบคำขอที่ตรงกับตัวกรอง" : "ยังไม่มีคำขอ"}</p>
       )}
 
       {leads.length > 0 && (
         <p className="text-xs text-slate-500 mb-2">
-          {filteredLeads.length === 0
-            ? "ไม่พบคำขอที่ตรงกับตัวกรอง"
-            : `แสดง ${pageStart + 1}-${pageStart + pageLeads.length} จาก ${filteredLeads.length} คำขอ`}
+          แสดง {pageStart + 1}-{pageStart + leads.length} จาก {total} คำขอ
         </p>
       )}
 
-      {filteredLeads.length > 0 && (
-        <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
+      {leads.length > 0 && (
+        <div
+          className={`overflow-x-auto rounded-lg border border-slate-200 bg-white transition-opacity ${loading ? "opacity-60" : ""}`}
+          aria-busy={loading}
+        >
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
             <tr>
+              {/* iPad (<1280): เบอร์/บริการ ไปใต้ชื่อ · ตอบกลับ/โครงการ/ลบ รวมเป็น ⋯ (ผู้ใช้สั่ง 18 ต.ค.) */}
               <th className="px-3 py-2">ชื่อ</th>
-              <th className="px-3 py-2">เบอร์โทร</th>
-              <th className="px-3 py-2">บริการที่สนใจ</th>
+              <th className="hidden px-3 py-2 xl:table-cell">เบอร์โทร</th>
+              <th className="hidden px-3 py-2 xl:table-cell">บริการที่สนใจ</th>
               <th className="px-3 py-2">ข้อความ</th>
               <th className="px-3 py-2">วันที่</th>
               <th className="px-3 py-2">สถานะ</th>
-              <th className="px-3 py-2">ตอบกลับ</th>
-              <th className="px-3 py-2">โครงการ</th>
-              <th className="px-3 py-2"></th>
+              <th className="hidden px-3 py-2 xl:table-cell">ตอบกลับ</th>
+              <th className="hidden px-3 py-2 xl:table-cell">โครงการ</th>
+              <th className="hidden px-3 py-2 xl:table-cell"></th>
+              <th className="px-3 py-2 xl:hidden"><span className="sr-only">คำสั่ง</span></th>
             </tr>
           </thead>
           <tbody>
-            {pageLeads.map((lead) => (
+            {leads.map((lead) => (
               <tr key={lead.id} className="border-t border-slate-100">
-                <td className="px-3 py-2 font-medium text-slate-800">{lead.name}</td>
-                <td className="px-3 py-2 text-slate-700">{lead.phone}</td>
-                <td className="px-3 py-2 text-slate-700">{lead.serviceType}</td>
+                <td className="px-3 py-2 font-medium text-slate-800">
+                  {lead.name}
+                  <span className="block text-xs font-normal text-slate-500 xl:hidden">
+                    {lead.phone} · {lead.serviceType}
+                  </span>
+                </td>
+                <td className="hidden px-3 py-2 xl:table-cell text-slate-700">{lead.phone}</td>
+                <td className="hidden px-3 py-2 xl:table-cell text-slate-700">{lead.serviceType}</td>
                 <td className="px-3 py-2 text-slate-700 max-w-xs">
                   <div className="truncate">{lead.message ?? "-"}</div>
                   {leadProjectInfo(lead).length > 0 && (
                     <div className="mt-0.5 truncate text-xs text-slate-500">
                       {leadProjectInfo(lead).join(" · ")}
                     </div>
+                  )}
+                  {needsAreaAsk(lead) && (
+                    <span title={AREA_ASK_DETAIL} className={`${badgeClass("amber")} mt-1 whitespace-nowrap`}>
+                      {AREA_ASK_LABEL}
+                    </span>
                   )}
                 </td>
                 <td className="px-3 py-2 text-slate-700">{formatDateTime(lead.createdAt)}</td>
@@ -340,23 +342,24 @@ export function LeadsPage() {
                       </option>
                     ))}
                   </select>
+                  {lead.reply && <span className="mt-1 block text-xs text-emerald-700 xl:hidden">✓ ตอบแล้ว</span>}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap">
+                <td className="hidden px-3 py-2 xl:table-cell whitespace-nowrap">
                   <div className="flex items-center gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => openReply(lead)}>
+                    <Button variant="brand" size="sm" onClick={() => openReply(lead)}>
                       {lead.reply ? "แก้คำตอบ" : "ตอบกลับ"}
                     </Button>
                     {lead.reply && <span className="text-emerald-600 text-xs">✓ ตอบแล้ว</span>}
                   </div>
                 </td>
-                <td className="px-3 py-2">
+                <td className="hidden px-3 py-2 xl:table-cell">
                   <LeadProjectCell
                     lead={lead}
                     creating={creatingProjectFor === lead.id}
                     onCreate={() => handleCreateProject(lead.id)}
                   />
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-right">
+                <td className="hidden px-3 py-2 xl:table-cell whitespace-nowrap text-right">
                   {/* ลบได้เฉพาะคำขอที่ยังไม่เป็นโครงการ — คำขอที่เป็นโครงการแล้วจัดการที่โครงการ */}
                   {!lead.projectId && (
                     <Button
@@ -370,13 +373,30 @@ export function LeadsPage() {
                     </Button>
                   )}
                 </td>
+                <td className="px-3 py-2 text-right xl:hidden">
+                  <RowMenu
+                    label={`คำสั่งของคำขอ ${lead.name}`}
+                    items={[
+                      { key: "reply", label: lead.reply ? "แก้คำตอบ" : "ตอบกลับ", onSelect: () => openReply(lead) },
+                      ...(lead.serviceType === GENERAL_INQUIRY_SERVICE_TYPE
+                        ? []
+                        : lead.projectId
+                          ? [{ key: "project", label: "ไปที่โครงการ", onSelect: () => navigate(`/projects/${lead.projectId}`) }]
+                          : [{ key: "create", label: "สร้างโครงการ", onSelect: () => void handleCreateProject(lead.id) }]),
+                      ...(lead.projectId
+                        ? []
+                        : [{ key: "delete", label: "ลบ", danger: true, onSelect: () => void handleDelete(lead) }]),
+                    ]}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
-      <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
+      <Pagination page={page} pageCount={pageCount} onChange={list.setPage} />
 
       {replyingLead && (
         <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
@@ -415,6 +435,7 @@ export function LeadsPage() {
                   {leadProjectInfo(replyingLead).join(" · ")}
                 </p>
               )}
+              {needsAreaAsk(replyingLead) && <p className="text-xs text-amber-700">{AREA_ASK_DETAIL}</p>}
             </div>
 
             {!replyingLead.customerId && (

@@ -1,5 +1,6 @@
 import { writeAuditLog } from "../audit-log";
 import { prisma } from "../prisma";
+import { bangkokDay, claimScheduledRun, releaseScheduledRun } from "../scheduled-run";
 import { backupStatus, readBackupConfig, runBackup } from "./backup";
 import { isBackupStale, nextScheduledRun } from "./backup-plan";
 
@@ -10,6 +11,8 @@ import { isBackupStale, nextScheduledRun } from "./backup-plan";
  * เครื่องปิดข้ามเวลาที่ตั้งไว้ (เปิดเฉพาะเวลางาน) = รอบนั้นหายไปเลย จึงเช็คตอนบูตด้วย:
  * ชุดล่าสุดเก่ากว่า 24 ชม. → สำรองชดเชยทันทีหลังบูตหนึ่งนาที
  *
+ * มี API หลายตัว: ทุกตัวตั้งเวลา แต่ตัวที่จองรอบได้ (ScheduledRun) เท่านั้นที่สำรองจริง
+ *
  * ล้มเหลว = แจ้งเตือน OWNER ทุกคน — ระบบสำรองที่พังเงียบ ๆ แย่กว่าไม่มี เพราะทุกคนนึกว่ามี
  */
 async function notifyOwners(message: string) {
@@ -18,11 +21,19 @@ async function notifyOwners(message: string) {
     select: { id: true },
   });
   await prisma.notification.createMany({
-    data: owners.map((o) => ({ userId: o.id, message, link: "/settings?tab=security" })),
+    data: owners.map((o) => ({ userId: o.id, message, link: "/settings?tab=backup" })),
   });
 }
 
 async function scheduledRun(reason: "daily" | "catch-up") {
+  // API หลายตัวตั้งเวลาเดียวกันหมด — ตัวที่จองรอบได้เป็นคนสำรอง ที่เหลือข้าม (ดู scheduled-run.ts)
+  const runKey = `backup:${reason}:${bangkokDay()}`;
+  try {
+    if (!(await claimScheduledRun(runKey))) return;
+  } catch (err) {
+    console.error("backup: จองรอบไม่ได้ ข้ามรอบนี้:", err);
+    return;
+  }
   try {
     const manifest = await runBackup("auto");
     await writeAuditLog({
@@ -36,6 +47,8 @@ async function scheduledRun(reason: "daily" | "catch-up") {
     const message = err instanceof Error ? err.message : String(err);
     console.error("backup: สำรองอัตโนมัติล้มเหลว:", message);
     await notifyOwners(`สำรองข้อมูลอัตโนมัติไม่สำเร็จ — ${message.slice(0, 200)}`).catch(() => undefined);
+    // คืนรอบ — บูตใหม่ (หรือเครื่องอื่นที่บูตทีหลัง) จะสำรองชดเชยได้ ไม่ต้องรอพรุ่งนี้
+    await releaseScheduledRun(runKey).catch(() => undefined);
   }
 }
 

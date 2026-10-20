@@ -1,10 +1,11 @@
-import { Check, Clock, Eye, EyeOff, KeyRound, Loader2, Lock, Mail, Smartphone } from "lucide-react";
+import { Check, Clock, Eye, EyeOff, KeyRound, Loader2, Lock, User, Smartphone } from "lucide-react";
 import { useEffect, useState, type SubmitEvent } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { FloatingField } from "../components/FloatingField";
 import { OtpInput } from "../components/OtpInput";
 import { ApiError, useAuth } from "../lib/auth-context";
+import { returnPathFrom } from "../lib/return-to";
 
 // จัดรูปรหัสสำรองเป็น XXXX-XXXX อัตโนมัติระหว่างพิมพ์ (ใส่ขีดหลังตัวที่ 4, ตัดเหลือ 8 ตัว)
 function formatBackupCode(raw: string): string {
@@ -22,11 +23,18 @@ function formatBackupCode(raw: string): string {
  */
 const SUCCESS_HOLD_MS = 650;
 
-// วินาที → "MM:SS" สำหรับนับถอยหลังเวลาปลดล็อกบัญชี
+// วินาที → "MM:SS" (หรือ "H:MM:SS" เมื่อเกินชั่วโมง) สำหรับนับถอยหลังเวลาปลดล็อกบัญชี
+// การระงับขั้น 2FA ยืดได้ถึง 1 วัน ถ้าไม่แยกชั่วโมงจะขึ้น "1440:00 นาที"
 function formatCountdown(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
   const s = totalSeconds % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const mmss = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return h > 0 ? `${h}:${mmss}` : mmss;
+}
+
+function countdownUnit(totalSeconds: number): string {
+  return totalSeconds >= 3600 ? "ชั่วโมง" : "นาที";
 }
 
 function submitLabel(submitting: boolean, lockRemaining: number | null): string {
@@ -47,7 +55,7 @@ function CredentialsAlert({
         <Clock size={18} className="mt-0.5 shrink-0" />
         <div className="space-y-0.5">
           <p>{error ?? "บัญชีถูกล็อกชั่วคราวเนื่องจากพยายามเข้าสู่ระบบผิดหลายครั้ง"}</p>
-          <p className="font-semibold tabular-nums">ลองใหม่ได้ในอีก {formatCountdown(lockRemaining)} นาที</p>
+          <p className="font-semibold tabular-nums">ลองใหม่ได้ในอีก {formatCountdown(lockRemaining)} {countdownUnit(lockRemaining)}</p>
         </div>
       </div>
     );
@@ -70,11 +78,9 @@ function CredentialsSubmit({
           : "bg-slate-800 hover:bg-brand disabled:opacity-60 disabled:hover:bg-slate-800"
       }`}
     >
+      {/* สำเร็จ = ปุ่มเขียว + ข้อความอย่างเดียว ไม่มีเครื่องหมายถูก (ผู้ใช้สั่งเอาออก 18 ต.ค.) */}
       {loginSuccess ? (
-        <>
-          <Check size={18} strokeWidth={2.6} className="check-pop" />
-          <span>เข้าสู่ระบบสำเร็จ</span>
-        </>
+        <span>เข้าสู่ระบบสำเร็จ</span>
       ) : (
         <>
           {submitting && <Loader2 size={16} className="animate-spin" />}
@@ -192,7 +198,11 @@ export function LoginPage() {
   // ผ่านรหัสผ่านแล้วและไม่ต้องใช้ 2FA — โชว์เครื่องหมายถูกสั้น ๆ ก่อนพาเข้าระบบ
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [step, setStep] = useState<"credentials" | "twofactor">("credentials");
-  const [email, setEmail] = useState("");
+  // กลับมาจากหน้าตั้งรหัสใหม่ = เติมชื่อผู้ใช้ไว้ให้ (มาทาง state ไม่ใส่ใน URL)
+  const location = useLocation();
+  const [username, setUsername] = useState((location.state as { username?: string } | null)?.username ?? "");
+  // หน้าที่ตั้งใจเปิดก่อนถูกพามาเข้าสู่ระบบ — ไม่มีก็แดชบอร์ด
+  const returnTo = returnPathFrom(location.state);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [code, setCode] = useState("");
@@ -230,7 +240,7 @@ export function LoginPage() {
    * (ทาง 2FA ไม่เจอปัญหานี้เพราะเลื่อน commitUser ไปหลังอนิเมชั่นอยู่แล้ว)
    */
   if (status === "ready" && isStaff && !loginSuccess) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={returnTo} replace />;
   }
 
   async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
@@ -239,7 +249,7 @@ export function LoginPage() {
     setSubmitting(true);
     let ok = false;
     try {
-      const { twoFactorRequired } = await login(email, password);
+      const { twoFactorRequired } = await login(username, password);
       if (twoFactorRequired) {
         setStep("twofactor");
         setCode("");
@@ -249,7 +259,7 @@ export function LoginPage() {
       } else {
         ok = true;
         setLoginSuccess(true);
-        setTimeout(() => navigate("/", { replace: true }), SUCCESS_HOLD_MS);
+        setTimeout(() => navigate(returnTo, { replace: true }), SUCCESS_HOLD_MS);
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "เข้าสู่ระบบไม่สำเร็จ");
@@ -265,6 +275,17 @@ export function LoginPage() {
     }
   }
 
+  // กลับไปขั้นกรอกรหัสผ่าน — ล้างทุกอย่างของขั้น 2FA (เซสชันครึ่งทางเดิมใช้ต่อไม่ได้อยู่แล้ว)
+  function backToCredentials() {
+    setStep("credentials");
+    setError(null);
+    setPassword("");
+    setCode("");
+    setBackupCode("");
+    setTwoFaMode("app");
+    setVerifySuccess(false);
+  }
+
   async function submit2fa(value: string) {
     const v = value.trim();
     if (!v || submitting || verifySuccess) return;
@@ -277,11 +298,19 @@ export function LoginPage() {
       setVerifySuccess(true);
       setTimeout(() => {
         commitUser(authedUser);
-        navigate("/", { replace: true });
+        navigate(returnTo, { replace: true });
       }, 900);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "รหัสยืนยันไม่ถูกต้อง");
       setSubmitting(false);
+      // กรอกผิดครบเพดาน/ถูกระงับ/เซสชันหมดอายุ — กรอกรหัสต่อในหน้านี้ไม่มีทางผ่าน พากลับไปขั้นรหัสผ่าน
+      // พร้อมข้อความ (ถูกระงับ = แถบเหลืองนับถอยหลังแบบเดียวกับบัญชีถูกล็อก ปุ่มเข้าสู่ระบบกดไม่ได้จนครบเวลา)
+      if (err instanceof ApiError && err.restartLogin) {
+        backToCredentials();
+        setError(err.message);
+        setLockRemaining(err.status === 423 && err.retryAfter ? err.retryAfter : null);
+        return;
+      }
+      setError(err instanceof ApiError ? err.message : "รหัสยืนยันไม่ถูกต้อง");
       // เคลียร์รหัสจากแอปให้กรอกใหม่หลังโชว์แดง+สั่นชั่วครู่ (รหัสสำรองปล่อยไว้ให้แก้เอง)
       if (twoFaMode === "app") setTimeout(() => setCode(""), 450);
     }
@@ -316,14 +345,16 @@ export function LoginPage() {
           </h1>
 
           <FloatingField
-            id="email"
-            label="อีเมล"
-            type="email"
+            id="username"
+            label="ชื่อผู้ใช้"
+            type="text"
             required
             autoComplete="username"
-            value={email}
-            onChange={setEmail}
-            icon={<Mail size={18} />}
+            autoCapitalize="none"
+            spellCheck={false}
+            value={username}
+            onChange={setUsername}
+            icon={<User size={18} />}
           />
 
           <FloatingField
@@ -347,6 +378,16 @@ export function LoginPage() {
               </button>
             }
           />
+
+          <div className="-mt-2 text-right">
+            <Link
+              to="/forgot-password"
+              state={{ username: username.trim() || undefined }}
+              className="text-sm text-slate-500 transition-colors hover:text-brand"
+            >
+              ลืมรหัสผ่าน?
+            </Link>
+          </div>
 
           <CredentialsAlert lockRemaining={lockRemaining} error={error} />
 
@@ -386,15 +427,7 @@ export function LoginPage() {
                 setCode("");
                 setBackupCode("");
               }}
-              onBack={() => {
-                setStep("credentials");
-                setError(null);
-                setPassword("");
-                setCode("");
-                setBackupCode("");
-                setTwoFaMode("app");
-                setVerifySuccess(false);
-              }}
+              onBack={backToCredentials}
             />
           )}
         </form>

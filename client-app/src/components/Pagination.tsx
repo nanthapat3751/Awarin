@@ -2,6 +2,7 @@ interface PaginationProps {
   page: number;
   pageCount: number;
   onChange: (page: number) => void;
+  className?: string;
 }
 
 /**
@@ -34,14 +35,14 @@ function pageNumbers(page: number, pageCount: number): PageEntry[] {
   return out;
 }
 
-export function Pagination({ page, pageCount, onChange }: Readonly<PaginationProps>) {
+export function Pagination({ page, pageCount, onChange, className = "mt-6" }: Readonly<PaginationProps>) {
   if (pageCount <= 1) return null;
 
   const arrowClass =
-    "flex h-11 w-9 items-center justify-center rounded-lg text-lg text-slate-600 transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent sm:w-11";
+    "flex h-11 w-9 items-center justify-center rounded-lg text-lg text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent sm:w-11";
 
   return (
-    <nav className="mt-6 flex flex-wrap items-center justify-center gap-1" aria-label="แบ่งหน้า">
+    <nav className={`flex flex-wrap items-center justify-center gap-1 ${className}`} aria-label="แบ่งหน้า">
       <button
         type="button"
         onClick={() => onChange(page - 1)}
@@ -66,7 +67,7 @@ export function Pagination({ page, pageCount, onChange }: Readonly<PaginationPro
             className={`h-11 min-w-9 rounded-lg px-1 text-sm tabular-nums transition-colors sm:min-w-11 sm:px-2 ${
               entry === page
                 ? "bg-brand font-semibold text-white"
-                : "text-slate-600 hover:bg-white"
+                : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             {entry}

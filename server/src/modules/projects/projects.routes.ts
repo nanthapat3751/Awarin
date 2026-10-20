@@ -1,11 +1,13 @@
 import { Router } from "express";
 
+import { domainAcceptsMail } from "../../lib/email-domain";
 import { requireAuth } from "../../middleware/auth";
 import { requireRole } from "../../middleware/rbac";
 import {
   CustomerFileError,
   getProjectCustomerActivity,
 } from "../customers/customerFile.service";
+import { createdPeriod, searchText } from "../../lib/list-query";
 import { getProjectActivity } from "./activity.service";
 import {
   createProjectSchema,
@@ -24,6 +26,7 @@ import {
   issueCustomerAccessLink,
   linkLeadToProject,
   listProjects,
+  listProjectsPage,
   setCustomProjectPrice,
   transitionProject,
   updateProject,
@@ -34,7 +37,20 @@ export const projectsRouter = Router();
 
 projectsRouter.use(requireAuth, requireRole("OWNER", "ADMIN"));
 
+// ?page= มา = หน้ารายการแบบแบ่งหน้าที่เซิร์ฟเวอร์ (?q=&status=&year=&month=&page=)
+// ไม่มี page = รายการเต็มแบบเดิม (ที่อื่นที่ยังต้องการทั้งชุด)
 projectsRouter.get("/", async (req, res) => {
+  if (req.query.page !== undefined) {
+    res.json(
+      await listProjectsPage({
+        q: searchText(req.query.q),
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        period: createdPeriod(req.query.year, req.query.month),
+        page: req.query.page,
+      }),
+    );
+    return;
+  }
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
   const q = typeof req.query.q === "string" ? req.query.q : undefined;
@@ -124,15 +140,22 @@ projectsRouter.get("/:id/customer-activity", async (req, res) => {
   }
 });
 
+// ?page=2 — หน้าละ 15 เหตุการณ์ ใหม่สุดก่อน
 projectsRouter.get("/:id/activity", async (req, res) => {
-  const activity = await getProjectActivity(req.params.id);
-  res.json({ activity });
+  const page = typeof req.query.page === "string" ? Number(req.query.page) : 1;
+  res.json(await getProjectActivity(req.params.id, page));
 });
 
 projectsRouter.post("/:id/customer-access-link", async (req, res) => {
   const parsed = issueAccessLinkSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง", details: parsed.error.flatten() });
+    return;
+  }
+
+  // พนักงานพิมพ์อีเมลลูกค้าเองตรงนี้ — จับโดเมนที่พิมพ์ผิดก่อนจะออกลิงก์ไปให้ผิดคน
+  if (parsed.data.email && !(await domainAcceptsMail(parsed.data.email))) {
+    res.status(400).json({ error: "โดเมนของอีเมลนี้รับอีเมลไม่ได้ กรุณาตรวจสอบอีกครั้ง" });
     return;
   }
 

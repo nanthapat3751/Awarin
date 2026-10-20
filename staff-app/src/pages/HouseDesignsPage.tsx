@@ -1,4 +1,4 @@
-import { GripVertical, ImageOff, Star, Trash2 } from "lucide-react";
+import { ChevronDown, GripVertical, ImageOff, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -10,6 +10,7 @@ import { ImageUploadField } from "../components/ImageUploadField";
 import { Layout } from "../components/Layout";
 import { PageHeader } from "../components/PageHeader";
 import { ApiError } from "../lib/api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import {
@@ -21,6 +22,7 @@ import {
 } from "../lib/houseDesigns-api";
 import { rowNavClass, stopRowNav, useRowNav } from "../lib/row-nav";
 import { featuredStar, publishedBadgeClass } from "../lib/status-badge";
+import { TableSkeleton } from "../components/Skeleton";
 
 interface FormState {
   name: string;
@@ -75,6 +77,81 @@ function moveBefore(ids: string[], dragId: string, overId: string): string[] {
   if (idx < 0) return ids;
   without.splice(idx, 0, dragId);
   return without;
+}
+
+const INPUT = "w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm";
+
+/** ช่องตัวเลขหนึ่งช่องของฟอร์มเพิ่มแบบบ้าน */
+function NumberInput({
+  label,
+  value,
+  onChange,
+  min,
+}: Readonly<{ label: string; value: string; onChange: (v: string) => void; min?: number }>) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-slate-700">
+      <span className="truncate">{label}</span>
+      <input type="number" min={min} value={value} onChange={(e) => onChange(e.target.value)} className={INPUT} />
+    </label>
+  );
+}
+
+type ImageTab = "exteriorImages" | "interiorImages" | "plans";
+const IMAGE_TABS: { key: ImageTab; label: string }[] = [
+  { key: "exteriorImages", label: "ภายนอก" },
+  { key: "interiorImages", label: "ภายใน" },
+  { key: "plans", label: "แปลนบ้าน" },
+];
+
+function countImages(value: string): number {
+  return value.split("\n").filter((s) => s.trim()).length;
+}
+
+/**
+ * รูปสามชนิดของแบบบ้านในกล่องเดียว สลับด้วยแท็บ — เดิมเป็นกล่องลากวางเต็มความกว้างสามกล่องเรียงกัน
+ * กินฟอร์มไปครึ่งหน้า · ทุกแท็บถูกเรนเดอร์ค้างไว้ (ซ่อนด้วย hidden) อัปโหลดค้างอยู่แล้วสลับแท็บจะไม่หาย
+ */
+function HouseImageTabs({
+  form,
+  onChange,
+}: Readonly<{ form: Pick<FormState, ImageTab>; onChange: (key: ImageTab, value: string) => void }>) {
+  const [tab, setTab] = useState<ImageTab>("exteriorImages");
+  return (
+    <div className="flex flex-col gap-3">
+      <div role="tablist" aria-label="ชนิดรูป" className="flex gap-5 border-b border-slate-200 text-sm">
+        {IMAGE_TABS.map((t) => {
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setTab(t.key)}
+              className={`-mb-px border-b-2 pb-2 transition-colors ${
+                active
+                  ? "border-brand font-medium text-brand"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {t.label} <span className="tabular-nums">({countImages(form[t.key])})</span>
+            </button>
+          );
+        })}
+      </div>
+      {IMAGE_TABS.map((t) => (
+        <div key={t.key} role="tabpanel" hidden={tab !== t.key}>
+          <ImageUploadField
+            label=""
+            compact
+            cover={t.key === "exteriorImages"}
+            value={form[t.key]}
+            onChange={(v) => onChange(t.key, v)}
+          />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function HouseDesignsPage() {
@@ -169,11 +246,14 @@ export function HouseDesignsPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!(await confirm("ย้ายแบบบ้านนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ย้ายไปถังขยะ" })))
+    if (!(await confirm("ย้ายแบบบ้านนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", { confirmLabel: "ลบ" })))
       return;
     try {
       await deleteHouseDesign(id);
-      toast.success("ย้ายไปถังขยะแล้ว — กู้คืนได้ที่เมนูถังขยะ");
+      toast.undo("ย้ายแบบบ้านไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("houseDesign", id);
+        await refresh();
+      });
       await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ย้ายไปถังขยะไม่สำเร็จ");
@@ -269,8 +349,8 @@ export function HouseDesignsPage() {
                       )}
                     </div>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => toggleFeatured(d)}>
-                    เอาออก
+                  <Button variant="dangerQuiet" size="sm" onClick={() => toggleFeatured(d)}>
+                    เอาออกจากหน้าแรก
                   </Button>
                 </li>
               );
@@ -279,150 +359,117 @@ export function HouseDesignsPage() {
         )}
       </section>
 
+      {/* ฟอร์มเพิ่มแบบบ้าน แบบ A (ผู้ใช้เลือก 11 ต.ค. 2026): ข้อมูลซ้าย · รูปขวาเป็นแท็บ · ค่าวัดถอดพับไว้
+          เดิมทุกช่องเรียงลงยาว + กล่องลากวางเต็มความกว้างสามกล่อง สูงเกินหนึ่งจอ */}
       {showAddForm && (
-        <div className="mb-4 grid grid-cols-2 gap-2 border border-dashed border-slate-300 rounded-md p-3 bg-white">
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>ชื่อแบบบ้าน</span>
-            <input
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>พื้นที่ใช้สอย (ตร.ม.)</span>
-            <input
-              type="number"
-              value={form.area}
-              onChange={(e) => setForm((f) => ({ ...f, area: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            />
-          </label>
-          <div className="col-span-2 flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-700">
-              ค่าวัดถอดปริมาณ{" "}
-              <span className="font-normal text-slate-400">
-                (ไม่บังคับ — ใช้คิด BOQ ตอนสร้างโครงการจากแบบ สเกลตามพื้นที่อัตโนมัติ)
-              </span>
-            </span>
-            <div className="grid grid-cols-3 gap-2">
-              <label className="flex flex-col gap-1 text-xs text-slate-500">
-                <span>พื้นที่ผนัง (ตร.ม.)</span>
+        <section aria-label="เพิ่มแบบบ้าน" className="mb-4 rounded-lg border border-slate-200 bg-white p-5">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <div className="flex flex-col gap-4">
+              <h2 className="text-sm font-semibold text-slate-800">ข้อมูลแบบบ้าน</h2>
+              <label className="flex flex-col gap-1 text-xs text-slate-700">
+                <span>
+                  ชื่อแบบบ้าน <span className="text-red-600">*</span>
+                </span>
                 <input
-                  type="number"
-                  value={form.wallAreaSqm}
-                  onChange={(e) => setForm((f) => ({ ...f, wallAreaSqm: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  className={INPUT}
+                  autoFocus
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-500">
-                <span>รอบรูป (ม.)</span>
-                <input
-                  type="number"
-                  value={form.perimeterM}
-                  onChange={(e) => setForm((f) => ({ ...f, perimeterM: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <NumberInput
+                  label="พื้นที่ใช้สอย (ตร.ม.)"
+                  value={form.area}
+                  onChange={(v) => setForm((f) => ({ ...f, area: v }))}
+                />
+                <NumberInput
+                  label="จำนวนชั้น"
+                  min={1}
+                  value={form.floors}
+                  onChange={(v) => setForm((f) => ({ ...f, floors: v }))}
+                />
+                <NumberInput
+                  label="ห้องนอน"
+                  min={0}
+                  value={form.bedrooms}
+                  onChange={(v) => setForm((f) => ({ ...f, bedrooms: v }))}
+                />
+                <NumberInput
+                  label="ห้องน้ำ"
+                  min={0}
+                  value={form.bathrooms}
+                  onChange={(v) => setForm((f) => ({ ...f, bathrooms: v }))}
+                />
+              </div>
+              <label className="flex flex-col gap-1 text-xs text-slate-700">
+                <span>รายละเอียด</span>
+                <textarea
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  className={INPUT}
+                  rows={3}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-500">
-                <span>ปริมาตรคอนกรีต (ลบ.ม.)</span>
-                <input
-                  type="number"
-                  value={form.concreteVolumeM3}
-                  onChange={(e) => setForm((f) => ({ ...f, concreteVolumeM3: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-500">
-                <span>พื้นที่ตั้งอาคาร/หลังคา (ตร.ม.)</span>
-                <input
-                  type="number"
-                  value={form.footprintSqm}
-                  onChange={(e) => setForm((f) => ({ ...f, footprintSqm: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
+              {/* ใช้เฉพาะตอนสร้างโครงการจากแบบ (คิด BOQ) — ลูกค้าไม่เห็น จึงพับไว้ไม่ให้ดูเป็นช่องบังคับ */}
+              <details className="group rounded-md border border-slate-200 px-3 py-2.5">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm text-slate-700">
+                  <ChevronDown size={14} className="shrink-0 -rotate-90 transition-transform group-open:rotate-0" />
+                  ค่าวัดถอดปริมาณ
+                  <span className="text-xs text-slate-400">ไม่บังคับ · ใช้คิด BOQ ตอนสร้างโครงการจากแบบ สเกลตามพื้นที่อัตโนมัติ</span>
+                </summary>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <NumberInput
+                    label="พื้นที่ผนัง (ตร.ม.)"
+                    value={form.wallAreaSqm}
+                    onChange={(v) => setForm((f) => ({ ...f, wallAreaSqm: v }))}
+                  />
+                  <NumberInput
+                    label="รอบรูป (ม.)"
+                    value={form.perimeterM}
+                    onChange={(v) => setForm((f) => ({ ...f, perimeterM: v }))}
+                  />
+                  <NumberInput
+                    label="ปริมาตรคอนกรีต (ลบ.ม.)"
+                    value={form.concreteVolumeM3}
+                    onChange={(v) => setForm((f) => ({ ...f, concreteVolumeM3: v }))}
+                  />
+                  <NumberInput
+                    label="พื้นที่ตั้งอาคาร/หลังคา (ตร.ม.)"
+                    value={form.footprintSqm}
+                    onChange={(v) => setForm((f) => ({ ...f, footprintSqm: v }))}
+                  />
+                </div>
+              </details>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <h2 className="text-sm font-semibold text-slate-800">รูปภาพ</h2>
+              <HouseImageTabs form={form} onChange={(key, v) => setForm((f) => ({ ...f, [key]: v }))} />
             </div>
           </div>
-          <div className="col-span-2 grid grid-cols-3 gap-2">
-            <label className="flex flex-col gap-1 text-xs text-slate-700">
-              <span>จำนวนชั้น</span>
-              <input
-                type="number"
-                min={1}
-                value={form.floors}
-                onChange={(e) => setForm((f) => ({ ...f, floors: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-slate-700">
-              <span>ห้องนอน</span>
-              <input
-                type="number"
-                min={0}
-                value={form.bedrooms}
-                onChange={(e) => setForm((f) => ({ ...f, bedrooms: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-slate-700">
-              <span>ห้องน้ำ</span>
-              <input
-                type="number"
-                min={0}
-                value={form.bathrooms}
-                onChange={(e) => setForm((f) => ({ ...f, bathrooms: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              />
-            </label>
-          </div>
-          <label className="flex flex-col gap-1 text-xs text-slate-700 col-span-2">
-            <span>รายละเอียด</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              rows={2}
-            />
-          </label>
-          <div className="col-span-2">
-            <ImageUploadField
-              label="ภาพภายนอก"
-              value={form.exteriorImages}
-              onChange={(v) => setForm((f) => ({ ...f, exteriorImages: v }))}
-            />
-          </div>
-          <div className="col-span-2">
-            <ImageUploadField
-              label="ภาพภายใน"
-              value={form.interiorImages}
-              onChange={(v) => setForm((f) => ({ ...f, interiorImages: v }))}
-            />
-          </div>
-          <div className="col-span-2">
-            <ImageUploadField
-              label="แปลนบ้าน"
-              value={form.plans}
-              onChange={(v) => setForm((f) => ({ ...f, plans: v }))}
-            />
-          </div>
-          <div className="col-span-2 flex gap-2">
-            <Button onClick={submitCreate}>บันทึก</Button>
+
+          <div className="mt-5 flex items-center gap-2 border-t border-slate-100 pt-4">
+            <Button onClick={submitCreate} disabled={!form.name.trim()}>
+              บันทึก
+            </Button>
             <Button variant="ghost" onClick={() => setShowAddForm(false)}>
               ยกเลิก
             </Button>
+            {!form.name.trim() && <span className="text-xs text-slate-400">กรอกชื่อแบบบ้านก่อนบันทึก</span>}
           </div>
-        </div>
+        </section>
       )}
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && <TableSkeleton rows={6} cols={5} />}
       {error && <p className="text-red-600">{error}</p>}
       {!loading && !error && designs.length === 0 && (
         <p className="text-slate-500">ยังไม่มีแบบบ้าน</p>
       )}
 
       {designs.length > 0 && (
-        <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
             <tr>
               <th className="px-3 py-2">ชื่อแบบบ้าน</th>
@@ -472,7 +519,7 @@ export function HouseDesignsPage() {
                   <td className="px-3 py-2 whitespace-nowrap" onClick={stopRowNav}>
                     <div className="flex gap-2">
                       <Button
-                        variant={d.published ? "ghost" : "primary"}
+                        variant={d.published ? "dangerQuiet" : "ghost"}
                         size="sm"
                         onClick={() => togglePublish(d)}
                       >
@@ -488,6 +535,7 @@ export function HouseDesignsPage() {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </Layout>
   );

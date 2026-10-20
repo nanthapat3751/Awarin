@@ -1,9 +1,11 @@
 import request from "supertest";
 
 import { app } from "../../src/app";
+import { todayIso } from "../../src/lib/business-date";
 import { hashPassword } from "../../src/lib/password";
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginOwner, createCustomerDirect } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 // mock ด้วยเหตุผลเดียวกับไฟล์เทสต์อื่น: entry แบบ ESM ของ Puppeteer โหลดใต้ runtime CJS ของ
 // ts-jest ไม่ได้ และเทสต์ชุดนี้ก็ไม่ได้ใช้มันอยู่แล้ว
@@ -22,13 +24,16 @@ jest.mock("../../src/lib/pdf/customer-quote-pdf", () => ({
  */
 async function createCustomerNoLogin(prefix: string) {
   const email = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
-  const passwordHash = await hashPassword("test-customer-battery-staple");
+  const passwordHash = await hashPassword("Amber-thicket-71-woodgrain");
   const user = await prisma.user.create({
     data: {
       email,
       passwordHash,
       fullName: "Test Customer",
       role: "CUSTOMER",
+      // เลียนแบบบัญชีที่ทีมงานสร้างให้ (ยืนยันแล้ว) — บัญชีที่สมัครเองแล้วยังไม่ยืนยันถูกแยกออกจาก
+      // รายชื่อหลักและ CSV (ดู unverified-signups.test.ts)
+      emailVerifiedAt: new Date(),
       customerProfile: { create: { phone: "0812345678" } },
     },
   });
@@ -37,14 +42,16 @@ async function createCustomerNoLogin(prefix: string) {
 
 /** ผู้ใช้ ADMIN + ล็อกอิน (helper กลางมีแค่ owner/customer) — ใช้ทดสอบว่า ADMIN ไม่เห็นไอพี */
 async function createAndLoginAdmin(prefix: string) {
-  const email = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
-  const password = "test-admin-battery-staple";
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const email = `${prefix}-${stamp}@example.com`;
+  const username = `${prefix}-${stamp}`.toLowerCase().replace(/[^a-z0-9.-]+/g, "-");
+  const password = "Hollow-cobbler-19-seabreeze";
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({
-    data: { email, passwordHash, fullName: "Test Admin", role: "ADMIN" },
+    data: { email, username, passwordHash, fullName: "Test Admin", role: "ADMIN" },
   });
   const agent = request.agent(app);
-  const res = await agent.post("/api/auth/staff/login").send({ email, password });
+  const res = await agent.post("/api/auth/staff/login").send({ username, password });
   if (res.status !== 200) throw new Error(`admin login failed: ${res.status}`);
   return { agent, userId: user.id };
 }
@@ -135,9 +142,7 @@ describe("แฟ้มลูกค้า (customer file)", () => {
 
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
     const quoteId = quoteRes.body.quote.id as string;
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
 
     return { projectId, quoteId, quoteNo: quoteRes.body.quote.quoteNo as string };
   }
@@ -312,7 +317,8 @@ describe("แฟ้มลูกค้า (customer file)", () => {
     expect(viewAndLogin.length).toBeGreaterThan(onlyView.length);
 
     // ช่วงวันที่ — "วันนี้ถึงวันนี้" ต้องได้ของวันนี้ครบ ไม่ใช่ศูนย์
-    const today = new Date().toISOString().slice(0, 10);
+    // วันนี้ตามเวลาไทย (เซิร์ฟเวอร์นับวันแบบนี้) — วันแบบ UTC ช่วงตี 0–7 ของไทยยังเป็นเมื่อวาน เทสต์จะตกเฉพาะช่วงนั้น
+    const today = todayIso();
     const todayRows = await kindsOf(`?from=${today}&to=${today}`);
     expect(todayRows.length).toBeGreaterThan(0);
 

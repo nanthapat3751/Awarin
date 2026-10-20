@@ -55,6 +55,8 @@ export interface CompanyLetterheadData {
   companyPhone: string;
   /** เลขประจำตัวผู้เสียภาษี — ไม่บังคับ ถ้าไม่ได้ตั้งค่าไว้จะไม่พิมพ์บรรทัดนี้ */
   companyTaxId?: string | null;
+  /** "สำนักงานใหญ่" / "สาขาที่ 00001" — ใบกำกับภาษีต้องระบุสถานประกอบการของผู้ขาย */
+  companyBranch?: string | null;
   companyEmail?: string | null;
   /** data URI ของโลโก้ที่บริษัทอัปโหลดเอง — ไม่ส่ง = ไฟล์ตั้งต้น · null = ไม่มีโลโก้ */
   logo?: string | null;
@@ -106,7 +108,13 @@ export function renderLetterhead(company: CompanyLetterheadData, doc: DocumentTi
           <div class="letterhead-name">${escapeHtml(company.companyName)}</div>
           ${company.companyAddress ? `<div>${escapeHtml(company.companyAddress)}</div>` : ""}
           ${contactLine(company.companyPhone, company.companyEmail)}
-          ${company.companyTaxId ? `<div>เลขประจำตัวผู้เสียภาษี ${escapeHtml(company.companyTaxId)}</div>` : ""}
+          ${
+            company.companyTaxId
+              ? `<div>เลขประจำตัวผู้เสียภาษี ${escapeHtml(company.companyTaxId)}${
+                  company.companyBranch ? ` · ${escapeHtml(company.companyBranch)}` : ""
+                }</div>`
+              : ""
+          }
         </div>
       </div>
       <div class="letterhead-doc">
@@ -147,6 +155,11 @@ export interface RunningHeadData {
   docLabel: string;
   /** โลโก้ไฟล์เล็กที่บริษัทอัปโหลดเอง — ไม่ส่ง = ไฟล์ตั้งต้น · null = ไม่มีโลโก้ */
   logoSmall?: string | null;
+  /**
+   * ไม่พิมพ์ "หน้า N/M" — ใบแจ้งหนี้/ใบเสร็จฉบับพิมพ์ของบริษัทเป็นต้นฉบับ+สำเนาในไฟล์เดียว แผ่นต้นฉบับที่ฉีก
+   * ให้ลูกค้าจะเขียนว่า "หน้า 1/2" ชวนให้คิดว่าได้เอกสารไม่ครบ
+   */
+  hidePageNumbers?: boolean;
 }
 
 const RUNNING_TEXT_STYLE = "font-family:'Sarabun',sans-serif;font-size:7pt;color:#777;";
@@ -212,7 +225,7 @@ export function documentChrome(
           <span>${escapeHtml(data.companyName)}</span>
         </span>
         <span>${escapeHtml(data.docLabel)}</span>
-        <span>หน้า <span class="pageNumber"></span>/<span class="totalPages"></span></span>
+        ${data.hidePageNumbers ? "<span></span>" : `<span>หน้า <span class="pageNumber"></span>/<span class="totalPages"></span></span>`}
       </div>
     </div>`;
 

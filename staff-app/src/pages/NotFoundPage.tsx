@@ -34,7 +34,7 @@ export function NotFoundPage() {
             {pathname}
           </span>
         </p>
-        <Link to="/" className={`mt-5 ${buttonClasses("secondary")}`}>
+        <Link to="/" className={`mt-5 ${buttonClasses("neutral")}`}>
           กลับไปแดชบอร์ด
         </Link>
       </div>

@@ -12,8 +12,9 @@ import {
   markNotificationRead,
 } from "../lib/notifications-api";
 import { groupByDay, notificationVisual, timeAgo } from "../lib/notifications-format";
+import { ListSkeleton } from "../components/Skeleton";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 15;
 
 type Filter = "unread" | "all";
 
@@ -79,7 +80,7 @@ export function NotificationsPage() {
           <button
             type="button"
             onClick={handleMarkAllRead}
-            className="min-h-11 text-sm font-medium text-brand transition-colors hover:text-brand-dark"
+            className="link-pill -mr-2.5 min-h-11 whitespace-nowrap text-sm font-medium text-brand lg:min-h-0"
           >
             ทำเครื่องหมายอ่านทั้งหมด
           </button>
@@ -103,7 +104,7 @@ export function NotificationsPage() {
         ))}
       </div>
 
-      {loading && <p className="text-slate-500">กำลังโหลด...</p>}
+      {loading && <ListSkeleton rows={6} />}
 
       {!loading && items.length === 0 && (
         <p className="text-slate-500 py-8 text-center">

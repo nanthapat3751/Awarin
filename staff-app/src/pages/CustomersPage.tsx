@@ -2,10 +2,12 @@ import { ArrowDown, ArrowUp, Download } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import type {
-  CustomerActivityFeedItemDto,
-  CustomerListItemDto,
-  CustomerSortField,
+import {
+  type CustomerActivityFeedItemDto,
+  type CustomerDirectoryView,
+  type CustomerListItemDto,
+  type CustomerSortField,
+  UNVERIFIED_SIGNUP_TTL_DAYS,
 } from "@systemboq/shared-types";
 
 import {
@@ -31,6 +33,7 @@ import {
 import { rowNavClass, stopRowNav, useRowNav } from "../lib/row-nav";
 import { badgeClass } from "../lib/status-badge";
 import { useToast } from "../lib/toast-context";
+import { ListSkeleton, TableSkeleton } from "../components/Skeleton";
 
 type Tab = "list" | "activity";
 
@@ -126,17 +129,20 @@ export function CustomersPage() {
   const [customers, setCustomers] = useState<CustomerListItemDto[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(15);
   const [sort, setSort] = useState<CustomerSortField | null>(null);
   const [dir, setDir] = useState<"asc" | "desc">("asc");
   const [query, setQuery] = useState("");
+  // บัญชีที่สมัครแล้วยังไม่ยืนยันอีเมลแยกไว้อีกมุมมอง — ไม่นับเป็นลูกค้าและไม่ออกใน CSV ของรายชื่อหลัก
+  const [view, setView] = useState<CustomerDirectoryView>("verified");
+  const [unverifiedCount, setUnverifiedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const [feed, setFeed] = useState<CustomerActivityFeedItemDto[] | null>(null);
   const [feedTotal, setFeedTotal] = useState(0);
   const [feedPage, setFeedPage] = useState(1);
-  const [feedPageSize, setFeedPageSize] = useState(20);
+  const [feedPageSize, setFeedPageSize] = useState(15);
   const [filter, setFilter] = useState<ActivityFilterValue>(EMPTY_FILTER);
 
   // ตัวเลือกของช่อง "ลูกค้า" ในแท็บกิจกรรม — โหลดแยกจากตาราง เพราะตารางแบ่งหน้าแล้ว
@@ -147,11 +153,12 @@ export function CustomersPage() {
   useEffect(() => {
     let alive = true;
     const timer = window.setTimeout(() => {
-      listCustomerDirectory({ q: query, page, sort: sort ?? undefined, dir: sort ? dir : undefined })
+      listCustomerDirectory({ q: query, page, sort: sort ?? undefined, dir: sort ? dir : undefined, view })
         .then((res) => {
           if (!alive) return;
           setCustomers(res.customers);
           setTotal(res.total);
+          setUnverifiedCount(res.unverifiedCount);
           setPageSize(res.pageSize);
           setError(null);
         })
@@ -163,12 +170,12 @@ export function CustomersPage() {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [query, page, sort, dir]);
+  }, [query, page, sort, dir, view]);
 
   // เปลี่ยนคำค้นหรือการเรียง = กลับหน้า 1 ไม่งั้นค้างอยู่หน้าท้าย ๆ ของผลชุดเก่าแล้วดูเหมือนไม่มีข้อมูล
   useEffect(() => {
     setPage(1);
-  }, [query, sort, dir]);
+  }, [query, sort, dir, view]);
 
   useEffect(() => {
     if (tab !== "activity") return;
@@ -275,6 +282,7 @@ export function CustomersPage() {
                 onClick={() =>
                   runExport(() =>
                     downloadCustomerDirectoryCsv({
+                      view,
                       q: query,
                       sort: sort ?? undefined,
                       dir: sort ? dir : undefined,
@@ -289,7 +297,8 @@ export function CustomersPage() {
         }
       />
 
-      <div className="mb-6 flex gap-3 overflow-x-auto border-b border-slate-300">
+      {/* เส้นฐานเป็นเงาด้านใน ไม่ใช่ border + -mb-px — กันแถบเลื่อนแนวตั้ง ▲●▼ บน Windows (ดูแท็บหน้าโครงการ) */}
+      <div className="mb-6 flex gap-3 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-slate-300)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {([
           { key: "list" as Tab, label: "รายชื่อ", count: customers ? total : null },
           { key: "activity" as Tab, label: "กิจกรรม", count: null },
@@ -299,7 +308,7 @@ export function CustomersPage() {
             type="button"
             onClick={() => goTab(t.key)}
             aria-current={t.key === tab ? "page" : undefined}
-            className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors ${
+            className={`shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors ${
               t.key === tab
                 ? "border-brand font-semibold text-brand"
                 : "border-transparent text-slate-600 hover:border-slate-400 hover:text-slate-900"
@@ -321,28 +330,62 @@ export function CustomersPage() {
 
       {tab === "list" && (
         <>
+          {/* โผล่เฉพาะเมื่อมีบัญชีที่ยังไม่ยืนยัน (หรือกำลังดูมุมมองนั้นอยู่) — ไม่มีก็ไม่ต้องมีปุ่มรก */}
+          {(unverifiedCount > 0 || view === "unverified") && (
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <div role="radiogroup" aria-label="มุมมองรายชื่อ" className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
+                {([
+                  { key: "verified" as const, label: "ลูกค้า" },
+                  { key: "unverified" as const, label: `ยังไม่ยืนยันอีเมล ${unverifiedCount}` },
+                ]).map((v) => (
+                  <button
+                    key={v.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={view === v.key}
+                    onClick={() => setView(v.key)}
+                    className={`rounded-md px-3 py-1 transition-colors ${
+                      view === v.key ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              {view === "unverified" && (
+                <p className="text-xs text-slate-500">
+                  สมัครแล้วแต่ยังไม่ยืนยันอีเมล — อาจพิมพ์อีเมลผิดหรือเป็นอีเมลปลอม เข้าระบบไม่ได้ ·
+                  ระบบลบให้อัตโนมัติเมื่อครบ {UNVERIFIED_SIGNUP_TTL_DAYS} วัน เว้นบัญชีที่ผูกโครงการ/คำขอไว้แล้ว
+                </p>
+              )}
+            </div>
+          )}
           {error && <p className="text-slate-600">{error}</p>}
-          {!error && customers === null && <p className="text-slate-500">กำลังโหลด...</p>}
+          {!error && customers === null && <TableSkeleton rows={8} cols={6} />}
           {!error && customers !== null && customers.length === 0 && (
             <p className="text-slate-500">
               {query.trim()
                 ? `ไม่พบลูกค้าที่ตรงกับ “${query}”`
-                : "ยังไม่มีบัญชีลูกค้าในระบบ"}
+                : view === "unverified"
+                  ? "ไม่มีบัญชีที่รอยืนยันอีเมล"
+                  : "ยังไม่มีบัญชีลูกค้าในระบบ"}
             </p>
           )}
 
           {customers !== null && customers.length > 0 && (
             <>
-              <table className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm [&_tbody_tr:hover]:bg-slate-50/70">
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
                 <thead className="text-left text-xs font-medium text-slate-600 [&_th]:border-b [&_th]:border-slate-300 [&_th]:bg-slate-200">
                   <tr>
                     <SortHeader field="name" label="ชื่อ" sort={sort} dir={dir} onSort={toggleSort} />
-                    <th className="whitespace-nowrap px-3 py-2">เบอร์โทร</th>
+                    {/* iPad (<1280): เบอร์โทรไปใต้อีเมล — ตารางพอดีจอ (ผู้ใช้สั่ง 18 ต.ค.) */}
+                    <th className="hidden whitespace-nowrap px-3 py-2 xl:table-cell">เบอร์โทร</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right">โครงการ</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right">ใบเสนอราคา</th>
                     <SortHeader
                       field="lastLogin"
-                      label="เข้าระบบล่าสุด"
+                      label={view === "unverified" ? "ลบอัตโนมัติ" : "เข้าระบบล่าสุด"}
                       sort={sort}
                       dir={dir}
                       onSort={toggleSort}
@@ -380,14 +423,18 @@ export function CustomersPage() {
                               {c.anonymized ? "ลบบัญชีแล้ว" : "ระงับการใช้งาน"}
                             </span>
                           )}
+                          {!c.emailVerified && (
+                            <span className={`${badgeClass("amber")} ml-2`}>ยังไม่ยืนยันอีเมล</span>
+                          )}
                           {/* ชื่อบริษัทอยู่บรรทัดเดียวกับอีเมล เพราะเป็น "ชื่อที่เอกสารจะออกให้"
                               ไม่ใช่ข้อมูลติดต่อ — ต้องเห็นตั้งแต่ในรายชื่อก่อนเปิดแฟ้ม */}
                           <p className="text-xs text-slate-500">
                             {c.companyName ? `${c.companyName} · ` : ""}
                             {c.email}
                           </p>
+                          {c.phone && <p className="text-xs text-slate-500 xl:hidden">{c.phone}</p>}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                        <td className="hidden whitespace-nowrap px-3 py-2 text-slate-700 xl:table-cell">
                           {c.phone ?? "—"}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700">
@@ -396,8 +443,13 @@ export function CustomersPage() {
                         <td className="px-3 py-2 text-right tabular-nums text-slate-700">
                           {c.quoteCount || "—"}
                         </td>
-                        <td className={`whitespace-nowrap px-3 py-2 ${quiet.className}`}>
-                          {quiet.text}
+                        <td className={`whitespace-nowrap px-3 py-2 ${view === "unverified" ? "text-slate-500" : quiet.className}`}>
+                          {/* มุมมองที่ยังไม่ยืนยัน = เข้าระบบไม่ได้อยู่แล้ว ช่องนี้จึงบอกกำหนดลบแทน */}
+                          {view !== "unverified"
+                            ? quiet.text
+                            : c.purgeAt
+                              ? formatDate(c.purgeAt)
+                              : "ไม่ลบ (มีของผูกไว้)"}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-500">
                           {formatDate(c.createdAt)}
@@ -407,6 +459,7 @@ export function CustomersPage() {
                   })}
                 </tbody>
               </table>
+              </div>
               <Pagination page={page} pageCount={pageCount} onChange={setPage} />
             </>
           )}
@@ -446,7 +499,7 @@ export function CustomersPage() {
             </p>
           )}
 
-          {feed === null && <p className="text-slate-500">กำลังโหลด...</p>}
+          {feed === null && <ListSkeleton rows={6} />}
           {feed !== null && feed.length === 0 && (
             <p className="text-slate-500">
               {isFilterActive(filter) || feedCustomerId

@@ -1,5 +1,6 @@
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 /**
  * PATCH /api/projects/:id/rates — แก้อัตราค่าดำเนินการ+กำไร / VAT ของโครงการที่สร้างไปแล้ว
@@ -131,9 +132,7 @@ describe("project rates", () => {
     const versionOneId = detail.body.currentVersion.id as string;
 
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quote.body.quote.id);
 
     const res = await owner.agent
       .patch(`/api/projects/${projectId}/rates`)
@@ -295,10 +294,7 @@ describe("project rates", () => {
 
       // ส่งใบเสนอราคา → เวอร์ชันถูกล็อก → แก้ BOQ จะ clone เป็นเวอร์ชันใหม่
       const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" })
-        .expect(200);
+      expect((await sendQuote(owner.agent, projectId, quote.body.quote.id)).status).toBe(200);
 
       await owner.agent.post(`/api/projects/${projectId}/boq/items`).send({
         categoryId: itemCategoryId,

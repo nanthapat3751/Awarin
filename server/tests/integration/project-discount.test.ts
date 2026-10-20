@@ -1,5 +1,6 @@
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 /**
  * ส่วนลดท้ายใบ — ส่งผ่าน PATCH /api/projects/:id/rates (ช่อง discount)
@@ -179,9 +180,7 @@ describe("project discount", () => {
     const versionOneId = detail.body.currentVersion.id as string;
 
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quote.body.quote.id);
 
     const res = await setDiscount(projectId, { mode: "AMOUNT", value: 300 });
     expect(res.status).toBe(200);
@@ -200,9 +199,7 @@ describe("project discount", () => {
     await setDiscount(projectId, { mode: "PERCENT", value: 10, note: "ต่อรองแล้ว" });
 
     const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quote.body.quote.id);
 
     await addLine(projectId, 10); // การแก้ BOQ นี้จะ clone เวอร์ชันใหม่
 
@@ -274,9 +271,7 @@ describe("project discount", () => {
 
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
     const quoteId = quoteRes.body.quote.id as string;
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
 
     const detail = await customer.agent.get(`/api/my/quotes/${quoteId}`);
     expect(detail.status).toBe(200);

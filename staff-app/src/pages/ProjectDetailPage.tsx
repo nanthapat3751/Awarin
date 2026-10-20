@@ -1,5 +1,8 @@
 import {
   ArrowRight,
+  BadgePercent,
+  Banknote,
+  Boxes,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -9,17 +12,27 @@ import {
   ChevronsUpDown,
   ChevronUp,
   Clock,
-  Download,
+  FileSpreadsheet,
   FileText,
+  Grid3x3,
   Layers,
+  ListPlus,
   Lock,
   Mail,
   Pencil,
   Phone,
+  Plus,
+  Receipt,
+  Ruler,
+  Scissors,
   Send,
   Trash2,
+  TrendingUp,
+  Upload,
   UserRound,
+  Wallet,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -32,22 +45,34 @@ import type {
   CustomerDto,
   LeadDto,
   MaterialDto,
-  MaterialSummaryDto,
   ProjectDetailDto,
+  ProjectOpeningDto,
   ProjectStatus,
   ProjectVersionDto,
   QuoteDto,
+  TakeoffRowInput,
   QuoteStatus,
   TemplateDto,
   WorkCategoryDto,
 } from "@systemboq/shared-types";
 
 // สูตรแยกค่าดำเนินการ/กำไร อยู่ใน shared-types เพราะทั้งเซิร์ฟเวอร์และหน้าจอต้องได้ตัวเลขเดียวกัน
-import { marginAfterDiscount, splitOverheadProfit } from "@systemboq/shared-types";
+import {
+  roundTo,
+  applyNetRounding,
+  marginAfterDiscount,
+  ROUNDING_UNITS,
+  roundingUnitLabel,
+  splitOverheadProfit,
+  sumTakeoffSheet,
+  isAreaUnit,
+  tileTakeoff,
+} from "@systemboq/shared-types";
 import { BoqPriceDriftNotice } from "../components/BoqPriceDriftNotice";
 import { ScrollableTabBar } from "../components/ScrollableTabBar";
+import { RowMenu } from "../components/RowMenu";
 import { BoqVersionCompare } from "../components/BoqVersionCompare";
-import { Button, buttonClasses } from "../components/Button";
+import { Button, buttonClasses, iconButtonClasses } from "../components/Button";
 import { RebarCalculator } from "../components/RebarCalculator";
 import { Layout } from "../components/Layout";
 import { ProjectActivity } from "../components/ProjectActivity";
@@ -57,21 +82,43 @@ import { useStuckPastHeader } from "../lib/use-stuck-past-header";
 import { UNIT_OPTIONS } from "../lib/units";
 import {
   MaterialComponentsEditor,
+  componentRowsFrom,
+  type RecipeSource,
   componentRowsToInput,
   deriveUnitPriceFromRows,
   validComponentRows,
   type ComponentRow,
 } from "../components/MaterialComponentsEditor";
 import { QuoteAttachmentsPanel } from "../components/QuoteAttachmentsPanel";
+import {
+  QuoteApprovalControls,
+  QuoteApprovalStatus,
+  QuoteLockedNote,
+  QuoteReturnNote,
+} from "../components/QuoteApprovalControls";
 import { QuoteViewCell } from "../components/QuoteViewCell";
 import { SearchableSelect, type SearchableOption } from "../components/SearchableSelect";
-import { SearchInput } from "../components/SearchInput";
-import { ApiError } from "../lib/api";
+import { CustomerPicker } from "../components/CustomerPicker";
+import { Avatar } from "../components/Avatar";
+import { BoqBulkAddDialog, type TopCategory } from "../components/BoqBulkAddDialog";
+import { BoqImportDialog } from "../components/BoqImportDialog";
+import { ChangeOrdersPanel } from "../components/ChangeOrdersPanel";
+import { ProjectCostsPanel } from "../components/ProjectCostsPanel";
+import { OpeningsDialog } from "../components/OpeningsDialog";
+import { Pagination } from "../components/Pagination";
+import { StructuralCalcDialog } from "../components/StructuralCalcDialog";
+import { StructuralMembersPanel } from "../components/StructuralMembersPanel";
+import { SheetQuantityBlock, TakeoffSheetDialog } from "../components/TakeoffSheetDialog";
+import { TileCalcDialog, type TileCalcApply } from "../components/TileCalcDialog";
+import { openingsTotal, takeoffInputsOf } from "../lib/takeoff";
+import { RebarCompareBar, RebarCompareTag, SiteRebarCard } from "../components/StructuralCompare";
+import { useRebarCutting, useStructuralCompare } from "../lib/use-structural-compare";
+import { ApiError, downloadFile } from "../lib/api";
+import { restoreTrashItem } from "../lib/trash-api";
 import { useAuth } from "../lib/auth-context";
 import {
   addBoqItem,
   deleteBoqItem,
-  getMaterialSummary,
   reorderBoqItems,
   updateBoqItem,
   type QtyBasis,
@@ -81,6 +128,9 @@ import { buildCategoryPath, categoryParts } from "../lib/category-path";
 import { useConfirm } from "../lib/confirm-context";
 import { useToast } from "../lib/toast-context";
 import { ContractBodyEditor } from "../components/ContractBodyEditor";
+import { ContractPaymentsPanel } from "../components/ContractPaymentsPanel";
+import { ContractMoneySummary } from "../components/ProjectContractMoney";
+import { useContractMoney } from "../lib/use-contract-money";
 import { createContract, listContracts, signContract } from "../lib/contracts-api";
 import { listContractTemplates } from "../lib/contract-templates-api";
 import { pdfViewerPath } from "../lib/document-pdf";
@@ -111,6 +161,9 @@ import {
   listTemplates,
   saveProjectAsTemplate,
 } from "../lib/templates-api";
+import { DetailSkeleton, PanelSkeleton } from "../components/Skeleton";
+import { DateInput } from "../components/DateInput";
+import { NARROW_SCREEN, useMediaQuery } from "../lib/use-media-query";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   DRAFT: "ร่าง",
@@ -196,18 +249,64 @@ const CONTRACT_ELIGIBLE_STATUSES: ReadonlySet<ProjectStatus> = new Set(["APPROVE
  * ทำไมต้องมี: เดิมทุกอย่างเรียงต่อกันแนวตั้งจนหน้ายาว ~7,000px (เกือบ 8 หน้าจอ) โดยตาราง BOQ
  * กินไป 76% — "สรุปวัสดุ" ที่อยู่ท้ายสุดต้องเลื่อนผ่าน BOQ ทั้งหมดกว่าจะถึง
  */
-const PROJECT_TABS = ["overview", "boq", "quotes", "contracts", "materials"] as const;
+// แท็บ "รายการซื้อของ" (materials) ถอดออก 18 ต.ค. ผู้ใช้สั่ง — งานจัดซื้อหลังได้งานอยู่นอกขอบเขต (ประเมินราคา + เว็บลูกค้า)
+// ลิงก์เก่า ?tab=materials ตกไปแท็บแรกเอง · ฝั่งเซิร์ฟเวอร์ (สรุปวัสดุ · ของชิ้นเดียว · Excel ขอราคา) ยังอยู่ เปิดกลับได้
+const PROJECT_TABS = ["overview", "boq", "quotes", "contract", "costs"] as const;
 type ProjectTab = (typeof PROJECT_TABS)[number];
 
 function isProjectTab(value: string | null): value is ProjectTab {
   return value != null && (PROJECT_TABS as readonly string[]).includes(value);
 }
 
+/**
+ * มุมมองย่อยในแท็บ "สัญญาและการเงิน" — เรียงตามลำดับงานจริงหลังลงนาม
+ * (เรื่องใหม่ในอนาคต เช่น ใบลดหนี้ เพิ่มเป็นมุมมองย่อยได้ ไม่ต้องเพิ่มแท็บ)
+ */
+const CONTRACT_VIEWS = ["payments", "changes", "documents"] as const;
+type ContractView = (typeof CONTRACT_VIEWS)[number];
+const isContractView = (v: string | null): v is ContractView => v != null && (CONTRACT_VIEWS as readonly string[]).includes(v);
+
+/** ลิงก์เก่า ?tab=contracts / ?tab=payments (แดชบอร์ด บุ๊กมาร์ก) → แท็บรวม + มุมมองย่อยที่ตรงกัน */
+const LEGACY_CONTRACT_TABS: Record<string, ContractView> = { contracts: "documents", payments: "payments" };
+
 /** หัวข้อที่ปุ่มอื่นในหน้าเลื่อนไปหา อยู่แท็บไหน — ใช้สลับแท็บให้ก่อนเลื่อน ไม่งั้นเลื่อนไปหาของที่ไม่ได้เรนเดอร์ */
 const SECTION_TAB: Record<string, ProjectTab> = {
   "project-details": "overview",
+  "custom-price-section": "overview",
+  "boq-section": "boq",
   "quotes-section": "quotes",
-  "contracts-section": "contracts",
+  "contracts-section": "contract",
+};
+
+/**
+ * สิ่งที่ยังขาดจนทำขั้นตอนถัดไปไม่ได้ — null = พร้อมออกใบเสนอราคาแล้ว
+ *
+ * มีไว้เพราะการ์ด "ขั้นตอนถัดไป" เคยบอกให้ "ไปสร้างใบเสนอราคา" ทั้งที่ปุ่มนั้นกดไม่ได้
+ * (โครงการกำหนดเองที่ยังไม่ใส่ราคา / โครงการประเมินราคาที่ยังไม่มีบรรทัด BOQ)
+ * คนใช้จึงไปยืนอยู่หน้าปุ่มจางโดยไม่มีอะไรบอกว่าติดอะไรอยู่
+ */
+type QuoteBlocker = "PRICE" | "BOQ";
+
+function quoteBlockerOf(isCustom: boolean, hasCustomPrice: boolean, itemCount: number): QuoteBlocker | null {
+  if (isCustom) return hasCustomPrice ? null : "PRICE";
+  return itemCount > 0 ? null : "BOQ";
+}
+
+const BLOCKER_TEXT: Record<QuoteBlocker, { title: string; detail: string; action: string; section: string }> = {
+  PRICE: {
+    title: "กำหนดราคาโครงการ",
+    detail:
+      "โครงการกำหนดเองต้องใส่ราคาก่อน จึงจะออกใบเสนอราคาและแนบไฟล์ BOQ/แบบที่ทำจาก Excel หรือ PDF ได้",
+    action: "ไปกำหนดราคา",
+    section: "custom-price-section",
+  },
+  BOQ: {
+    title: "เพิ่มรายการ BOQ",
+    detail:
+      "โครงการนี้ยังไม่มีรายการ BOQ สักบรรทัด จึงยังไม่มีราคาให้เสนอ — เพิ่มเองทีละบรรทัดหรือดึงจากแม่แบบก็ได้",
+    action: "ไปที่ BOQ",
+    section: "boq-section",
+  },
 };
 
 // จัดกลุ่มรายการ BOQ ตามรากหมวดงาน (งานโครงสร้าง/สถาปัตย์/ระบบ) + subtotal ต่อหมวด แทนการแบ่งหน้า
@@ -253,8 +352,60 @@ type BoqRenderRow =
       collapsed: boolean;
       /** id ของบรรทัดในก้อนนี้ — ใช้ปิดฟอร์มแก้ไขถ้ากำลังแก้บรรทัดที่กำลังจะถูกยุบ */
       itemIds: string[];
+      /** ก้อนนี้ถูกแบ่งหน้าตัดกลาง: ลำดับบรรทัดแรก–สุดท้ายของชิ้นในหน้านี้ (นับจาก 1) */
+      from?: number;
+      to?: number;
+      /** หัวซ้ำที่ต้นหน้าถัดไป — ก้อนเดียวกันต่อจากหน้าก่อน */
+      continued?: boolean;
     }
   | { type: "item"; item: BoqItemDto };
+
+/** ตาราง BOQ หน้าละกี่บรรทัด — ผู้ใช้ขอ 15 (เลือกแบบ 1: เท่ากันทุกหน้า ไม่มีตัวเลือกจำนวนต่อหน้า) */
+const BOQ_PAGE_SIZE = 15;
+
+/**
+ * แบ่งแถวของหมวดที่เปิดเป็นหน้าละ `size` บรรทัด (ผู้ใช้เลือกแบบ 1 — 11 ต.ค. 2026)
+ * วิธีตัดเหมือนหน้าหมวดงาน: นับเฉพาะบรรทัดรายการ (หมวดย่อยที่ยุบนับ 0 แต่หัวยังอยู่)
+ * ก้อนหมวดย่อยที่ข้ามหน้า → หัวซ้ำ "(ต่อ)" ที่ต้นหน้าถัดไป และทุกชิ้นที่ถูกตัดบอกช่วง "3–5 จาก 8"
+ * หัวหมวดย่อยที่ตกท้ายหน้าพอดีถูกยกไปหน้าถัดไปพร้อมบรรทัดของมัน ไม่ทิ้งหัวลอยไว้ท้ายหน้า
+ */
+function paginateBoqRows(rows: BoqRenderRow[], size: number): BoqRenderRow[][] {
+  const pages: BoqRenderRow[][] = [];
+  let page: BoqRenderRow[] = [];
+  let count = 0;
+  let sub: SubheaderRow | null = null;
+  let head: SubheaderRow | null = null;
+  let posInSub = 0;
+  const flush = () => {
+    pages.push(page);
+    page = [];
+    count = 0;
+    head = null;
+  };
+  for (const row of rows) {
+    if (row.type === "subheader") {
+      if (count >= size) flush();
+      sub = row;
+      posInSub = 0;
+      head = { ...row, from: 1, to: 0 };
+      page.push(head);
+      continue;
+    }
+    if (count >= size) {
+      flush();
+      if (sub && !sub.collapsed) {
+        head = { ...sub, from: posInSub + 1, to: posInSub, continued: true };
+        page.push(head);
+      }
+    }
+    page.push(row);
+    count++;
+    posInSub++;
+    if (head) head.to = posInSub;
+  }
+  if (page.length > 0) pages.push(page);
+  return pages.length > 0 ? pages : [[]];
+}
 
 // เรียงตัวเลือก dropdown ตามรหัสงาน/วัสดุ เพื่อให้รายการอ่านตามลำดับหมวดงาน
 // (A-01-01, A-01-02, … B-01-01, …) แทนลำดับจาก API ส่วน numeric:true ทำให้ 2 มาก่อน 10;
@@ -346,8 +497,9 @@ const STEP_LABEL_CLASS: Record<StepState, string> = {
   todo: "text-slate-400",
 };
 
-function stepStateOf(index: number, currentIndex: number, rejected: boolean): StepState {
-  if (index < currentIndex) return "done";
+function stepStateOf(index: number, currentIndex: number, rejected: boolean, finished: boolean): StepState {
+  // ส่งมอบแล้ว = จบทุกขั้น — ขั้นสุดท้ายไม่ใช่ "งานที่ค้างอยู่" จึงติ๊กถูกด้วย
+  if (finished || index < currentIndex) return "done";
   if (index > currentIndex) return "todo";
   return rejected ? "stopped" : "current";
 }
@@ -376,12 +528,13 @@ function ProjectStatusStepper({
   // "ลูกค้าปฏิเสธ" ไม่ใช่ขั้นในเส้นทาง แต่เป็นการสะดุดที่ขั้น "เสนอราคา" — วางหมุดปัจจุบันไว้ที่
   // ขั้นนั้นแล้วทำเป็นสีแดงพร้อมกากบาท ดีกว่าซ่อนแถบทั้งอันเหมือนตอนยกเลิก เพราะดีลยังไปต่อได้
   const rejected = status === "REJECTED";
+  const finished = status === "COMPLETED";
   const currentIndex = rejected ? STATUS_FLOW.indexOf("QUOTED") : STATUS_FLOW.indexOf(status);
 
   return (
     <ol className="flex items-start">
       {STATUS_FLOW.map((s, i) => {
-        const state = stepStateOf(i, currentIndex, rejected);
+        const state = stepStateOf(i, currentIndex, rejected, finished);
         const date = stepDates[s];
         return (
           <Fragment key={s}>
@@ -415,42 +568,128 @@ function ProjectStatusStepper({
 // (B) การ์ด "ขั้นตอนถัดไป" — บอกพนักงานว่าควรทำอะไรต่อ + ปุ่มลงมือ และย้ำว่าสถานะที่ขยับเองจะ
 // เกิดตอนไหน (ส่งใบเสนอราคา → เสนอราคาแล้ว, ลูกค้ายอมรับ → อนุมัติแล้ว) ที่ต้องคนตัดสินใจเอง
 // (ส่งมอบ/ยกเลิก) จึงเป็นปุ่มชัด ๆ ที่นี่
+/** ใบร่างล่าสุด (ถ้ามี) — การ์ดขั้นตอนถัดไปของโครงการร่างขึ้นอยู่กับว่าใบนี้อนุมัติไปถึงไหนแล้ว */
+function latestDraftOf(quotes: QuoteDto[]): QuoteDto | null {
+  return quotes.find((q) => q.status === "DRAFT") ?? null;
+}
+
+const DRAFT_STEP: Record<
+  "NO_QUOTE" | "NEED_REQUEST" | "NEED_MY_APPROVAL" | "WAITING_OWNER" | "READY",
+  { title: string; detail: string; action: string; tone: "brand" | "amber" }
+> = {
+  NO_QUOTE: {
+    title: "ออกใบเสนอราคา",
+    detail: "สร้างใบเสนอราคา ขออนุมัติจากเจ้าของ แล้วส่งให้ลูกค้า",
+    action: "ไปสร้างใบเสนอราคา",
+    tone: "brand",
+  },
+  NEED_REQUEST: {
+    title: "ขออนุมัติใบเสนอราคา",
+    detail: "ใบเสนอราคาต้องได้รับอนุมัติจากเจ้าของก่อนส่งให้ลูกค้า — ลายเซ็นของผู้ขอและผู้อนุมัติจะลงในใบให้เอง",
+    action: "ไปที่ใบเสนอราคา",
+    tone: "brand",
+  },
+  NEED_MY_APPROVAL: {
+    title: "อนุมัติใบเสนอราคา",
+    detail: "ตรวจราคาแล้วอนุมัติ หรือส่งกลับให้แก้พร้อมเหตุผล",
+    action: "ไปที่ใบเสนอราคา",
+    tone: "brand",
+  },
+  WAITING_OWNER: {
+    title: "รอเจ้าของอนุมัติใบเสนอราคา",
+    detail: "เจ้าของได้รับแจ้งเตือนแล้ว — อนุมัติเมื่อไรจะมีแจ้งเตือนกลับมา แล้วส่งให้ลูกค้าได้เลย",
+    action: "ไปที่ใบเสนอราคา",
+    tone: "amber",
+  },
+  READY: {
+    title: "ส่งใบเสนอราคาให้ลูกค้า",
+    detail: "อนุมัติแล้ว — เมื่อส่งให้ลูกค้า สถานะจะเปลี่ยนเป็น “เสนอราคาแล้ว” โดยอัตโนมัติ",
+    action: "ไปที่ใบเสนอราคา",
+    tone: "brand",
+  },
+};
+
+function draftStepOf(draft: QuoteDto | null, isOwner: boolean): keyof typeof DRAFT_STEP {
+  const state = draft?.approval?.state;
+  if (!draft) return "NO_QUOTE";
+  if (state === "APPROVED") return "READY";
+  if (state === "PENDING") return isOwner ? "NEED_MY_APPROVAL" : "WAITING_OWNER";
+  return isOwner ? "NEED_MY_APPROVAL" : "NEED_REQUEST";
+}
+
+function DraftNextAction({
+  draft,
+  isOwner,
+  onGoQuotes,
+}: Readonly<{ draft: QuoteDto | null; isOwner: boolean; onGoQuotes: () => void }>) {
+  const step = DRAFT_STEP[draftStepOf(draft, isOwner)];
+  const amber = step.tone === "amber";
+  return (
+    <div
+      className={`rounded-lg border p-4 flex flex-col gap-2 ${
+        amber ? "border-amber-200 bg-amber-50" : "border-brand/30 bg-brand/5"
+      }`}
+    >
+      <div className={`flex items-center gap-2 text-sm font-semibold ${amber ? "text-amber-700" : "text-brand"}`}>
+        {amber ? <Clock size={16} /> : <ArrowRight size={16} />} ขั้นตอนถัดไป: {step.title}
+      </div>
+      <p className="text-sm text-slate-500">{step.detail}</p>
+      <Button size="sm" variant="ghost" className="self-start" onClick={onGoQuotes}>
+        {step.action}
+      </Button>
+    </div>
+  );
+}
+
 function ProjectNextAction({
   status,
-  hasQuote,
+  draftQuote,
+  isOwner,
+  blocker,
   rejectionReason,
   savingTransition,
   onGoQuotes,
+  onGoSection,
   onGoContracts,
   onMarkDelivered,
   onCloseLost,
 }: Readonly<{
   status: ProjectStatus;
-  hasQuote: boolean;
+  /** ใบร่างล่าสุด — การ์ดบอกขั้นอนุมัติตามใบนี้ (null = ยังไม่มีใบร่าง) */
+  draftQuote: QuoteDto | null;
+  isOwner: boolean;
+  /** สิ่งที่ยังขาดจนออกใบเสนอราคาไม่ได้ — null = พร้อมแล้ว */
+  blocker: QuoteBlocker | null;
   /** เหตุผลที่ลูกค้าให้ไว้ตอนปฏิเสธ (customerNote ของใบล่าสุด) — null ถ้าไม่ได้ระบุ */
   rejectionReason: string | null;
   savingTransition: boolean;
   onGoQuotes: () => void;
+  onGoSection: (id: string) => void;
   onGoContracts: () => void;
   onMarkDelivered: () => void;
   onCloseLost: () => void;
 }>) {
   const base = "rounded-lg border p-4 flex flex-col gap-2";
 
-  if (status === "DRAFT") {
+  // ยังติดอะไรอยู่ = บอกสิ่งนั้น ไม่ใช่บอกขั้นตอนที่ยังทำไม่ได้ (ต้องมาก่อนทุกสถานะ เพราะ
+  // โครงการที่ถูกปฏิเสธแล้วออกใบใหม่ก็ติดเงื่อนไขเดียวกัน)
+  if (blocker && (status === "DRAFT" || status === "REJECTED")) {
+    const t = BLOCKER_TEXT[blocker];
     return (
       <div className={`${base} border-brand/30 bg-brand/5`}>
         <div className="flex items-center gap-2 text-sm font-semibold text-brand">
-          <ArrowRight size={16} /> ขั้นตอนถัดไป: ส่งใบเสนอราคาให้ลูกค้า
+          <ArrowRight size={16} /> ขั้นตอนถัดไป: {t.title}
         </div>
-        <p className="text-sm text-slate-500">
-          เมื่อคุณส่งใบเสนอราคาให้ลูกค้า สถานะจะเปลี่ยนเป็น “เสนอราคาแล้ว” โดยอัตโนมัติ
-        </p>
-        <Button size="sm" className="self-start" onClick={onGoQuotes}>
-          {hasQuote ? "ไปที่ใบเสนอราคา" : "ไปสร้างใบเสนอราคา"}
+        <p className="text-sm text-slate-500">{t.detail}</p>
+        <Button variant="ghost" size="sm" className="self-start" onClick={() => onGoSection(t.section)}>
+          {t.action}
         </Button>
       </div>
     );
+  }
+
+  if (status === "DRAFT") {
+    return <DraftNextAction draft={draftQuote} isOwner={isOwner} onGoQuotes={onGoQuotes} />;
   }
 
   if (status === "QUOTED") {
@@ -463,7 +702,7 @@ function ProjectNextAction({
           สถานะจะเปลี่ยนเป็น “อนุมัติแล้ว” โดยอัตโนมัติเมื่อลูกค้ากดยอมรับ
           หรือบันทึกการตอบกลับเองได้ที่ใบเสนอราคา
         </p>
-        <Button variant="secondary" size="sm" className="self-start" onClick={onGoQuotes}>
+        <Button variant="ghost" size="sm" className="self-start" onClick={onGoQuotes}>
           ไปที่ใบเสนอราคา
         </Button>
       </div>
@@ -506,10 +745,10 @@ function ProjectNextAction({
           ออกสัญญาให้ลูกค้า และเมื่อส่งมอบงานเรียบร้อยแล้วให้ทำเครื่องหมายเพื่อปิดโครงการ
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={onGoContracts}>
+          <Button variant="ghost" size="sm" onClick={onGoContracts}>
             ไปที่สัญญา
           </Button>
-          <Button variant="secondary" size="sm" disabled={savingTransition} onClick={onMarkDelivered}>
+          <Button variant="brand" size="sm" disabled={savingTransition} onClick={onMarkDelivered}>
             ทำเครื่องหมายส่งมอบงาน
           </Button>
         </div>
@@ -579,6 +818,7 @@ const TAKEOFF_BASES: {
   measureLabel: string;
 }[] = [
   { value: "MANUAL", label: "กรอกเอง", driver: null, perLabel: "จำนวน", measureLabel: "" },
+  { value: "SHEET", label: "ถอดจากแบบ (กรอกขนาดทีละชิ้น)", driver: null, perLabel: "ใบถอดแบบ", measureLabel: "" },
   { value: "PER_AREA", label: "ต่อพื้นที่พื้น (× ตร.ม.)", driver: "floorArea", perLabel: "ปริมาณต่อ 1 ตร.ม.พื้น", measureLabel: "พื้นที่ใช้สอย" },
   { value: "PER_WALL_AREA", label: "ต่อพื้นที่ผนัง (× ตร.ม.)", driver: "wallArea", perLabel: "ปริมาณต่อ 1 ตร.ม.ผนัง", measureLabel: "พื้นที่ผนัง" },
   { value: "PER_PERIMETER", label: "ต่อความยาวรอบรูป (× ม.)", driver: "perimeter", perLabel: "ปริมาณต่อ 1 เมตร", measureLabel: "ความยาวรอบรูป" },
@@ -595,6 +835,8 @@ type RatesPatch = {
   overheadPercent?: number | null;
   vatPercent?: number;
   discount?: DiscountPatch;
+  contingencyPercent?: number;
+  roundingUnit?: number | null;
 };
 
 /** ช่องตัวเลขที่เว้นว่างได้: ว่าง = null (ไม่แตะค่านี้) */
@@ -630,6 +872,20 @@ function ratesInputError(
     return "ส่วนลดเป็นเปอร์เซ็นต์ต้องไม่เกิน 100";
   }
   return null;
+}
+
+/** ตรวจค่าเผื่อเหลือเผื่อขาด — แยกจาก ratesInputError เพื่อไม่ให้ฟังก์ชันเดียวบวมเกินอ่านไหว */
+function contingencyError(contingency: number | null): string | null {
+  if (contingency != null && (!Number.isFinite(contingency) || contingency < 0 || contingency > 100)) {
+    return "ค่าเผื่อเหลือเผื่อขาด ต้องเป็นตัวเลข 0-100";
+  }
+  return null;
+}
+
+/** ค่าเผื่อเหลือเผื่อขาดในคำขอ — ส่งเฉพาะเมื่อเปลี่ยนจริง (ไม่งั้นไปสะกิดกฎสิทธิ์ของ ADMIN โดยไม่จำเป็น) */
+function contingencyPatchOf(version: ProjectVersionDto, contingency: number | null): RatesPatch {
+  if (contingency == null || contingency === Number(version.contingencyPct)) return {};
+  return { contingencyPercent: contingency };
 }
 
 function discountPatchOf(discMode: DiscountMode, discValue: number, note: string): DiscountPatch {
@@ -676,8 +932,13 @@ function previewQtyOf(
   coefficient: string,
   waste: string,
   driverValue: number | null,
+  sheet: { rows: TakeoffRowInput[]; unit: string },
 ): number | null {
   if (basis === "MANUAL") return quantity.trim() === "" ? null : Number(quantity);
+  // ใบถอดแบบ: สูตรเดียวกับเซิร์ฟเวอร์ (shared-types) — ยังไม่มีแถว = ยังไม่รู้ปริมาณ
+  if (basis === "SHEET") {
+    return sheet.rows.length ? sumTakeoffSheet(sheet.rows, sheet.unit, Number(waste) || 0).quantity : null;
+  }
   return previewTakeoffQty(Number(coefficient), Number(waste), driverValue);
 }
 
@@ -697,68 +958,10 @@ function DiscountMarginHint({ margin }: Readonly<{ margin: { remaining: number; 
  * ชื่อปุ่มในแถวสัญญา — หลังลงนามแล้ว สิ่งที่อยู่หลังปุ่มนี้คือการติดตามรับเงิน ไม่ใช่ถ้อยคำ
  * (ถ้อยคำแก้ไม่ได้แล้ว) ชื่อปุ่มต้องบอกสิ่งที่จะได้เจอจริง ๆ
  */
+/** ชื่อของสิ่งที่อยู่ใต้แถว — ก่อนลงนามแก้ถ้อยคำ/แผนงวด · หลังลงนามคือการรับเงิน (ถ้อยคำแก้ไม่ได้แล้ว) */
 function contractPanelLabel(open: boolean, signed: boolean): string {
-  if (open) return "ปิด";
-  return signed ? "งวดและการรับเงิน" : "แก้ข้อความ";
-}
-
-/** เนื้อแผงสรุปวัสดุ: กำลังโหลด · ยังไม่มีบรรทัดที่แตกวัสดุ · ตารางรวม */
-function MaterialSummaryBody({ summary }: Readonly<{ summary: MaterialSummaryDto | null }>) {
-  if (!summary) return <p className="text-sm text-slate-500 py-2">กำลังโหลด...</p>;
-  if (summary.rows.length === 0) {
-    return (
-      <p className="text-sm text-slate-500 py-2">
-        ยังไม่มีบรรทัดใดแตกวัสดุย่อย — ตั้งสูตรวัสดุในหน้า “วัสดุ / ค่าแรง” แล้วเลือกวัสดุนั้นในบรรทัด BOQ
-        หรือกด “แก้ไข” บรรทัดแล้วเพิ่มวัสดุย่อยได้เลย
-      </p>
-    );
-  }
-  return (
-    <>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">
-          แตกวัสดุย่อยแล้ว {summary.linesWithComponents} จาก {summary.totalLines} บรรทัด
-        </p>
-        <Button variant="ghost" size="sm" onClick={() => window.print()}>
-          <Download size={13} /> พิมพ์ / บันทึก PDF
-        </Button>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
-            <tr>
-              <th className="px-3 py-2">วัสดุ</th>
-              <th className="px-3 py-2">หน่วย</th>
-              <th className="px-3 py-2 text-right">ปริมาณรวม</th>
-              <th className="px-3 py-2 text-right">ราคา/หน่วย</th>
-              <th className="px-3 py-2 text-right">รวม</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summary.rows.map((r, i) => (
-              <tr key={`${r.componentMaterialId ?? r.name}-${i}`} className="border-t border-slate-100">
-                <td className="px-3 py-2 text-slate-800">{r.name}</td>
-                <td className="px-3 py-2 text-slate-500">{r.unit}</td>
-                <td className="px-3 py-2 text-right text-slate-800">
-                  {Number(r.totalQty).toLocaleString("th-TH", { maximumFractionDigits: 3 })}
-                </td>
-                <td className="px-3 py-2 text-right text-slate-500">{money(r.unitPrice)}</td>
-                <td className="px-3 py-2 text-right text-slate-800 font-medium">{money(r.totalCost)}</td>
-              </tr>
-            ))}
-            <tr className="border-t-2 border-slate-300 bg-slate-50">
-              <td className="px-3 py-2 font-semibold text-slate-800" colSpan={4}>
-                รวมค่าวัสดุทั้งหมด (โดยประมาณเพื่อสั่งซื้อ)
-              </td>
-              <td className="px-3 py-2 text-right font-semibold text-brand">
-                {money(summary.grandTotal)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
+  const what = signed ? "งวดและการรับเงิน" : "แก้ข้อความและงวด";
+  return open ? `พับ${what}` : what;
 }
 
 function basisConfig(value: string) {
@@ -775,7 +978,7 @@ function previewTakeoffQty(
     return null;
   }
   const q = floorArea * coefficient * (1 + (Number.isFinite(wastePct) ? wastePct : 0) / 100);
-  return Math.round(q * 1000) / 1000;
+  return roundTo(q, 3);
 }
 
 // รวมของบรรทัด = ปริมาณ × (ราคาวัสดุ + ค่าแรง) — ตรงกับ calculateLineAmounts ฝั่งเซิร์ฟเวอร์
@@ -787,13 +990,16 @@ function lineTotalOf(
   if (qty == null || !Number.isFinite(qty)) return null;
   const mat = Number.isFinite(materialUnitPrice) ? materialUnitPrice : 0;
   const lab = Number.isFinite(laborUnitPrice) ? laborUnitPrice : 0;
-  return Math.round(qty * (mat + lab) * 100) / 100;
+  // ปัดค่าวัสดุกับค่าแรงแยกกันก่อนบวก เหมือน calculateLineAmounts เป๊ะ ๆ — ถ้าบวกก่อนปัด
+  // ตัวอย่างที่ลงท้าย .005 ทั้งคู่จะได้ยอดต่างจากที่เซิร์ฟเวอร์บันทึกจริง 0.01 บาท
+  const r2 = (v: number) => roundTo(v, 2);
+  return r2(r2(qty * mat) + r2(qty * lab));
 }
 
 /** ส่วนลดที่มีผลกับยอดหนึ่ง ๆ — % คิดจากฐาน, จำนวนเงินคงที่ตัดไม่ให้เกินฐาน (สะท้อน resolveDiscountAmount) */
 function previewDiscount(base: number, discount: PreviewDiscount | undefined): number {
   if (!discount) return 0;
-  const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+  const round2 = (v: number) => roundTo(v, 2);
   if (discount.pct != null) return round2(base * (discount.pct / 100));
   return Math.min(round2(discount.amt), base);
 }
@@ -810,14 +1016,22 @@ function previewNetPrice(
   overheadProfitPct: number,
   vatPct: number,
   discount?: PreviewDiscount,
+  roundingUnit?: number | null,
 ): number {
-  const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+  const round2 = (v: number) => roundTo(v, 2);
   const direct = round2(newDirectCost);
   const oh = round2(direct * (overheadProfitPct / 100));
   const beforeDiscount = round2(direct + oh);
   const beforeVat = round2(beforeDiscount - previewDiscount(beforeDiscount, discount));
-  const vat = round2(beforeVat * (vatPct / 100));
-  return round2(beforeVat + vat);
+  // ปัดยอดด้วยสูตรเดียวกับเซิร์ฟเวอร์ (shared-types) — พรีวิวต้องเท่ากับยอดที่จะบันทึกจริง
+  return applyNetRounding(beforeVat, vatPct, roundingUnit).netPrice;
+}
+
+/** ส่วนลดของเวอร์ชันในรูปที่พรีวิวกิน — % คิดใหม่ตามยอด, จำนวนเงินคงที่ใช้ค่าเดิม */
+function versionDiscount(version: ProjectVersionDto): PreviewDiscount {
+  return version.discountPct != null
+    ? { pct: Number(version.discountPct), amt: 0 }
+    : { pct: null, amt: Number(version.discountAmt) };
 }
 
 /** state + ตัวจัดการทั้งหมดของหน้าโครงการ — ส่วนแสดงผลรับไปทั้งก้อนผ่าน ProjectVM */
@@ -844,8 +1058,6 @@ function useProjectDetailState() {
   const [newContractTemplateId, setNewContractTemplateId] = useState("");
   const [templates, setTemplates] = useState<TemplateDto[]>([]);
   // รายงานสรุปวัสดุ (ถอดปริมาณ) — โหลดตอนเปิดการ์ด, รีเฟรชเมื่อ BOQ เปลี่ยน
-  const [materialSummary, setMaterialSummary] = useState<MaterialSummaryDto | null>(null);
-  const [showMaterialSummary, setShowMaterialSummary] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
@@ -873,6 +1085,8 @@ function useProjectDetailState() {
 
   const [showLeadPicker, setShowLeadPicker] = useState(false);
   const [unlinkedLeads, setUnlinkedLeads] = useState<LeadDto[]>([]);
+  // นับเฉพาะตอนโครงการยังไม่ผูกทั้งลูกค้าและคำขอ (การ์ดถามว่า "งานนี้ของลูกค้าคนไหน?") · null = ยังไม่รู้ ไม่โชว์ตัวเลข
+  const [pendingLeadCount, setPendingLeadCount] = useState<number | null>(null);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [linkingLead, setLinkingLead] = useState(false);
 
@@ -880,6 +1094,12 @@ function useProjectDetailState() {
   const [addForm, setAddForm] = useState<AddFormState>(EMPTY_ADD_FORM);
   // สูตรวัสดุย่อยของบรรทัดที่กำลังเพิ่ม (ว่าง = วัสดุก้อนเดียว / ให้ระบบดึงจากแคตตาล็อกถ้ามี)
   const [addComponents, setAddComponents] = useState<ComponentRow[]>([]);
+  // ใบถอดแบบของบรรทัดที่กำลังเพิ่ม (ฐาน "ถอดจากแบบ") — ส่งไปพร้อมบรรทัดตอนกดบันทึก
+  const [addSheetRows, setAddSheetRows] = useState<TakeoffRowInput[]>([]);
+  // ใบถอดแบบที่เปิดจากตาราง (กดที่ "ใบถอดแบบ N แถว") — บันทึกตรงไม่ต้องเข้าโหมดแก้ไข
+  const [sheetItem, setSheetItem] = useState<BoqItemDto | null>(null);
+  const [tileItem, setTileItem] = useState<BoqItemDto | null>(null);
+  const [showStructural, setShowStructural] = useState(false);
   // เครื่องมือคิดน้ำหนักเหล็กเส้น (กก. = ความยาว × d²/162) สำหรับกรอกเป็นปริมาณของบรรทัดเหล็ก
   const [rebarOpen, setRebarOpen] = useState(false);
   const [rebarDia, setRebarDia] = useState("12");
@@ -909,6 +1129,7 @@ function useProjectDetailState() {
   const [editRebarLen, setEditRebarLen] = useState("");
   // สูตรวัสดุย่อยของบรรทัดที่กำลังแก้ (โหลดจาก snapshot เดิมตอน startEdit; ส่งกลับทั้งชุดตอนบันทึก)
   const [editComponents, setEditComponents] = useState<ComponentRow[]>([]);
+  const [editSheetRows, setEditSheetRows] = useState<TakeoffRowInput[]>([]);
 
   // ราคาโครงการกำหนดเอง (CUSTOM) — พนักงานกรอกยอดก่อน VAT
   const [customPriceInput, setCustomPriceInput] = useState("");
@@ -921,11 +1142,15 @@ function useProjectDetailState() {
   // จาก 10% เป็น 12% ต้องตัดสินใจเรื่องการแบ่งไปด้วยทุกครั้ง ทั้งที่เป็นคนละเรื่องกัน
   const [overheadInput, setOverheadInput] = useState("");
   const [vatInput, setVatInput] = useState("");
+  // ค่าเผื่อเหลือเผื่อขาด % ของต้นทุนตรง — ว่าง = ไม่เผื่อ
+  const [contingencyInput, setContingencyInput] = useState("");
   // ส่วนลดอยู่ในแผงเดียวกับอัตรา เพราะทั้งสามอย่างคือ "การต่อรองราคา" ครั้งเดียวกัน
   // กดบันทึกทีเดียวจบ ไม่ต้องแยกเป็นสองรอบให้เกิดสองเวอร์ชันโดยไม่จำเป็น (BR-07)
   const [discMode, setDiscMode] = useState<"NONE" | "PERCENT" | "AMOUNT">("NONE");
   const [discInput, setDiscInput] = useState("");
   const [discNote, setDiscNote] = useState("");
+  // ปัดยอดสุทธิ — "" = ไม่ปัด, ไม่งั้นคือหน่วยบาทเป็นข้อความ ("1" / "100" / "1000" / "10000")
+  const [roundInput, setRoundInput] = useState("");
   const [savingRates, setSavingRates] = useState(false);
   // สัญญาที่กำลังกางช่องแก้ข้อความอยู่ (ทีละฉบับ เพราะแผงสูงมาก)
   const [editingContractId, setEditingContractId] = useState<string | null>(null);
@@ -933,6 +1158,9 @@ function useProjectDetailState() {
   // แก้ไขรายละเอียดโครงการ (ชื่อ/สถานที่ก่อสร้าง/พื้นที่/ช่วงเวลา/หมายเหตุ)
   const [showEditInfo, setShowEditInfo] = useState(false);
   const [savingInfo, setSavingInfo] = useState(false);
+  // ช่องเปิดประตู/หน้าต่างในฟอร์มแก้รายละเอียด — undefined = ยังไม่แตะ (ไม่ส่งไปแก้)
+  const [infoOpenings, setInfoOpenings] = useState<ProjectOpeningDto[] | undefined>(undefined);
+  const [showOpenings, setShowOpenings] = useState(false);
   const [infoForm, setInfoForm] = useState({
     name: "",
     siteAddress: "",
@@ -975,6 +1203,36 @@ function useProjectDetailState() {
         };
       });
   }, [itemCategories, categoryById]);
+  // หมวดย่อยที่ใช้งานได้ — ที่วางรหัสงานใหม่ตอนนำเข้า Excel (รหัสในไฟล์ที่ระบบไม่รู้จัก)
+  const subgroupOptions = useMemo<SearchableOption[]>(() => {
+    const chainActive = (id: string): boolean => {
+      for (let cur = categoryById.get(id); cur; cur = cur.parentId ? categoryById.get(cur.parentId) : undefined) {
+        if (!cur.active) return false;
+      }
+      return true;
+    };
+    return categories
+      .filter((c) => c.level === "SUBGROUP" && chainActive(c.id))
+      .sort((a, b) => byCode(a.code, b.code))
+      .map((c) => {
+        const path = buildCategoryPath(c.id, categoryById);
+        return { value: c.id, label: c.code ? `${c.code} — ${path}` : path, keywords: `${c.code ?? ""} ${path}` };
+      });
+  }, [categories, categoryById]);
+  // หมวดระดับรายการ → หมวดบนสุด (A เตรียมการ / B โครงสร้าง …) ให้ปุ่มกรองในหน้าต่างเพิ่มหลายรายการ
+  const topCategoryOf = useMemo(() => {
+    const map = new Map<string, TopCategory>();
+    for (const c of itemCategories) {
+      let top = c;
+      for (let parent = top.parentId ? categoryById.get(top.parentId) : undefined; parent; ) {
+        top = parent;
+        parent = top.parentId ? categoryById.get(top.parentId) : undefined;
+      }
+      const name = top.name.replace(/^หมวด(งาน)?\s*/, "") || top.name;
+      map.set(c.id, { key: top.id, label: top.code ? `${top.code} ${name}` : name, sort: top.code ?? top.name });
+    }
+    return map;
+  }, [itemCategories, categoryById]);
   // เฉพาะวัสดุที่ยังใช้งานอยู่ — ตัวที่ถูกปิดใช้งานไม่ควรถูกเลือกเข้า BOQ ใหม่ (แถวเก่าที่เคยใช้
   // ยังอยู่ได้เพราะราคาถูก snapshot ไว้แล้วในบรรทัด BOQ)
   const materialOptions = useMemo<SearchableOption[]>(
@@ -990,14 +1248,6 @@ function useProjectDetailState() {
     [materials],
   );
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
-
-  async function loadMaterialSummary() {
-    try {
-      setMaterialSummary(await getMaterialSummary(projectId));
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "โหลดสรุปวัสดุไม่สำเร็จ");
-    }
-  }
 
   async function refresh() {
     setLoading(true);
@@ -1089,6 +1339,7 @@ function useProjectDetailState() {
       targetEndDate: p.targetEndDate ? p.targetEndDate.slice(0, 10) : "",
       description: p.description ?? "",
     });
+    setInfoOpenings(undefined);
     setShowEditInfo(true);
   }
 
@@ -1108,6 +1359,8 @@ function useProjectDetailState() {
         footprintSqm: num(infoForm.footprintSqm),
         bathrooms: num(infoForm.bathrooms),
         floors: num(infoForm.floors),
+        // ส่งเฉพาะเมื่อแก้รายการ — ไม่งั้นทุกการบันทึกรายละเอียดจะเขียนทับช่องเปิดเดิม
+        ...(infoOpenings === undefined ? {} : { openings: infoOpenings }),
         startDate: infoForm.startDate || null,
         targetEndDate: infoForm.targetEndDate || null,
         description: infoForm.description.trim() || null,
@@ -1146,6 +1399,9 @@ function useProjectDetailState() {
       setDiscInput("");
     }
     setDiscNote(v.discountNote ?? "");
+    setRoundInput(v.roundingUnit != null ? String(v.roundingUnit) : "");
+    // 0% เผื่อเหลือเผื่อขาด = ไม่ได้เผื่อ ซึ่งเป็นค่าเดียวกับช่องว่าง — โชว์ว่างไว้จะอ่านง่ายกว่า
+    setContingencyInput(Number(v.contingencyPct) > 0 ? String(Number(v.contingencyPct)) : "");
     setShowRates(true);
   }
 
@@ -1159,19 +1415,28 @@ function useProjectDetailState() {
     };
     // ส่วนลด: ค่าว่างในโหมด %/บาท = ยังไม่ได้กรอก ให้ถือว่าไม่มีส่วนลด
     const discValue = discInput === "" ? 0 : Number(discInput);
-    const inputError = ratesInputError(inputs, Number(version.overheadProfitPct), discMode, discValue);
+    const isCustomProject = detail.project.type === "CUSTOM";
+    const contingency = optionalNumber(contingencyInput);
+    const inputError =
+      ratesInputError(inputs, Number(version.overheadProfitPct), discMode, discValue) ??
+      (isCustomProject ? null : contingencyError(contingency));
     if (inputError) {
       toast.error(inputError);
       return;
     }
     const note = discNote.trim();
-    const body = ratesPatchOf(
-      version,
-      detail.project.type === "CUSTOM",
-      inputs,
-      discountPatchOf(discMode, discValue, note),
-      note,
-    );
+    const nextRounding = roundInput === "" ? null : Number(roundInput);
+    const body = {
+      ...ratesPatchOf(
+        version,
+        isCustomProject,
+        inputs,
+        discountPatchOf(discMode, discValue, note),
+        note,
+      ),
+      ...(isCustomProject ? {} : contingencyPatchOf(version, contingency)),
+      ...(nextRounding === (version.roundingUnit ?? null) ? {} : { roundingUnit: nextRounding }),
+    };
     if (Object.keys(body).length === 0) {
       setShowRates(false);
       return;
@@ -1230,11 +1495,6 @@ function useProjectDetailState() {
   }, [projectId]);
 
   // โหลด/รีเฟรชสรุปวัสดุเมื่อเปิดการ์ด และเมื่อ BOQ เปลี่ยน (ต้นทุนตรงขยับ = เวอร์ชันถูกแก้)
-  useEffect(() => {
-    if (!showMaterialSummary) return;
-    loadMaterialSummary();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showMaterialSummary, detail?.currentVersion?.id, detail?.currentVersion?.directCost]);
 
   useEffect(() => {
     if (!showCustomerSearch) return;
@@ -1250,12 +1510,27 @@ function useProjectDetailState() {
     return () => clearTimeout(timer);
   }, [customerQuery, showCustomerSearch]);
 
-  async function handleAssignCustomer(customerId: string | null) {
+  async function handleAssignCustomer(next: CustomerDto | null) {
+    const prev = detail?.project.customer ?? null;
+    if (next && next.id === prev?.id) return;
+    // ลูกค้าเห็นใบเสนอราคา/สัญญาผ่าน project.customerId — เปลี่ยน/เลิกผูกหลังส่งใบไปแล้ว
+    // ลูกค้าเดิมจะมองไม่เห็นใบเหล่านั้นอีกทันที จึงถามก่อน (ยังไม่เคยส่ง = เปลี่ยนได้เลย)
+    const sent = quotes.filter((q) => q.sentAt).length;
+    if (prev && sent > 0) {
+      const ok = await confirm(
+        next
+          ? `ใบเสนอราคาที่ส่งแล้ว ${sent} ใบ จะย้ายไปอยู่ในพอร์ทัลของ ${next.fullName} — ${prev.fullName} จะไม่เห็นใบเหล่านี้อีก`
+          : `เลิกผูก ${prev.fullName}? ใบเสนอราคาที่ส่งแล้ว ${sent} ใบจะหายจากพอร์ทัลของลูกค้าคนนี้`,
+        { confirmLabel: next ? "เปลี่ยนลูกค้า" : "เลิกผูกลูกค้า", variant: "danger" },
+      );
+      if (!ok) return;
+    }
     setAssigningCustomer(true);
     try {
-      await updateProject(projectId, { customerId });
+      await updateProject(projectId, { customerId: next?.id ?? null });
       setShowCustomerSearch(false);
       setCustomerQuery("");
+      toast.success(next ? `ผูกกับลูกค้า ${next.fullName} แล้ว` : "เลิกผูกลูกค้าแล้ว");
       await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "บันทึกลูกค้าไม่สำเร็จ");
@@ -1266,9 +1541,11 @@ function useProjectDetailState() {
 
   // ไอเดียที่ 1: เติมอีเมลของ lead ล่วงหน้าในตัวเลือก (มีโอกาสตรงกับบัญชีที่ลงทะเบียนไว้มากสุด
   // เพราะอีเมลคือตัวตนที่ใช้ล็อกอิน) เพื่อให้ลูกค้าที่ตรงกันปรากฏขึ้นมาทันที
+  // เปลี่ยนลูกค้า (ผูกอยู่แล้ว) ไม่เติม — เปิดมาเห็นลูกค้าล่าสุดเลย ไม่ใช่ค้นซ้ำหาคนเดิม
   function openCustomerSearch() {
-    setCustomerQuery(detail?.lead?.email ?? detail?.lead?.name ?? "");
+    setCustomerQuery(detail?.project.customer ? "" : (detail?.lead?.email ?? detail?.lead?.name ?? ""));
     setShowCreateCustomer(false);
+    setShowLeadPicker(false);
     setShowCustomerSearch((v) => !v);
   }
 
@@ -1282,12 +1559,18 @@ function useProjectDetailState() {
     });
     setAccessLink(null);
     setShowCustomerSearch(false);
+    setShowLeadPicker(false);
     setShowCreateCustomer((v) => !v);
   }
 
   // ออกลิงก์เข้าใช้: fromForm=true ใช้ข้อมูลในฟอร์ม (สร้างบัญชีจากคำขอ); false = ลูกค้าผูกอยู่แล้ว
   // (ส่ง body ว่าง ให้ backend ใช้ลูกค้าเดิม เช่น ออกลิงก์ใหม่ตอนลูกค้าลืมรหัส)
   async function handleIssueAccessLink(fromForm: boolean) {
+    // ลูกค้าใหม่ที่ไม่มีคำขอ: ไม่มีข้อมูลให้ดึง ต้องกรอกเองครบ (เซิร์ฟเวอร์ตรวจซ้ำอีกชั้น)
+    if (fromForm && (!accessLinkForm.email.trim() || !accessLinkForm.fullName.trim())) {
+      toast.error("กรอกอีเมลและชื่อ-นามสกุลของลูกค้า");
+      return;
+    }
     setIssuingLink(true);
     try {
       const res = await issueCustomerAccessLink(projectId, fromForm ? accessLinkForm : undefined);
@@ -1317,22 +1600,37 @@ function useProjectDetailState() {
   // โปรเจกต์เปล่าถูกโยงกลับไปยังคำขอที่มันควรเป็นของได้
   async function openLeadPicker() {
     const next = !showLeadPicker;
+    setShowCustomerSearch(false);
+    setShowCreateCustomer(false);
     setShowLeadPicker(next);
     if (!next) return;
     setLoadingLeads(true);
     try {
       const res = await listLeads();
-      setUnlinkedLeads(
-        res.leads.filter(
-          (l) => !l.projectId && l.status !== "CLOSED" && l.status !== "REJECTED",
-        ),
-      );
+      setUnlinkedLeads(res.leads.filter(isOpenLead));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "โหลดคำขอไม่สำเร็จ");
     } finally {
       setLoadingLeads(false);
     }
   }
+
+  // โครงการที่ยังไม่ผูกอะไรเลย: นับคำขอที่รอโครงการไว้โชว์บนทางเลือก "มาจากคำขอ"
+  const needsOwner = Boolean(detail && !detail.project.customer && !detail.lead);
+  useEffect(() => {
+    if (!needsOwner) return;
+    let stale = false;
+    listLeads()
+      .then((res) => {
+        if (!stale) setPendingLeadCount(res.leads.filter(isOpenLead).length);
+      })
+      .catch(() => {
+        if (!stale) setPendingLeadCount(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [needsOwner]);
 
   async function handleLinkLead(leadId: string) {
     setLinkingLead(true);
@@ -1392,49 +1690,87 @@ function useProjectDetailState() {
       materialUnitPrice: material?.materialUnitPrice ?? f.materialUnitPrice,
       laborUnitPrice: material?.laborUnitPrice ?? f.laborUnitPrice,
     }));
+    // สูตรของวัสดุในคลังโผล่เป็นแถวให้เห็น/แก้ได้เลย (เดิมซ่อนไว้แล้วให้เซิร์ฟเวอร์ดึงเองตอนบันทึก
+    // ผู้ใช้จึงไม่รู้ว่าค่าวัสดุมาจากไหน) · วัสดุไม่มีสูตร = กลับเป็นใส่ราคาเอง
+    if (material) setAddComponents(componentRowsFrom(material.components));
   }
 
-  async function submitAdd() {
-    const usesDriver = addForm.qtyBasis !== "MANUAL";
-    // MANUAL ต้องมีปริมาณ; ฐานอ้างค่าวัดต้องมีสัมประสิทธิ์ต่อ 1 หน่วย
-    if (!addForm.categoryId) return;
-    if (usesDriver ? !addForm.qtyCoefficient : !addForm.quantity) return;
+  /** ตารางแสดงทีละหมวด — เปิดหมวดที่เพิ่งรับบรรทัดใหม่ ไม่งั้นบรรทัดใหม่มองไม่เห็นจนดูเหมือนหาย */
+  function revealCategory(categoryId: string, focusId?: string) {
+    openBoqGroup(boqRootOf(categoryId, categoryById).key);
+    // หมวดยาวแบ่งหลายหน้า — พาไปหน้าที่บรรทัดใหม่อยู่ (เพิ่มหลายรายการไม่รู้ id = คงหน้าเดิม)
+    if (focusId) setBoqFocusId(focusId);
+    // หมวดย่อยที่รับบรรทัดใหม่อาจถูกยุบอยู่ — กางให้
+    // (คีย์ของก้อนหมวดย่อย = rootId-subId-ลำดับก้อน จึงล้างทุกก้อนของหมวดย่อยนั้น)
+    const addedRoot = boqRootOf(categoryId, categoryById).id;
+    const addedSub = categoryParts(categoryId, categoryById).sub?.id;
+    if (addedSub) {
+      const prefix = `${addedRoot}-${addedSub}-`;
+      setCollapsedSubs((prev) => new Set([...prev].filter((k) => !k.startsWith(prefix))));
+    }
+  }
+
+  /** คืน true เมื่อบันทึกสำเร็จ · keepOpen = ล้างฟอร์มไว้กรอกบรรทัดถัดไป (หมวดงานเดิมคงไว้) */
+  async function submitAdd(opts: { keepOpen?: boolean } = {}): Promise<boolean> {
+    const usesSheet = addForm.qtyBasis === "SHEET";
+    const usesDriver = addForm.qtyBasis !== "MANUAL" && !usesSheet;
+    const material = addForm.materialId ? materials.find((m) => m.id === addForm.materialId) : undefined;
+    // เดิมกดบันทึกแล้วเงียบไปเฉย ๆ เมื่อขาดช่อง — บอกให้รู้ว่าขาดอะไร
+    const problem = (() => {
+      if (!addForm.categoryId) return "เลือกหมวดงานก่อน";
+      if (!material && !addForm.name.trim()) return "กรอกชื่อรายการ หรือเลือกวัสดุจากคลัง";
+      if (!material && !addForm.unit.trim()) return "เลือกหน่วยนับ";
+      if (usesSheet && addSheetRows.length === 0) return "กรอกใบถอดแบบก่อนบันทึก";
+      if (usesDriver && !(Number(addForm.qtyCoefficient) > 0)) return "กรอกปริมาณต่อ 1 หน่วยของค่าวัด";
+      if (!usesSheet && !usesDriver && !(Number(addForm.quantity) > 0)) return "กรอกจำนวน (มากกว่า 0)";
+      return null;
+    })();
+    if (problem) {
+      toast.error(problem);
+      return false;
+    }
     // สูตรที่พนักงานกรอกเอง: ถ้ามี ให้ส่งไป (ทับราคาวัสดุ); ถ้าไม่กรอกและเลือกวัสดุแคตตาล็อกที่มีสูตร
     // ปล่อยเป็น undefined เพื่อให้เซิร์ฟเวอร์ดึงสูตรจากแคตตาล็อกมาให้เอง
     const addRecipe = componentRowsToInput(addComponents);
     const hasRecipe = addRecipe.length > 0;
-    // ตารางแสดงทีละหมวด — เพิ่มลงหมวดอื่นแล้วไม่สลับตาม บรรทัดใหม่จะมองไม่เห็นจนดูเหมือนหาย
-    const addedTo = boqRootOf(addForm.categoryId, categoryById).key;
+    // ผูกวัสดุในคลัง: ส่งราคาเฉพาะช่องที่แก้ทับราคาคลังจริง — เดิมไม่ส่งเลย ราคาที่พิมพ์แก้จึงหายเงียบ
+    // (เซิร์ฟเวอร์ถือว่าค่าที่ส่งมาชนะค่าคลัง · ไม่ได้แก้ = ปล่อยให้ใช้ค่าคลังตามเดิม)
+    const overrides = (field: "materialUnitPrice" | "laborUnitPrice") =>
+      material !== undefined && Number(addForm[field] || 0) !== Number(material[field]);
     try {
-      await addBoqItem(projectId, {
+      const added = await addBoqItem(projectId, {
         categoryId: addForm.categoryId,
-        materialId: addForm.materialId || undefined,
-        name: addForm.materialId ? undefined : addForm.name.trim(),
-        unit: addForm.materialId ? undefined : addForm.unit.trim(),
-        materialUnitPrice: addForm.materialId ? undefined : Number(addForm.materialUnitPrice),
-        laborUnitPrice: addForm.materialId ? undefined : Number(addForm.laborUnitPrice || 0),
+        materialId: material?.id,
+        name: material ? undefined : addForm.name.trim(),
+        unit: material ? undefined : addForm.unit.trim(),
+        materialUnitPrice:
+          !material || (overrides("materialUnitPrice") && !hasRecipe) ? Number(addForm.materialUnitPrice || 0) : undefined,
+        laborUnitPrice: !material || overrides("laborUnitPrice") ? Number(addForm.laborUnitPrice || 0) : undefined,
         qtyBasis: addForm.qtyBasis,
-        quantity: usesDriver ? undefined : Number(addForm.quantity),
+        quantity: usesDriver || usesSheet ? undefined : Number(addForm.quantity),
         qtyCoefficient: usesDriver ? Number(addForm.qtyCoefficient) : undefined,
-        wasteFactorPct: usesDriver ? Number(addForm.wasteFactorPct || 0) : undefined,
+        wasteFactorPct: usesDriver || usesSheet ? Number(addForm.wasteFactorPct || 0) : undefined,
+        takeoffRows: usesSheet ? addSheetRows : undefined,
         note: addForm.note.trim() || undefined,
-        components: hasRecipe ? addRecipe : undefined,
+        // ผูกวัสดุคลัง: ส่งเสมอ — [] = ผู้ใช้เลือก "ใส่ราคาเอง" (เซิร์ฟเวอร์ถือว่าตั้งใจไม่แตกวัสดุ
+        // ไม่ดึงสูตรคลังมาทับ) · กรอกเอง: ไม่มีสูตรก็ไม่ต้องส่ง
+        components: material || hasRecipe ? addRecipe : undefined,
       });
-      setAddForm(EMPTY_ADD_FORM);
+      const addedCategoryId = addForm.categoryId;
+      setAddForm(opts.keepOpen ? { ...EMPTY_ADD_FORM, categoryId: addedCategoryId } : EMPTY_ADD_FORM);
       setAddComponents([]);
-      setShowAddForm(false);
-      await refresh();
-      openBoqGroup(addedTo);
-      // หมวดย่อยที่รับบรรทัดใหม่อาจถูกยุบอยู่ — กางให้ ไม่งั้นบรรทัดที่เพิ่งเพิ่มมองไม่เห็นจนดูเหมือนหาย
-      // (คีย์ของก้อนหมวดย่อย = rootId-subId-ลำดับก้อน จึงล้างทุกก้อนของหมวดย่อยนั้น)
-      const addedRoot = boqRootOf(addForm.categoryId, categoryById).id;
-      const addedSub = categoryParts(addForm.categoryId, categoryById).sub?.id;
-      if (addedSub) {
-        const prefix = `${addedRoot}-${addedSub}-`;
-        setCollapsedSubs((prev) => new Set([...prev].filter((k) => !k.startsWith(prefix))));
-      }
+      setAddSheetRows([]);
+      setRebarOpen(false);
+      if (!opts.keepOpen) setShowAddForm(false);
+      // เพิ่มบรรทัดเปลี่ยนแค่ข้อมูลโครงการ — โหลดเงียบ ๆ ไม่ต้องขึ้นโครงร่างทั้งหน้า (ซึ่งถอดฟอร์มทิ้ง
+      // แล้วสร้างใหม่ หน้ากระพริบ และโฟกัสของ "บันทึก + เพิ่มต่อ" หลุด)
+      await silentRefresh();
+      revealCategory(addedCategoryId, added.item.id);
+      if (opts.keepOpen) toast.success("เพิ่มแล้ว — กรอกรายการถัดไปได้เลย");
+      return true;
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "เพิ่มรายการไม่สำเร็จ");
+      return false;
     }
   }
 
@@ -1452,16 +1788,8 @@ function useProjectDetailState() {
     setEditUnit(item.unit);
     setEditRebarOpen(false);
     setEditRebarLen("");
-    setEditComponents(
-      item.components.map((c) => ({
-        componentMaterialId: c.componentMaterialId ?? "",
-        name: c.name,
-        unit: c.unit,
-        qtyPerUnit: c.qtyPerUnit,
-        wasteFactorPct: c.wasteFactorPct ?? "",
-        unitPrice: c.unitPrice,
-      })),
-    );
+    setEditSheetRows(takeoffInputsOf(item.takeoffRows));
+    setEditComponents(componentRowsFrom(item.components));
   }
 
   // สลับวัสดุของบรรทัดที่กำลังแก้ไข → ดึงชื่อ/หน่วย/ราคาของวัสดุใหม่มาแทน (แก้ราคาต่อทับได้)
@@ -1475,28 +1803,26 @@ function useProjectDetailState() {
       setEditMaterialPrice(material.materialUnitPrice);
       setEditLaborPrice(material.laborUnitPrice);
       // สลับวัสดุ → แทนสูตรวัสดุย่อยด้วยสูตรของวัสดุใหม่ (หรือล้างเป็นก้อนเดียวถ้าวัสดุใหม่ไม่มีสูตร)
-      setEditComponents(
-        material.components.map((c) => ({
-          componentMaterialId: c.componentMaterialId ?? "",
-          name: c.name,
-          unit: c.unit,
-          qtyPerUnit: c.qtyPerUnit,
-          wasteFactorPct: c.wasteFactorPct ?? "",
-          unitPrice: c.unitPrice,
-        })),
-      );
+      setEditComponents(componentRowsFrom(material.components));
     }
   }
 
   async function submitEdit(itemId: string) {
-    const usesDriver = editBasis !== "MANUAL";
+    const usesSheet = editBasis === "SHEET";
+    const usesDriver = editBasis !== "MANUAL" && !usesSheet;
+    if (usesSheet && editSheetRows.length === 0) {
+      toast.error("กรอกใบถอดแบบก่อนบันทึก");
+      return;
+    }
     try {
       await updateBoqItem(projectId, itemId, {
         qtyBasis: editBasis,
         // ฐานอ้างค่าวัด: ส่งสัมประสิทธิ์ + เผื่อเสีย (เซิร์ฟเวอร์ถอดปริมาณจากค่าวัด); MANUAL: ส่งปริมาณ
-        quantity: usesDriver ? undefined : Number(editQuantity),
+        // ใบถอดแบบ: ส่งแถวทั้งชุด + เผื่อเสีย (เซิร์ฟเวอร์รวมเอง)
+        quantity: usesDriver || usesSheet ? undefined : Number(editQuantity),
         qtyCoefficient: usesDriver ? Number(editCoefficient) : undefined,
-        wasteFactorPct: usesDriver ? Number(editWaste || 0) : undefined,
+        wasteFactorPct: usesDriver || usesSheet ? Number(editWaste || 0) : undefined,
+        takeoffRows: usesSheet ? editSheetRows : undefined,
         // สลับวัสดุ + ชื่อ/หน่วยที่ตามมา ("" = ไม่ผูกวัสดุ → null)
         materialId: editMaterialId || null,
         name: editName.trim() || undefined,
@@ -1517,6 +1843,68 @@ function useProjectDetailState() {
         return;
       }
       toast.error(err instanceof ApiError ? err.message : "แก้ไขไม่สำเร็จ");
+    }
+  }
+
+  /** บันทึกใบถอดแบบที่เปิดจากตาราง (หรือเลิกใช้ — ปริมาณล่าสุดกลายเป็นจำนวนที่กรอกเอง) */
+  async function saveItemSheet(item: BoqItemDto, rows: TakeoffRowInput[] | null, waste: number | null) {
+    if (
+      !rows &&
+      !(await confirm(`เลิกใช้ใบถอดแบบของ “${item.name}”? แถวในใบจะถูกลบ ส่วนจำนวน ${item.quantity} ${item.unit} ยังอยู่`, {
+        confirmLabel: "เลิกใช้ใบถอดแบบ",
+        variant: "danger",
+      }))
+    ) {
+      return;
+    }
+    try {
+      await updateBoqItem(
+        projectId,
+        item.id,
+        rows ? { qtyBasis: "SHEET", takeoffRows: rows, wasteFactorPct: waste } : { qtyBasis: "MANUAL", quantity: Number(item.quantity) },
+      );
+      setSheetItem(null);
+      await silentRefresh();
+      toast.success(rows ? "บันทึกใบถอดแบบแล้ว" : "เลิกใช้ใบถอดแบบแล้ว — ปริมาณล่าสุดยังอยู่ แก้เป็นตัวเลขได้ตามปกติ");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        toast.info("ระบบสร้างเวอร์ชันใหม่ของ BOQ แล้ว (เนื่องจากมีการส่งใบเสนอราคาไปก่อนหน้านี้) กรุณาเปิดใบถอดแบบอีกครั้ง");
+        setSheetItem(null);
+        await silentRefresh();
+        return;
+      }
+      toast.error(err instanceof ApiError ? err.message : "บันทึกใบถอดแบบไม่สำเร็จ");
+    }
+  }
+
+  /** บันทึกตัวคิดกระเบื้อง (หรือเลิกใช้) — วัสดุย่อยคิดที่เซิร์ฟเวอร์ด้วยสูตรเดียวกับพรีวิว */
+  async function saveItemTile(item: BoqItemDto, payload: TileCalcApply | null, fallbackPrice?: number) {
+    if (
+      !payload &&
+      !(await confirm(`เลิกใช้ตัวคิดกระเบื้องของ “${item.name}”? ค่าที่กรอกในตัวคิดจะหายไป ส่วนปริมาณ ${item.quantity} ${item.unit} ยังอยู่`, {
+        confirmLabel: "เลิกใช้ตัวคิด",
+        variant: "danger",
+      }))
+    ) {
+      return;
+    }
+    try {
+      await updateBoqItem(
+        projectId,
+        item.id,
+        payload ?? { tileCalc: null, ...(fallbackPrice === undefined ? {} : { materialUnitPrice: fallbackPrice }) },
+      );
+      setTileItem(null);
+      await silentRefresh();
+      toast.success(payload ? "บันทึกตัวคิดกระเบื้องแล้ว" : "เลิกใช้ตัวคิดกระเบื้องแล้ว");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        toast.info("ระบบสร้างเวอร์ชันใหม่ของ BOQ แล้ว (เนื่องจากมีการส่งใบเสนอราคาไปก่อนหน้านี้) กรุณาเปิดตัวคิดอีกครั้ง");
+        setTileItem(null);
+        await silentRefresh();
+        return;
+      }
+      toast.error(err instanceof ApiError ? err.message : "บันทึกตัวคิดกระเบื้องไม่สำเร็จ");
     }
   }
 
@@ -1549,6 +1937,37 @@ function useProjectDetailState() {
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "สร้างใบเสนอราคาไม่สำเร็จ");
     }
+  }
+
+  // ส่งออก Excel — ชื่อไฟล์ตั้งฝั่งนี้ (header ของเซิร์ฟเวอร์ใช้กับการเปิดลิงก์ตรง)
+  const [exportingExcel, setExportingExcel] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [showBulkAdd, setShowBulkAdd] = useState(false);
+
+  async function exportExcel(key: string, path: string, fileName: string) {
+    setExportingExcel(key);
+    try {
+      await downloadFile(path, fileName);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "ส่งออก Excel ไม่สำเร็จ");
+    } finally {
+      setExportingExcel(null);
+    }
+  }
+
+  function exportBoqExcel() {
+    if (!detail) return;
+    const v = detail.currentVersion;
+    void exportExcel(
+      "boq",
+      `/api/projects/${detail.project.id}/boq/export.xlsx`,
+      `BOQ-${detail.project.projectNo}-v${v.versionNo}-ภายใน.xlsx`,
+    );
+  }
+
+  function exportQuoteExcel(quoteId: string, quoteNo: string) {
+    if (!detail) return;
+    void exportExcel(quoteId, `/api/projects/${detail.project.id}/quotes/${quoteId}/export.xlsx`, `${quoteNo}-BOQ.xlsx`);
   }
 
   async function handleDeleteQuote(quoteId: string, quoteNo: string) {
@@ -1660,9 +2079,19 @@ function useProjectDetailState() {
   }
 
   async function handleDeleteTemplate(templateId: string) {
-    if (!(await confirm("ลบแม่แบบนี้ใช่หรือไม่?", { confirmLabel: "ลบ", variant: "danger" }))) return;
+    // ข้อความเดียวกับหน้าแม่แบบ — ที่นี่ก็เป็นการย้ายเข้าถังขยะ ไม่ใช่ลบทิ้งถาวร
+    if (
+      !(await confirm("ย้ายแม่แบบนี้ไปถังขยะ? กู้คืนได้ภายหลังที่เมนูถังขยะ", {
+        confirmLabel: "ลบ",
+      }))
+    )
+      return;
     try {
       await deleteTemplate(templateId);
+      toast.undo("ย้ายแม่แบบไปถังขยะแล้ว", async () => {
+        await restoreTrashItem("template", templateId);
+        await refresh();
+      });
       await refresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ลบแม่แบบไม่สำเร็จ");
@@ -1690,7 +2119,12 @@ function useProjectDetailState() {
   // ใช้ replace ไม่ให้ทุกครั้งที่กดแท็บไปกองอยู่ในประวัติการกดย้อนกลับ
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
-  const tab: ProjectTab = isProjectTab(rawTab) ? rawTab : "overview";
+  const legacyContractView = rawTab ? LEGACY_CONTRACT_TABS[rawTab] : undefined;
+  const tab: ProjectTab = legacyContractView ? "contract" : isProjectTab(rawTab) ? rawTab : "overview";
+  // มุมมองย่อย/สัญญาที่เลือกในแท็บสัญญาและการเงิน อยู่ใน URL เหมือนแท็บ (รีเฟรช/ส่งลิงก์แล้วอยู่ที่เดิม)
+  const rawView = searchParams.get("view");
+  const requestedContractView: ContractView | null = isContractView(rawView) ? rawView : (legacyContractView ?? null);
+  const selectedContractParam = searchParams.get("contract");
   function goTab(next: ProjectTab) {
     const params = new URLSearchParams(searchParams);
     if (next === "overview") params.delete("tab");
@@ -1699,34 +2133,142 @@ function useProjectDetailState() {
   }
   // หมวดที่เปิดในแท็บ BOQ ก็อยู่ใน query string เช่นกัน (?cat=C) — ไม่มี = หน้าสรุปยอดทุกหมวด
   const boqCatParam = searchParams.get("cat");
+  // หน้าของตาราง BOQ (?page=) — ผูกกับหมวดที่เปิด เปลี่ยนหมวด = กลับหน้า 1
+  const boqPageParam = Math.max(1, Math.floor(Number(searchParams.get("page"))) || 1);
+  // บรรทัดที่ต้องพาไปให้เห็น (เพิ่งเพิ่ม/เลื่อนลำดับ/เปิดแก้จากแท็บอื่น) — ตารางหาหน้าของมันแล้วเปิดให้
+  const [boqFocusId, setBoqFocusId] = useState<string | null>(null);
+
+  /** กลับขึ้นไปที่แถบหมวด — กดจากท้ายตารางยาว ๆ แล้วเนื้อหาใหม่จะได้ไม่เริ่มกลางจอ */
+  function scrollToBoqTop() {
+    requestAnimationFrame(() => {
+      // วัดจากหมุดที่ไม่ติดจอ — ตัวแถบเองติดจออยู่ ตำแหน่งของมันไม่บอกว่าเลื่อนมาไกลแค่ไหน
+      const anchor = document.getElementById("boq-group-anchor");
+      // 48 = แถบหัวโครงการที่ติดจออยู่ (StickyPageHeader h-12)
+      const top = anchor ? anchor.getBoundingClientRect().top - 48 : 0;
+      if (top < 0) window.scrollTo({ top: window.scrollY + top });
+    });
+  }
+
   function openBoqGroup(key: string | null, scroll = false) {
     // แผงแก้ไขเป็นแถวในตาราง สลับหมวดแล้วแถวหายไปทั้งที่ยังไม่บันทึก จึงปิดให้ก่อน
     setEditingId(null);
+    setBoqFocusId(null);
     setSearchParams(
       (prev) => {
         const params = new URLSearchParams(prev);
+        // หมวดใหม่เริ่มหน้า 1 · เปิดหมวดเดิมซ้ำ (เช่น หลังเพิ่มบรรทัด) คงหน้าเดิมไว้
+        if (params.get("cat") !== key) params.delete("page");
         if (key) params.set("cat", key);
         else params.delete("cat");
         return params;
       },
       { replace: true },
     );
-    // กดจากท้ายตารางหมวดยาว ๆ → พากลับขึ้นมาที่แถบหมวด ไม่งั้นหมวดใหม่เริ่มกลางจอ
-    if (scroll) {
-      requestAnimationFrame(() => {
-        // วัดจากหมุดที่ไม่ติดจอ — ตัวแถบเองติดจออยู่ ตำแหน่งของมันไม่บอกว่าเลื่อนมาไกลแค่ไหน
-        const anchor = document.getElementById("boq-group-anchor");
-        // 48 = แถบหัวโครงการที่ติดจออยู่ (StickyPageHeader h-12)
-        const top = anchor ? anchor.getBoundingClientRect().top - 48 : 0;
-        if (top < 0) window.scrollTo({ top: window.scrollY + top });
-      });
-    }
+    if (scroll) scrollToBoqTop();
+  }
+
+  /** เปลี่ยนหน้าตาราง BOQ — แผงแก้ไขที่ค้างอยู่ปิดก่อน (แถวของมันจะหายไปกับหน้าเดิม)
+      keepEditing = ตารางพาไปหน้าของบรรทัดที่กำลังเปิดแก้เอง (แผงต้องอยู่ต่อ) */
+  function setBoqPage(page: number, scroll = true, keepEditing = false) {
+    if (!keepEditing) setEditingId(null);
+    setBoqFocusId(null);
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (page > 1) params.set("page", String(page));
+        else params.delete("page");
+        return params;
+      },
+      { replace: true },
+    );
+    if (scroll) scrollToBoqTop();
+  }
+
+  /** จากแท็บอื่น (เช่น สั่งซื้อวัสดุ) → เปิดแท็บ BOQ ที่หมวดของบรรทัด แล้วกางแผงแก้ไขของบรรทัดนั้น
+      เปลี่ยน tab + cat ในการอัปเดตเดียว — เรียก goTab แล้ว openBoqGroup ต่อกันจะทับกันเอง */
+  function editBoqLine(item: BoqItemDto) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set("tab", "boq");
+        params.set("cat", boqRootOf(item.categoryId, categoryById).key);
+        params.delete("page");
+        return params;
+      },
+      { replace: true },
+    );
+    startEdit(item);
+    // หมวดยาวแบ่งหลายหน้า — ให้ตารางเปิดหน้าที่บรรทัดนี้อยู่
+    setBoqFocusId(item.id);
+    // แถวแก้ไขขึ้นหลังแท็บ BOQ วาดเสร็จ — ลองหาซ้ำสั้น ๆ (rAF ไม่ทำงานตอนแถบเบราว์เซอร์ซ่อน)
+    let tries = 0;
+    const reveal = () => {
+      const row = document.querySelector("[data-boq-edit-row]");
+      if (!row) {
+        if (++tries < 20) setTimeout(reveal, 50);
+        return;
+      }
+      row.scrollIntoView({ block: "start" });
+      // หัวโครงการ + แถบหมวด + หัวตารางติดจอซ้อนกันอยู่ — วัดขอบล่างหัวตารางแล้วเลื่อนถอยให้หัวแผงแก้ไขไม่จมใต้มัน
+      const head = row.closest("table")?.querySelector("thead");
+      const hidden = (head?.getBoundingClientRect().bottom ?? 0) + 8 - row.getBoundingClientRect().top;
+      if (hidden > 0) window.scrollBy({ top: -hidden });
+    };
+    setTimeout(reveal, 0);
   }
 
   // สรุปวัสดุโหลดตอนถูกเปิดเท่านั้น — เดิมเป็นแผงพับได้ ตอนนี้แท็บทำหน้าที่เปิด/ปิดแทน
   useEffect(() => {
-    if (tab === "materials") setShowMaterialSummary(true);
   }, [tab]);
+
+  // เงินตามสัญญาของงานนี้ (ภาพรวม + หัวการ์ดสัญญา) — โหลดใหม่เมื่อสลับแท็บ/มุมมอง/สัญญา หรือปิดแผงแก้สัญญา
+  // เพราะการบันทึกรับเงินและงานเพิ่ม-ลดเกิดในแผงข้างใน ตัวเลขที่อื่นต้องตามทัน
+  const contractMoney = useContractMoney(
+    projectId,
+    contracts,
+    `${editingContractId}|${tab}|${rawView}|${selectedContractParam}`,
+  );
+
+  /** สัญญาที่ลงนามแล้วที่แท็บสัญญาและการเงินแสดงอยู่ — ไม่ได้เลือก = ฉบับที่เก็บเงินได้ฉบับแรก */
+  const signedContracts = contracts.filter((c) => c.signedAt);
+  const isLegacyContract = (id: string) => {
+    const v = contractMoney.get(id);
+    return Boolean(v && !v.hasPlan && v.contractAmount == null);
+  };
+  const activeContract =
+    signedContracts.find((c) => c.id === selectedContractParam) ??
+    signedContracts.find((c) => !isLegacyContract(c.id)) ??
+    signedContracts[0] ??
+    null;
+  // ยังไม่ลงนามสักฉบับ = มีแต่งานเอกสาร · ลงนามแล้ว = เปิดมาที่เรื่องเงินก่อน
+  const contractView: ContractView = activeContract ? (requestedContractView ?? "payments") : "documents";
+
+  function setContractParams(patch: { view?: ContractView; contract?: string | null }) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set("tab", "contract");
+        if (patch.view) params.set("view", patch.view);
+        if (patch.contract !== undefined) {
+          if (patch.contract) params.set("contract", patch.contract);
+          else params.delete("contract");
+        }
+        return params;
+      },
+      { replace: true },
+    );
+  }
+
+  /** ไปที่งวดและรับเงินของสัญญาฉบับนั้น — ใช้จากการ์ดภาพรวม (ลิงก์จากแดชบอร์ดใช้ URL ตรง) */
+  function openContractPanel(contractId: string) {
+    setContractParams({ view: "payments", contract: contractId });
+    setTimeout(() => {
+      const el = document.getElementById("contracts-section");
+      if (!el) return;
+      el.scrollIntoView({ block: "start" });
+      window.scrollBy({ top: -56 }); // แถบหัวโครงการที่ติดจอ
+    }, 0);
+  }
 
   return {
     confirm,
@@ -1755,10 +2297,6 @@ function useProjectDetailState() {
     setNewContractTemplateId,
     templates,
     setTemplates,
-    materialSummary,
-    setMaterialSummary,
-    showMaterialSummary,
-    setShowMaterialSummary,
     loading,
     setLoading,
     error,
@@ -1802,6 +2340,7 @@ function useProjectDetailState() {
     showLeadPicker,
     setShowLeadPicker,
     unlinkedLeads,
+    pendingLeadCount,
     setUnlinkedLeads,
     loadingLeads,
     setLoadingLeads,
@@ -1812,6 +2351,16 @@ function useProjectDetailState() {
     addForm,
     setAddForm,
     addComponents,
+    addSheetRows,
+    setAddSheetRows,
+    sheetItem,
+    setSheetItem,
+    saveItemSheet,
+    tileItem,
+    setTileItem,
+    saveItemTile,
+    showStructural,
+    setShowStructural,
     setAddComponents,
     rebarOpen,
     setRebarOpen,
@@ -1852,6 +2401,8 @@ function useProjectDetailState() {
     editRebarLen,
     setEditRebarLen,
     editComponents,
+    editSheetRows,
+    setEditSheetRows,
     setEditComponents,
     customPriceInput,
     setCustomPriceInput,
@@ -1865,16 +2416,26 @@ function useProjectDetailState() {
     setOverheadInput,
     vatInput,
     setVatInput,
+    contingencyInput,
+    setContingencyInput,
     discMode,
     setDiscMode,
     discInput,
     setDiscInput,
     discNote,
     setDiscNote,
+    roundInput,
+    setRoundInput,
     savingRates,
     setSavingRates,
     editingContractId,
     setEditingContractId,
+    contractMoney,
+    openContractPanel,
+    signedContracts,
+    activeContract,
+    contractView,
+    setContractParams,
     showEditInfo,
     setShowEditInfo,
     savingInfo,
@@ -1884,14 +2445,19 @@ function useProjectDetailState() {
     categoryById,
     itemCategories,
     categoryOptions,
+    subgroupOptions,
+    topCategoryOf,
     materialOptions,
     materialById,
-    loadMaterialSummary,
     refresh,
     silentRefresh,
     reloadQuotes,
     openEditInfo,
     handleSaveInfo,
+    infoOpenings,
+    setInfoOpenings,
+    showOpenings,
+    setShowOpenings,
     openRates,
     handleSaveRates,
     handleSetCustomPrice,
@@ -1907,11 +2473,20 @@ function useProjectDetailState() {
     selectMaterial,
     submitAdd,
     startEdit,
+    editBoqLine,
     selectEditMaterial,
     submitEdit,
     handleDelete,
     handleCreateQuote,
     handleDeleteQuote,
+    exportingExcel,
+    exportBoqExcel,
+    showImport,
+    setShowImport,
+    showBulkAdd,
+    setShowBulkAdd,
+    revealCategory,
+    exportQuoteExcel,
     handleQuoteTransition,
     openValidity,
     saveValidity,
@@ -1930,6 +2505,10 @@ function useProjectDetailState() {
     goTab,
     boqCatParam,
     openBoqGroup,
+    boqPageParam,
+    setBoqPage,
+    boqFocusId,
+    setBoqFocusId,
   };
 }
 
@@ -1940,7 +2519,11 @@ function takeoffDriversOf(project: ProjectDetailDto["project"]): TakeoffDriversU
   const num = (v: string | null | undefined) => (v ? Number(v) : null);
   return {
     floorArea: num(project.areaSqm),
-    wallArea: num(project.wallAreaSqm),
+    // ผนังสุทธิ = ผนัง − ช่องเปิด (ประตู/หน้าต่าง) — ตรงกับ resolveDrivers ฝั่งเซิร์ฟเวอร์
+    wallArea:
+      project.wallAreaSqm == null
+        ? null
+        : Math.max(0, Math.round((Number(project.wallAreaSqm) - Number(project.openingAreaSqm ?? 0)) * 100) / 100),
     perimeter: num(project.perimeterM),
     volume: num(project.concreteVolumeM3),
     footprint: num(project.footprintSqm),
@@ -1951,7 +2534,7 @@ function takeoffDriversOf(project: ProjectDetailDto["project"]): TakeoffDriversU
 
 /**
  * วันที่ของแต่ละขั้นสำหรับแถบขั้นตอน — ดึงจากเอกสารที่มีอยู่จริง (สร้างโครงการ, ใบเสนอราคาที่ส่ง
- * ครั้งแรก, ใบเสนอราคาที่ลูกค้ายอมรับ) ขั้น "ส่งมอบ" ไม่มี timestamp แยก จึงเว้นวันที่ไว้
+ * ครั้งแรก, ใบเสนอราคาที่ลูกค้ายอมรับ, วันที่กดส่งมอบ) — โครงการที่ส่งมอบก่อนระบบเก็บวันที่ไม่มีวันที่
  */
 function stepDatesOf(
   project: ProjectDetailDto["project"],
@@ -1967,7 +2550,7 @@ function stepDatesOf(
     DRAFT: project.createdAt,
     QUOTED: firstSentAt ?? null,
     APPROVED: acceptedAt,
-    COMPLETED: null,
+    COMPLETED: project.completedAt ?? null,
   };
 }
 
@@ -1979,7 +2562,11 @@ function rejectionReasonOf(quotes: QuoteDto[]): string | null {
   );
 }
 
-/** จัดกลุ่ม BOQ ตามรากหมวดงาน (เดินขึ้นสายพ่อแม่จนสุด) เรียงตามลำดับที่พบครั้งแรก (= ตาม sortOrder) */
+/**
+ * จัดกลุ่ม BOQ ตามรากหมวดงาน (เดินขึ้นสายพ่อแม่จนสุด) แล้วเรียงหมวดตาม sortOrder ของหมวดเอง
+ * — ต้องตรงกับ groupBoqItemsByTopCategory ฝั่งเซิร์ฟเวอร์ที่ PDF/Excel/หน้าลูกค้าใช้ เดิมเรียงตาม
+ * "บรรทัดแรกที่พบ" แล้วโครงการที่เพิ่มหมวด E ก่อน B ขึ้นจอเป็น E F B C แต่ใบเสนอราคาพิมพ์ B C E F
+ */
 function groupBoqByRoot(items: BoqItemDto[], categoryById: Map<string, WorkCategoryDto>): BoqGroup[] {
   const groups: BoqGroup[] = [];
   const byRoot = new Map<string, BoqGroup>();
@@ -1994,7 +2581,9 @@ function groupBoqByRoot(items: BoqItemDto[], categoryById: Map<string, WorkCateg
     g.items.push(item);
     g.subtotal += Number(item.lineTotal);
   }
-  return groups;
+  // sort ของ JS คงลำดับเดิมเมื่อค่าเท่ากัน — หมวดที่ sortOrder ซ้ำกันจึงเรียงตามที่พบเหมือนฝั่งเซิร์ฟเวอร์
+  const orderOf = (g: BoqGroup) => categoryById.get(g.rootId)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  return groups.sort((a, b) => orderOf(a) - orderOf(b));
 }
 
 /**
@@ -2056,7 +2645,13 @@ type SubheaderRow = Extract<BoqRenderRow, { type: "subheader" }>;
 
 /** ราคาสุทธิโดยประมาณหลังเปลี่ยนต้นทุนตรง — null ถ้ายังคิดยอดบรรทัดไม่ได้ */
 function netWithDirect(version: ProjectVersionDto, newDirect: number): number {
-  return previewNetPrice(newDirect, Number(version.overheadProfitPct), Number(version.vatPct));
+  return previewNetPrice(
+    newDirect,
+    Number(version.overheadProfitPct),
+    Number(version.vatPct),
+    versionDiscount(version),
+    version.roundingUnit,
+  );
 }
 
 /**
@@ -2079,8 +2674,13 @@ function linePreviewOf(
 
   let previewLineTotal: number | null = null;
   let previewNet: number | null = null;
+  let previewQty: number | null = null;
   if (editingItem) {
-    const qty = previewQtyOf(s.editBasis, s.editQuantity, s.editCoefficient, s.editWaste, driverValueOf(s.editBasis));
+    const qty = previewQtyOf(s.editBasis, s.editQuantity, s.editCoefficient, s.editWaste, driverValueOf(s.editBasis), {
+      rows: s.editSheetRows,
+      unit: s.editUnit,
+    });
+    previewQty = qty;
     const materialPrice = editHasRecipe ? editDerivedPrice : Number(s.editMaterialPrice);
     previewLineTotal = lineTotalOf(qty, materialPrice, Number(s.editLaborPrice));
     if (previewLineTotal != null) {
@@ -2091,7 +2691,11 @@ function linePreviewOf(
     }
   } else if (s.showAddForm) {
     const f = s.addForm;
-    const qty = previewQtyOf(f.qtyBasis, f.quantity, f.qtyCoefficient, f.wasteFactorPct, driverValueOf(f.qtyBasis));
+    const qty = previewQtyOf(f.qtyBasis, f.quantity, f.qtyCoefficient, f.wasteFactorPct, driverValueOf(f.qtyBasis), {
+      rows: s.addSheetRows,
+      unit: f.unit,
+    });
+    previewQty = qty;
     const materialPrice = addHasRecipe ? addDerivedPrice : Number(f.materialUnitPrice);
     previewLineTotal = lineTotalOf(qty, materialPrice, Number(f.laborUnitPrice || 0));
     if (previewLineTotal != null) {
@@ -2105,9 +2709,37 @@ function linePreviewOf(
     editDerivedPrice,
     previewLineTotal,
     previewNet,
+    previewQty,
     // แสดงพรีวิวยอดสุทธิเฉพาะเมื่อค่าต่างจากของเดิมจริง (ไม่งั้นรก)
     showNetPreview: previewNet != null && previewNet !== Number(version.netPrice),
   };
+}
+
+/**
+ * สูตรวัสดุที่มีอยู่แล้วให้คัดลอกเป็นจุดเริ่ม — วัสดุในคลังที่มีสูตร + บรรทัดในโครงการนี้ที่แตกวัสดุไว้
+ * (บรรทัดที่ตัวคิดกระเบื้องตั้งราคาไม่นับ: วัสดุย่อยของมันคิดจากขนาดแผ่น ไม่ใช่สูตรที่ใช้ซ้ำได้)
+ */
+function recipeSourcesOf(materials: MaterialDto[], items: BoqItemDto[]): RecipeSource[] {
+  const fromCatalog = materials
+    .filter((m) => m.active && m.components.length > 0)
+    .map((m) => ({
+      value: `m:${m.id}`,
+      label: `คลัง · ${m.code ? `${m.code} ` : ""}${m.name} (${m.components.length} วัสดุ)`,
+      rows: componentRowsFrom(m.components),
+    }));
+  const fromProject = items
+    .filter((i) => i.components.length > 0 && !i.tileCalc?.priced)
+    .map((i) => ({
+      value: `i:${i.id}`,
+      label: `ในโครงการนี้ · ${i.name} (${i.components.length} วัสดุ)`,
+      rows: componentRowsFrom(i.components),
+    }));
+  return [...fromProject, ...fromCatalog];
+}
+
+/** คำขอที่ยังรอโครงการ (ยังไม่ผูก และยังไม่ปิด/ปฏิเสธ) */
+function isOpenLead(l: LeadDto): boolean {
+  return !l.projectId && l.status !== "CLOSED" && l.status !== "REJECTED";
 }
 
 /** แท็บที่โชว์จริงขึ้นกับชนิดโครงการ: โครงการกำหนดเองไม่มี BOQ/สรุปวัสดุ และสัญญาโผล่เมื่อถึงสถานะ */
@@ -2116,27 +2748,35 @@ function visibleTabsOf(
   itemCount: number,
   quoteCount: number,
   contractCount: number,
-): { key: ProjectTab; label: string; count?: number }[] {
+  signedContractCount: number,
+): { key: ProjectTab; label: string; count?: number; badge?: string }[] {
   const isCustom = project.type === "CUSTOM";
-  const tabs: { key: ProjectTab; label: string; count?: number }[] = [{ key: "overview", label: "ภาพรวม" }];
+  const tabs: { key: ProjectTab; label: string; count?: number; badge?: string }[] = [{ key: "overview", label: "ภาพรวม" }];
   if (!isCustom) tabs.push({ key: "boq", label: "BOQ", count: itemCount });
   tabs.push({ key: "quotes", label: "ใบเสนอราคา", count: quoteCount });
   if (CONTRACT_ELIGIBLE_STATUSES.has(project.status)) {
-    tabs.push({ key: "contracts", label: "สัญญา", count: contractCount });
+    // เรื่องของสัญญาทั้งหมดอยู่แท็บเดียว (เอกสาร · งวดรับเงิน · งานเพิ่ม-ลด) — เดิมแยก "สัญญา" กับ "รับเงิน"
+    // แล้วงานเพิ่ม-ลดไปอยู่ใต้สัญญา ผู้ใช้สับสนว่าอะไรอยู่ไหน · นับเลขเฉพาะตอนยังไม่ลงนาม (ฉบับร่างที่รอเลือก)
+    tabs.push({
+      key: "contract",
+      label: "สัญญาและการเงิน",
+      count: signedContractCount === 0 && contractCount > 0 ? contractCount : undefined,
+    });
+    // ต้นทุนจริงเริ่มมีความหมายเมื่อลูกค้าตกลงราคาแล้ว (ก่อนนั้นยังไม่มีงานให้จ่าย)
+    tabs.push({ key: "costs", label: "ต้นทุนจริง" });
   }
-  if (!isCustom && itemCount > 0) tabs.push({ key: "materials", label: "สรุปวัสดุ" });
   return tabs;
 }
 
 /**
  * ผู้ติดต่อของโครงการ — ยึดบัญชีลูกค้าเป็นหลัก ถ้ายังไม่มีค่อยใช้ข้อมูลจากคำขอ
- * เบอร์โทรมาจากคำขอเสมอ เพราะ CustomerDto มีแค่ id/email/fullName ไม่มีเบอร์
+ * เบอร์โทรก็เช่นกัน: เบอร์ในโปรไฟล์ลูกค้าก่อน ไม่มีค่อยใช้เบอร์จากคำขอ
  */
 function contactOf(project: ProjectDetailDto["project"], lead: ProjectDetailDto["lead"]) {
   return {
     contactName: project.customer?.fullName ?? lead?.name ?? null,
     contactEmail: project.customer?.email ?? lead?.email ?? null,
-    contactPhone: lead?.phone ?? null,
+    contactPhone: project.customer?.phone ?? lead?.phone ?? null,
     // คนยื่นคำขออาจไม่ใช่เจ้าของบัญชี (เช่น ลูกชายยื่นแทนพ่อ) — ต้องโชว์แยกไว้ ไม่งั้นข้อมูลหาย
     differentRequester: Boolean(project.customer && lead && lead.name !== project.customer.fullName),
   };
@@ -2149,6 +2789,22 @@ type PriceCell = {
   empty?: boolean;
   negative?: boolean;
   hint?: ReactNode;
+  /** สีพื้นอ่อนของการ์ด (แบบเดียวกับการ์ดแดชบอร์ด) — ไม่ใส่ = เทา */
+  tone?: PriceTone;
+  icon?: LucideIcon;
+};
+
+/**
+ * สีการ์ดตัวเลขเงินของโครงการ — ดีไซน์เดียวกับการ์ดแดชบอร์ด (ผู้ใช้ขอให้เหมือนกัน): พื้นสีอ่อนตามความหมาย
+ * + วงกลมจางมุมล่างขวา · สีบอกบทบาทของตัวเลข: เทา = ต้นทุน · ฟ้า = ส่วนที่บวกเพิ่ม · อำพัน = ส่วนที่หัก ·
+ * เขียวหัวเป็ด = ภาษี · เขียนคลาสเต็มเพราะ Tailwind อ่านได้เฉพาะ literal
+ */
+type PriceTone = "slate" | "blue" | "amber" | "teal";
+const PRICE_TONE: Record<PriceTone, { card: string; value: string; icon: string }> = {
+  slate: { card: "bg-slate-100", value: "text-slate-800", icon: "text-slate-500" },
+  blue: { card: "bg-blue-50", value: "text-blue-900", icon: "text-blue-600" },
+  amber: { card: "bg-amber-50", value: "text-amber-900", icon: "text-amber-700" },
+  teal: { card: "bg-teal-50", value: "text-teal-900", icon: "text-teal-700" },
 };
 
 function discountCell(version: ProjectVersionDto, hint?: ReactNode): PriceCell {
@@ -2160,6 +2816,9 @@ function discountCell(version: ProjectVersionDto, hint?: ReactNode): PriceCell {
     empty: !hasDiscount,
     negative: true,
     hint,
+    // ยังไม่ลด = เทา (ไม่มีอะไรให้ดู) · ลดแล้ว = อำพัน (ส่วนที่หักออก)
+    tone: hasDiscount ? "amber" : "slate",
+    icon: BadgePercent,
   };
 }
 
@@ -2172,10 +2831,34 @@ function discountCell(version: ProjectVersionDto, hint?: ReactNode): PriceCell {
  * แยกก้อน "ค่าดำเนินการ+กำไร" ออกเป็นสองส่วนเพื่อแสดงเป็นบรรทัดย่อย — ตัวเลขหลักยังเป็น
  * ก้อนรวมเหมือนเดิม เพราะมันคือสิ่งที่บวกเข้าไปในราคาจริง ๆ
  */
+/**
+ * ช่อง "ปัดเศษ" — โชว์เฉพาะเวอร์ชันที่หักจริง เพราะตัวเลขทุกช่องต้องบวก/ลบกันได้เท่าราคาสุทธิ
+ * (ไม่ปัด = ไม่มีช่องนี้ ทางเข้าคือตัวเลือกในแผงแก้ราคา ซึ่งเปิดจากป้าย "ส่วนลด" อยู่แล้ว)
+ */
+function roundingCells(version: ProjectVersionDto): PriceCell[] {
+  if (!(Number(version.roundingAmt) > 0)) return [];
+  return [
+    {
+      label: "ปัดเศษ",
+      value: version.roundingAmt,
+      rate: true,
+      negative: true,
+      tone: "amber",
+      icon: Scissors,
+      hint: <span className="text-slate-400">{roundingUnitLabel(version.roundingUnit)}</span>,
+    },
+  ];
+}
+
 function priceCellsOf(version: ProjectVersionDto, isCustom: boolean): PriceCell[] {
-  const vatCell: PriceCell = { label: `VAT ${version.vatPct}%`, value: version.vatAmt, rate: true };
+  const vatCell: PriceCell = { label: `VAT ${version.vatPct}%`, value: version.vatAmt, rate: true, tone: "teal", icon: Receipt };
   if (isCustom) {
-    return [{ label: "ยอดก่อน VAT", value: version.directCost, rate: false }, discountCell(version), vatCell];
+    return [
+      { label: "ยอดก่อน VAT", value: version.directCost, rate: false, tone: "slate", icon: Wallet },
+      discountCell(version),
+      ...roundingCells(version),
+      vatCell,
+    ];
   }
   const discountAmt = Number(version.discountAmt);
   const split = splitOverheadProfit({
@@ -2184,13 +2867,16 @@ function priceCellsOf(version: ProjectVersionDto, isCustom: boolean): PriceCell[
     overheadProfitAmt: Number(version.overheadProfitAmt),
     overheadPct: version.overheadPct == null ? null : Number(version.overheadPct),
   });
-  const margin = split.known ? marginAfterDiscount(split.profitAmt, discountAmt) : null;
+  const roundingAmt = Number(version.roundingAmt);
+  const margin = split.known ? marginAfterDiscount(split.profitAmt, discountAmt + roundingAmt) : null;
   return [
-    { label: "ต้นทุนตรง", value: version.directCost, rate: false },
+    { label: "ต้นทุนตรง", value: version.directCost, rate: false, tone: "slate", icon: Wallet },
     {
       label: `ค่าดำเนินการ+กำไร ${version.overheadProfitPct}%`,
       value: version.overheadProfitAmt,
       rate: true,
+      tone: "blue",
+      icon: TrendingUp,
       // บรรทัดย่อยแทนการเพิ่มช่องที่ห้า — ตัวเลขที่ต้องอ่านเร็วยังเป็นก้อนรวม ส่วนการแบ่ง
       // เป็นข้อมูลประกอบที่ดูเมื่ออยากรู้ว่าเหลือกำไรให้ต่อรองเท่าไร
       hint: split.known ? (
@@ -2203,6 +2889,7 @@ function priceCellsOf(version: ProjectVersionDto, isCustom: boolean): PriceCell[
       ),
     },
     discountCell(version, margin && discountAmt > 0 ? <DiscountMarginHint margin={margin} /> : undefined),
+    ...roundingCells(version),
     vatCell,
   ];
 }
@@ -2229,11 +2916,16 @@ function ratesPreviewOf(s: ProjectState, version: ProjectVersionDto, isCustom: b
   }
 
   const discount = typedDiscount(s);
+  const contingency = s.contingencyInput === "" ? 0 : Number(s.contingencyInput);
+  const contingencyOk = Number.isFinite(contingency) && contingency >= 0;
   return {
     ratesSplitPreview,
     ratesPreviewMargin:
-      s.showRates && !isCustom && overheadOk && overhead <= totalPct && discount
-        ? marginPreviewOf(version, totalPct, overhead, discount, s.discMode === "NONE")
+      s.showRates && !isCustom && overheadOk && contingencyOk && overhead <= totalPct && discount
+        ? marginPreviewOf(version, totalPct, overhead, discount, s.discMode === "NONE", contingency, {
+            vatPct: Number(s.vatInput),
+            roundingUnit: s.roundInput === "" ? null : Number(s.roundInput),
+          })
         : null,
     ratesPreviewNet: s.showRates && discount ? netPreviewOf(s, version, isCustom ? 0 : totalPct, discount) : null,
   };
@@ -2251,13 +2943,24 @@ function marginPreviewOf(
   overheadPct: number,
   discount: PreviewDiscount,
   noDiscount: boolean,
+  contingencyPct: number,
+  rounding: { vatPct: number; roundingUnit: number | null },
 ) {
-  const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
-  const direct = Number(version.directCost);
+  const round2 = (v: number) => roundTo(v, 2);
+  // ฐานของกำไรคือ "ค่างานต้นทุน" = ต้นทุนตรง + เผื่อเหลือเผื่อขาด ตรงกับฝั่งเซิร์ฟเวอร์
+  const direct = round2(Number(version.directCost) * (1 + contingencyPct / 100));
   const totalAmt = round2(direct * (totalPct / 100));
   const profitAmt = round2(totalAmt - round2(direct * (overheadPct / 100)));
-  const discountAmt = previewDiscount(round2(direct + totalAmt), discount);
-  return marginAfterDiscount(profitAmt, noDiscount ? 0 : discountAmt);
+  const beforeDiscount = round2(direct + totalAmt);
+  const discountAmt = noDiscount ? 0 : previewDiscount(beforeDiscount, discount);
+  // ส่วนลดปัดเศษก็กินกำไรเหมือนส่วนลด — ต้องรวมไว้ ไม่งั้นบอกว่ายังเหลือกำไรมากกว่าความจริง
+  const vatPct = Number.isFinite(rounding.vatPct) ? rounding.vatPct : 0;
+  const roundingAmt = applyNetRounding(
+    round2(beforeDiscount - discountAmt),
+    vatPct,
+    rounding.roundingUnit,
+  ).roundingAmount;
+  return marginAfterDiscount(profitAmt, round2(discountAmt + roundingAmt));
 }
 
 /**
@@ -2272,7 +2975,13 @@ function netPreviewOf(
 ): number | null {
   const vat = Number(s.vatInput);
   if (!Number.isFinite(ohPct) || !Number.isFinite(vat)) return null;
-  const next = previewNetPrice(Number(version.directCost), ohPct, vat, discount);
+  const r2 = (v: number) => roundTo(v, 2);
+  const contingency = s.contingencyInput === "" ? 0 : Number(s.contingencyInput);
+  if (!Number.isFinite(contingency) || contingency < 0) return null;
+  const baseCost = r2(Number(version.directCost) * (1 + contingency / 100));
+
+  const roundingUnit = s.roundInput === "" ? null : Number(s.roundInput);
+  const next = previewNetPrice(baseCost, ohPct, vat, discount, roundingUnit);
   return next === Number(version.netPrice) ? null : next;
 }
 
@@ -2288,7 +2997,7 @@ function missingDriverLabelsOf(items: BoqItemDto[], driverValueOf: (basis: strin
   return [
     ...new Set(
       items
-        .filter((i) => i.qtyBasis !== "MANUAL" && driverValueOf(i.qtyBasis) == null)
+        .filter((i) => i.qtyBasis !== "MANUAL" && i.qtyBasis !== "SHEET" && driverValueOf(i.qtyBasis) == null)
         .map((i) => basisConfig(i.qtyBasis).measureLabel),
     ),
   ].filter(Boolean);
@@ -2305,6 +3014,7 @@ function boqViewOf(
   categoryById: Map<string, WorkCategoryDto>,
   catParam: string | null,
   collapsedSubs: Set<string>,
+  pageParam: number,
 ) {
   const boqGroups = groupBoqByRoot(items, categoryById);
   // แท็บ BOQ แสดงทีละหมวด (?cat=) — ไม่มี/ชี้หมวดที่ไม่มีแล้ว (เช่น ลบบรรทัดสุดท้ายของหมวด) = หน้าสรุป
@@ -2314,11 +3024,30 @@ function boqViewOf(
   // ยุบ/กางทุกหมวดย่อยของหมวดที่เปิดอยู่ (ปุ่มปลายขวาแถบหมวด แบบเดียวกับหน้าหมวดงาน/แม่แบบ)
   // ไม่จำสถานะข้ามการเปิดหน้า — BOQ ต้องเห็นครบเสมอตอนเปิดมา
   const foldableSubs = boqRenderRows.filter((row): row is SubheaderRow => row.type === "subheader");
+  // แบ่งหน้า — เลขหน้าเกินจำนวนหน้า (ลบบรรทัด/ยุบหมวดย่อย) = หน้าสุดท้าย
+  const boqPages = paginateBoqRows(boqRenderRows, BOQ_PAGE_SIZE);
+  const boqPageCount = boqPages.length;
+  const boqPage = Math.min(Math.max(1, pageParam), boqPageCount);
+  const boqPageRows = boqPages[boqPage - 1];
+  const itemsIn = (rows: BoqRenderRow[]) => rows.filter((r) => r.type === "item").length;
+  const boqShownCount = itemsIn(boqRenderRows);
+  const boqPageFrom = boqPages.slice(0, boqPage - 1).reduce((n, pg) => n + itemsIn(pg), 0) + 1;
+  const boqPageTo = boqPageFrom + itemsIn(boqPageRows) - 1;
+  /** หน้าที่บรรทัดนี้อยู่ · 0 = ไม่อยู่ในหมวดที่เปิด หรือหมวดย่อยของมันถูกยุบ */
+  const boqPageOfItem = (id: string) =>
+    boqPages.findIndex((pg) => pg.some((r) => r.type === "item" && r.item.id === id)) + 1;
   return {
     boqGroups,
     activeBoqIndex,
     activeBoqGroup,
     boqRenderRows,
+    boqPageRows,
+    boqPage,
+    boqPageCount,
+    boqShownCount,
+    boqPageFrom,
+    boqPageTo,
+    boqPageOfItem,
     positionInGroup: positionsInGroups(boqGroups),
     foldableSubs,
     allSubsCollapsed: foldableSubs.length > 0 && foldableSubs.every((row) => row.collapsed),
@@ -2337,7 +3066,13 @@ function deriveProjectView(s: ProjectState, detail: ProjectDetailDto) {
   };
 
   const editingItem = items.find((i) => i.id === s.editingId) ?? null;
-  const visibleTabs = visibleTabsOf(project, items.length, s.quotes.length, s.contracts.length);
+  const visibleTabs = visibleTabsOf(
+    project,
+    items.length,
+    s.quotes.length,
+    s.contracts.length,
+    s.contracts.filter((c) => c.signedAt).length,
+  );
 
   return {
     project,
@@ -2348,14 +3083,16 @@ function deriveProjectView(s: ProjectState, detail: ProjectDetailDto) {
     nextStatuses: NEXT_TRANSITIONS[project.status],
     isCustom,
     hasCustomPrice: Number(currentVersion.netPrice) > 0,
+    quoteBlocker: quoteBlockerOf(isCustom, Number(currentVersion.netPrice) > 0, items.length),
     floorArea: drivers.floorArea,
     drivers,
     driverValueOf,
     stepDates: stepDatesOf(project, s.quotes),
     rejectionReason: rejectionReasonOf(s.quotes),
-    ...boqViewOf(items, s.categoryById, s.boqCatParam, s.collapsedSubs),
+    ...boqViewOf(items, s.categoryById, s.boqCatParam, s.collapsedSubs, s.boqPageParam),
     editingItem,
     ...linePreviewOf(s, currentVersion, editingItem, driverValueOf),
+    recipeSources: recipeSourcesOf(s.materials, items),
     missingDriverLabels: missingDriverLabelsOf(items, driverValueOf),
     visibleTabs,
     activeTab: activeTabOf(visibleTabs, s.tab),
@@ -2391,6 +3128,8 @@ function projectViewActions(s: ProjectState, detail: ProjectDetailDto, v: Projec
     const previous = detail;
     // เลื่อนบนจอทันที ไม่ต้องรอเซิร์ฟเวอร์ — พลาดค่อยดึงของจริงกลับมา
     s.setDetail({ ...detail, items: nextItems });
+    // บรรทัดแรก/ท้ายของหน้าเลื่อนข้ามขอบหน้า — ตามไปหน้าที่มันย้ายไป
+    s.setBoqFocusId(itemId);
     s.setReordering(true);
     try {
       const res = await reorderBoqItems(
@@ -2454,7 +3193,7 @@ export function ProjectDetailPage() {
   if (s.loading) {
     return (
       <Layout>
-        <p className="text-slate-500">กำลังโหลด...</p>
+        <DetailSkeleton label="กำลังโหลดโครงการ..." />
       </Layout>
     );
   }
@@ -2473,13 +3212,85 @@ export function ProjectDetailPage() {
   return <ProjectDetailView vm={vm} />;
 }
 
+/**
+ * ค่าเผื่อเหลือเผื่อขาด (% ของต้นทุนตรง) — บวกเป็น "ค่างานต้นทุน" ก่อนคิดค่าดำเนินการ/กำไร
+ * อยู่บนสุดของแผงเพราะเป็นฐานของทุกอัตราข้างล่าง · แก้ได้เฉพาะเจ้าของระบบ (ระดับเดียวกับอัตรากำไร)
+ */
+function ContingencyField({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { canEditMargin, contingencyInput, setContingencyInput } = vm;
+  return (
+    <div className="mb-3 flex flex-wrap items-end gap-3 border-b border-slate-200 pb-3">
+      <label className="text-xs text-slate-600">
+        <span>เผื่อเหลือเผื่อขาด (%)</span>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.01"
+          value={contingencyInput}
+          onChange={(e) => setContingencyInput(e.target.value)}
+          placeholder="ไม่เผื่อ"
+          disabled={!canEditMargin}
+          className="mt-1 block w-28 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+        />
+      </label>
+    </div>
+  );
+}
+
+/**
+ * ช่องกรอกราคาของโครงการกำหนดเอง
+ *
+ * ตำแหน่งขยับตามสถานะโดยตั้งใจ: **ยังไม่มีราคา = เด้งขึ้นไปอยู่บนสุดของแท็บภาพรวม** เพราะมันคือ
+ * สิ่งเดียวที่ทำได้ตอนนั้น (ของเดิมอยู่ล่างสุดใต้จอ คนหาไม่เจอจนกดอะไรต่อไม่ได้เลย)
+ * พอมีราคาแล้วจะตกลงไปอยู่ท้ายหน้าเหมือนเดิม เพราะการแก้ราคาเกิดขึ้นนาน ๆ ครั้ง
+ */
+function CustomPriceCard({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { currentVersion, customPriceInput, setCustomPriceInput, handleSetCustomPrice, savingCustomPrice, hasCustomPrice } = vm;
+  const highlight = hasCustomPrice ? "border-slate-200" : "border-brand/40 ring-1 ring-brand/15";
+
+  return (
+    <div id="custom-price-section" className={`mb-6 scroll-mt-20 rounded-lg border bg-white p-4 ${highlight}`}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-1">
+        <p className="text-sm font-medium text-slate-700">ราคาโครงการกำหนดเอง</p>
+        <span className="text-xs text-slate-500">
+          กรอกยอดก่อน VAT (กำไรรวมในนี้แล้ว) — ระบบบวก VAT {currentVersion.vatPct}% ให้
+        </span>
+      </div>
+      {!hasCustomPrice && (
+        // บอกลำดับทั้งเส้นตั้งแต่ตรงนี้ เพราะเป็นจุดแรกที่คนเปิดโครงการกำหนดเองมาเจอ
+        <p className="mb-3 text-sm text-slate-500">
+          ใส่ราคาแล้วจะออกใบเสนอราคาได้ และ<strong className="font-medium text-slate-700">ช่องแนบไฟล์ BOQ/แบบ
+          จะอยู่ใต้ใบเสนอราคาแต่ละใบ</strong> ในแท็บ “ใบเสนอราคา”
+        </p>
+      )}
+      {/* ตัวเลขทั้งสามย้ายขึ้นไปอยู่แถบเหนือแท็บแล้ว ตรงนี้เหลือเฉพาะช่องกรอก */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="ยอดก่อน VAT (บาท)"
+          value={customPriceInput}
+          onChange={(e) => setCustomPriceInput(e.target.value)}
+          className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm"
+        />
+        <Button size="sm" onClick={handleSetCustomPrice} disabled={savingCustomPrice || customPriceInput === ""}>
+          <Check size={14} /> บันทึกราคา
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** แผงแก้อัตรา ค่าดำเนินการ+กำไร / VAT / ส่วนลด พร้อมพรีวิวราคาสุทธิ */
 function RatesPanel({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { showRates, isCustom, canEditMargin, ohInput, setOhInput, overheadInput, setOverheadInput, ratesSplitPreview, vatInput, setVatInput, discMode, setDiscMode, discInput, setDiscInput, discNote, setDiscNote, handleSaveRates, savingRates, setShowRates, ratesPreviewNet, ratesPreviewMargin, editable } = vm;
+  const { showRates, isCustom, canEditMargin, ohInput, setOhInput, overheadInput, setOverheadInput, ratesSplitPreview, vatInput, setVatInput, discMode, setDiscMode, discInput, setDiscInput, discNote, setDiscNote, roundInput, setRoundInput, handleSaveRates, savingRates, setShowRates, ratesPreviewNet, ratesPreviewMargin, editable } = vm;
   return (
     <>
       {showRates && (
         <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
+          {!isCustom && <ContingencyField vm={vm} />}
           <div className="flex flex-wrap items-end gap-3">
             {/* ค่าดำเนินการกับกำไรต่างกันตอนต่อรองราคา: ค่าดำเนินการเป็นเงินที่ต้องจ่ายออกไปจริง
                 (ค่าคุมงาน สำนักงานสนาม ประกันผลงาน) ลดเข้าไปในส่วนนั้นคือเฉือนเนื้อตัวเอง
@@ -2531,19 +3342,21 @@ function RatesPanel({ vm }: Readonly<{ vm: ProjectVM }>) {
                 </p>
               </>
             )}
-            <label className="text-xs text-slate-600">
-              <span>VAT (%)</span>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                autoFocus={isCustom || !canEditMargin}
-                value={vatInput}
-                onChange={(e) => setVatInput(e.target.value)}
-                className="mt-1 block w-28 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums text-slate-800"
-              />
-            </label>
+            {(
+              <label className="text-xs text-slate-600">
+                <span>VAT (%)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  autoFocus={isCustom || !canEditMargin}
+                  value={vatInput}
+                  onChange={(e) => setVatInput(e.target.value)}
+                  className="mt-1 block w-28 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums text-slate-800"
+                />
+              </label>
+            )}
           </div>
 
           {!isCustom && !canEditMargin && (
@@ -2594,6 +3407,28 @@ function RatesPanel({ vm }: Readonly<{ vm: ProjectVM }>) {
                 </label>
               </>
             )}
+          </div>
+
+          {/* ปัดยอดสุทธิ — อยู่ใต้ส่วนลดเพราะคือส่วนลดอีกก้อนหนึ่ง (หักก่อน VAT) แค่ระบบคิดยอดให้เอง */}
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="text-xs text-slate-600">
+              <span>ปัดยอดสุทธิ (รวม VAT)</span>
+              <select
+                value={roundInput}
+                onChange={(e) => setRoundInput(e.target.value)}
+                className="mt-1 block rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+              >
+                <option value="">ไม่ปัด</option>
+                {ROUNDING_UNITS.map((u) => (
+                  <option key={u} value={String(u)}>
+                    {roundingUnitLabel(u)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="pb-1 text-xs text-slate-500">
+              ปัดลงเสมอ ส่วนต่างหักเป็น &quot;ส่วนลดปัดเศษ&quot; ก่อนคิด VAT และพิมพ์ในใบเสนอราคา
+            </p>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -2658,10 +3493,37 @@ function RatesPanel({ vm }: Readonly<{ vm: ProjectVM }>) {
   );
 }
 
-/** ฟอร์มเพิ่มบรรทัด BOQ (เลือกวัสดุ/หมวดงาน/ฐานคำนวณปริมาณ/ราคา + พรีวิวยอด) */
+/** วิธีคิดปริมาณ 3 แบบที่คนคิดจริง — ฐาน "ต่อค่าวัด" ทั้ง 7 ตัวรวมเป็นแบบที่สาม แล้วเลือกตัวขับในนั้นอีกที */
+type QtyMode = "MANUAL" | "SHEET" | "DRIVER";
+const qtyModeOf = (basis: QtyBasis): QtyMode => (basis === "MANUAL" || basis === "SHEET" ? basis : "DRIVER");
+const DRIVER_BASES = TAKEOFF_BASES.filter((b) => b.driver != null);
+
+const addInputClass = "w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-slate-500 focus:outline-none";
+const addLabelClass = "flex flex-col gap-1 text-xs text-slate-600";
+
+function AddStep({ n, title, children }: Readonly<{ n: number; title: string; children: ReactNode }>) {
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] font-medium text-white">
+          {n}
+        </span>
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * ฟอร์มเพิ่มบรรทัด BOQ — เรียงตามลำดับที่คิดจริง: ① รายการอะไร ② เท่าไร ③ ราคาเท่าไร
+ * ยอดรวมของบรรทัดอยู่ข้างปุ่มบันทึก · หมายเหตุ/สูตรวัสดุย่อยพับไว้ (บรรทัดส่วนใหญ่ไม่ใช้)
+ */
 function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { showAddForm, setShowAddForm, submitAdd, materialOptions, addForm, selectMaterial, categoryOptions, setAddForm, unitsInUse, addHasRecipe, addDerivedPrice, driverValueOf, rebarOpen, setRebarOpen, rebarDia, setRebarDia, rebarLen, setRebarLen, addComponents, setAddComponents, materialById, editingItem, previewLineTotal, showNetPreview, previewNet } = vm;
+  const { showAddForm, setShowAddForm, submitAdd, materialOptions, addForm, selectMaterial, categoryOptions, setAddForm, unitsInUse, addHasRecipe, addDerivedPrice, driverValueOf, rebarOpen, setRebarOpen, rebarDia, setRebarDia, rebarLen, setRebarLen, addComponents, setAddComponents, materialById, editingItem, previewLineTotal, showNetPreview, previewNet, previewQty, recipeSources, addSheetRows, setAddSheetRows } = vm;
   const formRef = useRef<HTMLFormElement>(null);
+  const [showNote, setShowNote] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Esc ปิดฟอร์ม — ฟังที่ document แทนการดักคีย์บนกล่อง (กล่องเปล่าไม่ใช่ตัวรับคีย์) แต่จำกัด
   // เฉพาะตอนโฟกัสอยู่ในฟอร์ม เท่ากับตอนที่ยังดักบนกล่อง · dropdown ค้นหาหยุด Esc ของมันเองไว้แล้ว
@@ -2674,247 +3536,496 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [showAddForm, setShowAddForm]);
 
+  if (!showAddForm) return null;
+
+  const material = addForm.materialId ? materialById.get(addForm.materialId) : undefined;
+  const priceLocked = addHasRecipe;
+  const materialPrice = addHasRecipe ? addDerivedPrice : Number(addForm.materialUnitPrice || 0);
+  const unitTotal = materialPrice + Number(addForm.laborUnitPrice || 0);
+  const mode = qtyModeOf(addForm.qtyBasis);
+  const noteOpen = showNote || addForm.note !== "";
+
+  async function save(keepOpen: boolean) {
+    setSaving(true);
+    try {
+      const ok = await submitAdd({ keepOpen });
+      if (ok && keepOpen) {
+        setShowNote(false);
+        // กลับไปที่ช่องค้นหาวัสดุ (ปุ่มเปิดของ SearchableSelect ตัวแรก) พร้อมเลือกรายการถัดไปทันที
+        // รอให้ฟอร์มที่ล้างแล้ว render ก่อน (ตอนยังผูกวัสดุ ปุ่มแรกคือปุ่ม × ล้างค่า ซึ่งจะหายไป)
+        setTimeout(() => formRef.current?.querySelector<HTMLButtonElement>("label button")?.focus(), 0);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const priceHint = (catalogValue: string | undefined, current: string, reset: () => void) => {
+    if (catalogValue === undefined) return null;
+    const differs = Number(current || 0) !== Number(catalogValue);
+    return differs ? (
+      <span className="text-[11px] text-amber-700">
+        แก้จากราคาคลัง {money(catalogValue)} ·{" "}
+        <button type="button" onClick={reset} className="underline underline-offset-2 hover:text-amber-900">
+          คืนค่า
+        </button>
+      </span>
+    ) : (
+      <span className="text-[11px] text-slate-400">ราคาจากคลัง</span>
+    );
+  };
+
   return (
-    <>
-      {showAddForm && (
-        // ฟอร์มจริง: Enter ในช่องกรอก = บันทึก ตามพฤติกรรมมาตรฐานของเบราว์เซอร์
-        // (dropdown ค้นหากัน Enter ของมันเองไว้แล้ว) · ปุ่มข้างในทุกตัวเป็น type="button" จึงไม่ยิงบันทึก
-        <form
-          ref={formRef}
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitAdd();
-          }}
-          className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 border border-dashed border-slate-300 rounded-md p-3 bg-white items-end"
+    // ฟอร์มจริง: Enter ในช่องกรอก = บันทึก ตามพฤติกรรมมาตรฐานของเบราว์เซอร์
+    // (dropdown ค้นหากัน Enter ของมันเองไว้แล้ว) · ปุ่มข้างในทุกตัวเป็น type="button" จึงไม่ยิงบันทึก
+    <form
+      ref={formRef}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save(false);
+      }}
+      className="mb-4 flex flex-col gap-5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+    >
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-slate-800">เพิ่มรายการ BOQ</h2>
+        <button
+          type="button"
+          onClick={() => setShowAddForm(false)}
+          aria-label="ปิดฟอร์ม"
+          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         >
-          <label className="flex flex-col gap-1 text-xs text-slate-700 col-span-2">
-            ค้นหาวัสดุ (เลือกแล้วเติมหมวดงาน/ราคาให้)
+          <X size={16} />
+        </button>
+      </div>
+
+      <AddStep n={1} title="รายการ">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+          <label className={`${addLabelClass} sm:col-span-3`}>
+            <span>
+              วัสดุจากคลัง <span className="text-slate-400">(หรือเว้นว่างแล้วกรอกชื่อเอง)</span>
+            </span>
             <SearchableSelect
               options={materialOptions}
               value={addForm.materialId}
               onChange={selectMaterial}
-              placeholder="พิมพ์รหัส/ชื่อวัสดุ หรือเว้นไว้เพื่อกรอกเอง"
+              placeholder="พิมพ์รหัส/ชื่อวัสดุ"
               clearable
             />
           </label>
-
-          <label className="flex flex-col gap-1 text-xs text-slate-700 col-span-2">
-            หมวดงาน (ระดับรายการ)
+          <label className={`${addLabelClass} sm:col-span-2`}>
+            หมวดงาน
             <SearchableSelect
               options={categoryOptions}
               value={addForm.categoryId}
-              onChange={(next) => setAddForm((f) => ({ ...f, categoryId: next, materialId: "" }))}
+              onChange={(next) => setAddForm((f) => ({ ...f, categoryId: next }))}
               placeholder="พิมพ์รหัส/ชื่อหมวดงาน"
             />
           </label>
+        </div>
 
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>ชื่อรายการ</span>
-            <input
-              value={addForm.name}
-              disabled={Boolean(addForm.materialId)}
-              onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm disabled:bg-slate-100"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            หน่วยนับ
-            {/* ใช้ตัวเดียวกับหน้าวัสดุ/ค่าแรง — เลือกจากลิสต์ก็ได้ พิมพ์เองก็ได้ (แต่ต้องกดยืนยัน)
-                เดิมเป็นช่องพิมพ์เปล่า ๆ ซึ่งเป็นต้นทางของหน่วยสะกดเพี้ยน เช่น "ตรม." กับ "ตร.ม." */}
-            <UnitSelect
-              value={addForm.unit}
-              onChange={(unit) => setAddForm((f) => ({ ...f, unit }))}
-              options={UNIT_OPTIONS}
-              inUse={unitsInUse}
-              disabled={Boolean(addForm.materialId)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            ราคาวัสดุ/หน่วย
-            {addHasRecipe ? (
+        {material ? (
+          // ผูกกับคลัง: ชื่อและหน่วยมาจากคลัง — โชว์เป็นข้อความแทนช่องสีเทาที่กดไม่ได้แต่ไม่บอกว่าทำไม
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-slate-600">
+              หน่วย: <span className="font-medium text-slate-800">{material.unit}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => selectMaterial("")}
+              title="เก็บชื่อ หน่วย และราคาที่เติมไว้ แต่บรรทัดนี้จะไม่ผูกกับคลังแล้ว (ไม่เตือนเมื่อราคาคลังเปลี่ยน)"
+              className="text-slate-500 underline underline-offset-2 hover:text-slate-800"
+            >
+              แก้ชื่อ/หน่วยเอง (ไม่ผูกกับคลัง)
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+            <label className={`${addLabelClass} sm:col-span-3`}>
+              ชื่อรายการ
               <input
-                type="text"
-                readOnly
-                value={money(addDerivedPrice)}
-                title="คิดจากผลรวมของสูตรวัสดุย่อยด้านล่าง"
-                className="border border-slate-200 bg-slate-100 text-slate-500 rounded-md px-2 py-1 text-sm"
+                value={addForm.name}
+                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="เช่น งานรื้อถอนผนังเดิม"
+                className={addInputClass}
               />
-            ) : (
+            </label>
+            <label className={`${addLabelClass} sm:col-span-2`}>
+              หน่วยนับ
+              {/* ใช้ตัวเดียวกับหน้าวัสดุ/ค่าแรง — กันหน่วยสะกดเพี้ยน เช่น "ตรม." กับ "ตร.ม." */}
+              <UnitSelect
+                value={addForm.unit}
+                onChange={(unit) => setAddForm((f) => ({ ...f, unit }))}
+                options={UNIT_OPTIONS}
+                inUse={unitsInUse}
+              />
+            </label>
+          </div>
+        )}
+      </AddStep>
+
+      <AddStep n={2} title="ปริมาณ">
+        <div role="radiogroup" aria-label="วิธีคิดปริมาณ" className="inline-flex w-fit overflow-hidden rounded-md border border-slate-300 text-sm">
+          {(
+            [
+              ["MANUAL", "กรอกเอง"],
+              ["SHEET", "ถอดจากแบบ"],
+              ["DRIVER", "คิดจากค่าวัดโครงการ"],
+            ] as [QtyMode, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={mode === value}
+              onClick={() =>
+                setAddForm((f) => ({
+                  ...f,
+                  qtyBasis: value === "DRIVER" ? (qtyModeOf(f.qtyBasis) === "DRIVER" ? f.qtyBasis : "PER_AREA") : value,
+                }))
+              }
+              className={`border-r border-slate-300 px-3 py-1.5 last:border-r-0 ${
+                mode === value ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "MANUAL" && (
+          <>
+            <label className={`${addLabelClass} w-48`}>
+              จำนวน{addForm.unit && ` (${addForm.unit})`}
               <input
                 type="number"
-                value={addForm.materialUnitPrice}
-                onChange={(e) => setAddForm((f) => ({ ...f, materialUnitPrice: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+                step="any"
+                value={addForm.quantity}
+                onChange={(e) => setAddForm((f) => ({ ...f, quantity: e.target.value }))}
+                className={addInputClass}
               />
-            )}
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>ค่าแรง/หน่วย</span>
-            <input
-              type="number"
-              value={addForm.laborUnitPrice}
-              onChange={(e) => setAddForm((f) => ({ ...f, laborUnitPrice: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            </label>
+            {/* เครื่องมือคิดน้ำหนักเหล็กอยู่ใต้ช่องจำนวนที่มันเติมค่าให้ — โชว์เฉพาะโหมดกรอกเอง
+                เพราะโหมดอื่นปริมาณมาจากสูตร การใส่ทับจะล้างสูตรทิ้ง */}
+            <RebarCalculator
+              open={rebarOpen}
+              onToggle={() => setRebarOpen((v) => !v)}
+              diameterMm={rebarDia}
+              onDiameterChange={setRebarDia}
+              lengthM={rebarLen}
+              onLengthChange={setRebarLen}
+              unit={addForm.unit}
+              // ผูกวัสดุจากแคตตาล็อกอยู่ = หน่วยนับมาจากคลัง แก้ให้ไม่ได้ ได้แค่เตือน
+              onUnitChange={addForm.materialId ? undefined : (unit) => setAddForm((f) => ({ ...f, unit }))}
+              onInsert={(kg) => {
+                setAddForm((f) => ({ ...f, quantity: String(kg) }));
+                setRebarOpen(false);
+              }}
             />
-          </label>
+          </>
+        )}
 
-          <div className="col-span-2 grid grid-cols-2 sm:col-span-4 sm:grid-cols-4 items-end gap-2 rounded-md bg-slate-50 p-2">
-            <label className="flex flex-col gap-1 text-xs text-slate-700">
-              <span>ฐานคำนวณปริมาณ</span>
+        {mode === "SHEET" &&
+          (addForm.unit ? (
+            <SheetQuantityBlock
+              lineName={addForm.name}
+              unit={addForm.unit}
+              rows={addSheetRows}
+              waste={addForm.wasteFactorPct}
+              onChange={(rows, waste) => {
+                setAddSheetRows(rows);
+                setAddForm((f) => ({ ...f, wasteFactorPct: waste }));
+              }}
+              onUseManual={(q) =>
+                setAddForm((f) => ({ ...f, qtyBasis: "MANUAL", quantity: q == null ? f.quantity : String(q) }))
+              }
+            />
+          ) : (
+            <span className="text-xs text-amber-700">เลือกวัสดุหรือหน่วยนับในขั้นที่ 1 ก่อน แล้วค่อยเปิดใบถอดแบบ</span>
+          ))}
+
+        {mode === "DRIVER" && (
+          <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-4">
+            <label className={addLabelClass}>
+              คิดจาก
               <select
                 value={addForm.qtyBasis}
                 onChange={(e) => setAddForm((f) => ({ ...f, qtyBasis: e.target.value as QtyBasis }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+                className={addInputClass}
               >
-                {TAKEOFF_BASES.map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
-                ))}
+                {DRIVER_BASES.map((b) => {
+                  const dv = driverValueOf(b.value);
+                  return (
+                    <option key={b.value} value={b.value}>
+                      {b.measureLabel} {dv == null ? "(ยังไม่ได้ตั้ง)" : `= ${dv.toLocaleString("th-TH")}`}
+                    </option>
+                  );
+                })}
               </select>
             </label>
+            <label className={addLabelClass}>
+              {basisConfig(addForm.qtyBasis).perLabel}
+              <input
+                type="number"
+                step="0.0001"
+                value={addForm.qtyCoefficient}
+                onChange={(e) => setAddForm((f) => ({ ...f, qtyCoefficient: e.target.value }))}
+                className={addInputClass}
+              />
+            </label>
+            <label className={addLabelClass}>
+              เผื่อเสีย (%)
+              <input
+                type="number"
+                step="0.01"
+                value={addForm.wasteFactorPct}
+                onChange={(e) => setAddForm((f) => ({ ...f, wasteFactorPct: e.target.value }))}
+                className={addInputClass}
+              />
+            </label>
+            <div className="flex flex-col gap-1 text-xs">
+              <span className="text-slate-600">ปริมาณที่คิดได้</span>
+              {(() => {
+                const dv = driverValueOf(addForm.qtyBasis);
+                if (dv == null) {
+                  return (
+                    <span className="py-1.5 text-amber-700">
+                      ตั้ง “{basisConfig(addForm.qtyBasis).measureLabel}” ในรายละเอียดโครงการก่อน
+                    </span>
+                  );
+                }
+                const q = previewTakeoffQty(Number(addForm.qtyCoefficient), Number(addForm.wasteFactorPct), dv);
+                return q == null ? (
+                  <span className="py-1.5 text-slate-400">—</span>
+                ) : (
+                  <span className="py-1.5 text-slate-500">
+                    {dv} × {addForm.qtyCoefficient || 0} × (1+{addForm.wasteFactorPct || 0}%) ={" "}
+                    <span className="font-semibold text-slate-800">
+                      {q.toLocaleString("th-TH")} {addForm.unit}
+                    </span>
+                  </span>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+      </AddStep>
 
-            {addForm.qtyBasis === "MANUAL" ? (
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>จำนวน</span>
-                <input
-                  type="number"
-                  value={addForm.quantity}
-                  onChange={(e) => setAddForm((f) => ({ ...f, quantity: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
+      <AddStep n={3} title={`ราคาต่อหน่วย${addForm.unit ? ` (บาท/${addForm.unit})` : ""}`}>
+        <MaterialComponentsEditor
+          rows={addComponents}
+          onChange={setAddComponents}
+          materialById={materialById}
+          unitLabel={addForm.unit}
+          unitDatalistId="boq-units"
+          lineQuantity={editingItem ? null : previewQty}
+          copySources={recipeSources}
+        />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className={addLabelClass}>
+            ค่าวัสดุ
+            {priceLocked ? (
+              <>
+                <input type="text" readOnly value={money(materialPrice)} className={`${addInputClass} bg-slate-50 text-slate-500`} />
+                <span className="text-[11px] text-slate-400">คิดจากสูตรวัสดุด้านบน</span>
+              </>
             ) : (
               <>
-                <label className="flex flex-col gap-1 text-xs text-slate-700">
-                  {basisConfig(addForm.qtyBasis).perLabel}
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={addForm.qtyCoefficient}
-                    onChange={(e) => setAddForm((f) => ({ ...f, qtyCoefficient: e.target.value }))}
-                    className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-slate-700">
-                  <span>เผื่อเสีย (%)</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={addForm.wasteFactorPct}
-                    onChange={(e) => setAddForm((f) => ({ ...f, wasteFactorPct: e.target.value }))}
-                    className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                  />
-                </label>
-                <div className="flex flex-col gap-1 text-xs">
-                  <span className="text-slate-500">ปริมาณที่คิดได้</span>
-                  {(() => {
-                    const dv = driverValueOf(addForm.qtyBasis);
-                    if (dv == null) {
-                      return (
-                        <span className="text-amber-600">
-                          ตั้ง “{basisConfig(addForm.qtyBasis).measureLabel}” ในรายละเอียดโครงการก่อน
-                        </span>
-                      );
-                    }
-                    const q = previewTakeoffQty(
-                      Number(addForm.qtyCoefficient),
-                      Number(addForm.wasteFactorPct),
-                      dv,
-                    );
-                    return q == null ? (
-                      <span className="text-slate-400">—</span>
-                    ) : (
-                      <span className="font-medium text-slate-800">
-                        {dv} × {addForm.qtyCoefficient || 0} × (1+{addForm.wasteFactorPct || 0}%) ={" "}
-                        {q.toLocaleString("th-TH")}
-                      </span>
-                    );
-                  })()}
-                </div>
+                <input
+                  type="number"
+                  step="any"
+                  value={addForm.materialUnitPrice}
+                  onChange={(e) => setAddForm((f) => ({ ...f, materialUnitPrice: e.target.value }))}
+                  className={addInputClass}
+                />
+                {priceHint(material?.materialUnitPrice, addForm.materialUnitPrice, () =>
+                  setAddForm((f) => ({ ...f, materialUnitPrice: material!.materialUnitPrice })),
+                )}
               </>
             )}
-
-            {/* เครื่องมือคิดน้ำหนักเหล็กอยู่ในกล่องเดียวกับช่อง "จำนวน" ที่มันเติมค่าให้ — เดิมลอยอยู่
-                นอกกล่อง คนละแถวกับช่องปลายทาง เลยไม่มีอะไรบอกว่ากดแล้วตัวเลขไปโผล่ตรงไหน
-                โชว์เฉพาะโหมด "กรอกเอง" เพราะโหมดอื่นปริมาณมาจากสูตร การใส่ทับจะล้างสูตรทิ้ง */}
-            {addForm.qtyBasis === "MANUAL" && (
-              <div className="col-span-2 sm:col-span-4">
-                <RebarCalculator
-                  open={rebarOpen}
-                  onToggle={() => setRebarOpen((v) => !v)}
-                  diameterMm={rebarDia}
-                  onDiameterChange={setRebarDia}
-                  lengthM={rebarLen}
-                  onLengthChange={setRebarLen}
-                  unit={addForm.unit}
-                  // ผูกวัสดุจากแคตตาล็อกอยู่ = ช่องหน่วยนับถูกล็อก แก้ให้ไม่ได้ ได้แค่เตือน
-                  onUnitChange={
-                    addForm.materialId ? undefined : (unit) => setAddForm((f) => ({ ...f, unit }))
-                  }
-                  onInsert={(kg) => {
-                    setAddForm((f) => ({ ...f, quantity: String(kg) }));
-                    setRebarOpen(false);
-                  }}
-                />
-              </div>
-            )}
-          </div>
-
-          <label className="flex flex-col gap-1 text-xs text-slate-700 col-span-3">
-            <span>หมายเหตุ</span>
+          </label>
+          <label className={addLabelClass}>
+            ค่าแรง
             <input
+              type="number"
+              step="any"
+              value={addForm.laborUnitPrice}
+              onChange={(e) => setAddForm((f) => ({ ...f, laborUnitPrice: e.target.value }))}
+              className={addInputClass}
+            />
+            {priceHint(material?.laborUnitPrice, addForm.laborUnitPrice, () =>
+              setAddForm((f) => ({ ...f, laborUnitPrice: material!.laborUnitPrice })),
+            )}
+          </label>
+          <div className={addLabelClass}>
+            รวมต่อหน่วย
+            <span className="rounded-md border border-transparent px-2.5 py-1.5 text-sm font-medium text-slate-800 tabular-nums">
+              {money(unitTotal)}
+            </span>
+          </div>
+        </div>
+      </AddStep>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-4 text-xs">
+          {!noteOpen && (
+            <button type="button" onClick={() => setShowNote(true)} className="link-pill -my-1 -ml-2.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              + หมายเหตุ
+            </button>
+          )}
+        </div>
+        {noteOpen && (
+          <label className={addLabelClass}>
+            หมายเหตุ
+            <input
+              autoFocus={showNote && addForm.note === ""}
               value={addForm.note}
               onChange={(e) => setAddForm((f) => ({ ...f, note: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+              className={addInputClass}
             />
           </label>
+        )}
+      </div>
 
-          <div className="col-span-2 sm:col-span-4 border-t border-slate-200 pt-3">
-            <MaterialComponentsEditor
-              rows={addComponents}
-              onChange={setAddComponents}
-              materialOptions={materialOptions}
-              materialById={materialById}
-              unitLabel={addForm.unit}
-              unitDatalistId="boq-units"
-            />
-          </div>
-
-          <div className="col-span-2 sm:col-span-4 flex flex-wrap items-center gap-3">
-            <Button size="sm" type="submit">
-              <Check size={14} /> บันทึก
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)}>
-              <X size={14} /> ยกเลิก
-            </Button>
-            {!editingItem && previewLineTotal != null && (
-              <span className="text-xs text-slate-500">
-                รวมบรรทัดนี้ ≈{" "}
-                <span className="font-medium text-slate-800">{money(previewLineTotal)}</span>
-                {showNetPreview && (
-                  <>
-                    {" "}
-                    · ราคาสุทธิใหม่ ≈{" "}
-                    <span className="font-medium text-brand">{money(previewNet!)}</span>
-                  </>
-                )}
-              </span>
-            )}
-          </div>
-        </form>
-      )}
-    </>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+        <div className="text-sm text-slate-500">
+          {!editingItem && previewLineTotal != null ? (
+            <>
+              รวมบรรทัดนี้{" "}
+              <span className="ml-1 text-lg font-semibold text-slate-800 tabular-nums">{money(previewLineTotal)}</span>
+              {showNetPreview && (
+                <span className="ml-2 text-xs">
+                  · ราคาสุทธิใหม่ ≈ <span className="font-medium text-brand">{money(previewNet!)}</span>
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-xs text-slate-400">กรอกปริมาณและราคาเพื่อดูยอดของบรรทัดนี้</span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)} disabled={saving}>
+            ยกเลิก
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void save(true)}
+            disabled={saving}
+            title="บันทึกแล้วล้างฟอร์มไว้กรอกรายการถัดไป (หมวดงานเดิมยังอยู่)"
+          >
+            <Plus size={14} /> บันทึก + เพิ่มต่อ
+          </Button>
+          <Button size="sm" type="submit" disabled={saving}>
+            <Check size={14} /> {saving ? "กำลังบันทึก..." : "บันทึก"}
+          </Button>
+        </div>
+      </div>
+    </form>
   );
 }
 
 /** ตาราง BOQ ของหมวดที่เปิด (หรือหน้าสรุปทุกหมวด) + แถวแก้ไขในที่ */
+/** ชื่อแบบนี้น่าจะเป็นงานปูกระเบื้อง (ไม่นับหลังคาลอน — มุงคิดคนละแบบ) */
+const looksLikeTile = (name: string) => /กระเบื้อง|แกรนิต|เซรามิ|โมเสค|หินอ่อน/.test(name) && !/หลังคา|ลอน/.test(name);
+
+/**
+ * ลิงก์ตัวคิดกระเบื้องใต้จำนวน — ใช้อยู่ = บอกจำนวนแผ่น/กล่องที่ได้ · ยังไม่ใช้ = ชวนเฉพาะบรรทัดที่ชื่อเป็นงานกระเบื้อง
+ * (บรรทัด ตร.ม. อื่นเปิดได้จากแผงแก้ไข ไม่โชว์ทุกบรรทัดให้รก)
+ */
+function TileLink({ item, onOpen }: Readonly<{ item: BoqItemDto; onOpen: () => void }>) {
+  if (!isAreaUnit(item.unit)) return null;
+  const c = item.tileCalc;
+  if (!c && !looksLikeTile(item.name)) return null;
+  let label = "คิดจำนวนกระเบื้อง";
+  if (c) {
+    const r = tileTakeoff(c, {
+      rows: item.qtyBasis === "SHEET" ? takeoffInputsOf(item.takeoffRows) : null,
+      area: Number(item.quantity) / (1 + Number(item.wasteFactorPct ?? 0) / 100),
+    });
+    label = r.errors.length > 0 ? "ตัวคิดกระเบื้อง" : `${r.pieces.toLocaleString("th-TH")} แผ่น${r.boxes != null ? ` · ${r.boxes.toLocaleString("th-TH")} กล่อง` : ""}`;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="ตัวคิดกระเบื้อง — นับแผ่นตามแนวปู กล่อง ปูนกาว ยาแนว"
+      className={`link-pill -mb-1 -mr-2.5 -mt-0.5 ml-auto flex w-fit items-center gap-1 text-xs ${c ? "text-brand" : "text-slate-400 hover:text-brand"}`}
+    >
+      <Grid3x3 size={11} /> {label}
+    </button>
+  );
+}
+
+/** ข้อความจำนวนของหัวหมวดย่อย — ชิ้นที่ถูกแบ่งหน้าตัดบอกช่วง "(ต่อ) 3–5 จาก 8 รายการ" */
+function subheaderCountText(row: SubheaderRow): string | null {
+  const total = row.itemIds.length;
+  const cut = !row.collapsed && row.from != null && row.to != null && (row.from > 1 || row.to < total);
+  if (cut) return `${row.continued ? "(ต่อ) " : ""}${row.from}–${row.to} จาก ${total} รายการ`;
+  return row.count > 0 ? `(${row.count} รายการ)` : null;
+}
+
+/** ท้ายตาราง BOQ: "รายการ 16–30 จาก 46" + เลขหน้า — หมวดที่มีหน้าเดียวไม่ต้องมีแถบนี้ */
+function BoqPager({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { boqShownCount, boqPage, boqPageCount, setBoqPage, boqPageFrom, boqPageTo } = vm;
+  if (boqPageCount <= 1) return null;
+  return (
+    <div className="border-t border-slate-200 px-3 py-3 text-center">
+      <p className="text-xs text-slate-500 tabular-nums" aria-live="polite">
+        รายการ {boqPageFrom}–{boqPageTo} จาก {boqShownCount}
+      </p>
+      <Pagination page={boqPage} pageCount={boqPageCount} onChange={(p) => setBoqPage(p)} className="mt-1.5" />
+    </div>
+  );
+}
+
 function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { items, missingDriverLabels, openEditInfo, scrollToSection, boqGroups, activeBoqGroup, foldableSubs, toggleAllSubs, allSubsCollapsed, driftItemIds, openBoqGroup, currentVersion, boqRenderRows, toggleSub, editingId, categoryById, driverValueOf, positionInGroup, reordering, moveItem, startEdit, handleDelete, activeBoqIndex } = vm;
+  const { items, missingDriverLabels, openEditInfo, scrollToSection, boqGroups, activeBoqGroup, foldableSubs, toggleAllSubs, allSubsCollapsed, driftItemIds, openBoqGroup, currentVersion, boqPageRows, toggleSub, editingId, categoryById, driverValueOf, positionInGroup, reordering, moveItem, startEdit, handleDelete, activeBoqIndex, sheetItem, setSheetItem, saveItemSheet } = vm;
+  const { tileItem, setTileItem, saveItemTile, materials } = vm;
+  const { boqFocusId, setBoqFocusId, boqPageOfItem, boqPage, setBoqPage } = vm;
+  // iPad (<1280): หน่วยต่อท้ายจำนวน · วัสดุ/ค่าแรงซ้อนในคอลัมน์เดียว · แก้ไข/ลบ เป็น ⋯ — ตารางพอดีจอ หัวตารางติดจอได้
+  // (ผู้ใช้สั่ง 18 ต.ค.) สลับคอลัมน์ใน JSX ไม่ใช่ซ่อนด้วย CSS เพราะแถบหมวด/ยอดรวมใช้ colSpan
+  const narrow = useMediaQuery(NARROW_SCREEN);
+  const cols = narrow ? 6 : 8;
+  // เหล็กเสริม: ชุดเสนอราคา (ใน BOQ) เทียบชุดสั่งตัด — มีเฉพาะโครงการที่ใช้ตัวคิดชิ้นส่วน
+  const rebarCompare = useStructuralCompare(vm.projectId, items);
+  // รายการสั่งเหล็กหน้างาน กางใต้แถบเหล็ก (เดิมอยู่แท็บรายการซื้อของที่ถอดออก) — โหลดแผนตัดเฉพาะตอนกาง
+  const [showSiteRebar, setShowSiteRebar] = useState(false);
+  const rebarCutting = useRebarCutting(vm.projectId, showSiteRebar ? items : []);
+
+  // พาไปหน้าที่บรรทัดเป้าหมายอยู่ (เพิ่งเพิ่ม/เลื่อนลำดับข้ามหน้า/เปิดแก้จากแท็บอื่น) แล้วเลื่อนให้เห็น
+  const focusPage = boqFocusId ? boqPageOfItem(boqFocusId) : 0;
+  useEffect(() => {
+    if (!boqFocusId) return;
+    if (focusPage === 0) {
+      // ไม่อยู่ในหมวดที่เปิด/ถูกยุบ — เลิกตาม ไม่ค้างค่าไว้ไปกระโดดทีหลังโดยไม่ตั้งใจ
+      setBoqFocusId(null);
+      return;
+    }
+    if (focusPage !== boqPage) {
+      setBoqPage(focusPage, false, true);
+      setBoqFocusId(boqFocusId); // setBoqPage ล้างเป้าหมาย — ตามต่อเพื่อเลื่อนแถวเข้าจอในรอบถัดไป
+      return;
+    }
+    document.querySelector(`[data-boq-row-id="${boqFocusId}"]`)?.scrollIntoView({ block: "nearest" });
+    setBoqFocusId(null);
+  }, [boqFocusId, focusPage, boqPage, setBoqFocusId, setBoqPage]);
+
   return (
     <>
       {items.length > 0 && (
         <>
+          <RebarCompareBar compare={rebarCompare} siteOpen={showSiteRebar} onOpenSite={() => setShowSiteRebar((v) => !v)} />
+          {showSiteRebar && (
+            <SiteRebarCard compare={rebarCompare} cutting={rebarCutting} projectId={vm.projectId} projectNo={vm.project.projectNo} />
+          )}
+          <StructuralMembersPanel
+            projectId={vm.projectId}
+            items={items}
+            materials={materials}
+            categoryOptions={vm.categoryOptions}
+            editable={vm.editable}
+            onChanged={vm.silentRefresh}
+          />
           {missingDriverLabels.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
               <span>
@@ -3070,14 +4181,15 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
           ) : (
           <>
           <div className="mt-4 rounded-lg border border-slate-200 bg-white">
-          {/* กับดัก sticky: overflow ใด ๆ บนตัวห่อทำให้หัวตารางเลิกติดจอ — ปล่อยล้นได้เฉพาะจอแคบ */}
-          <div className="overflow-x-auto lg:overflow-x-visible">
+          {/* กับดัก sticky: overflow ใด ๆ บนตัวห่อทำให้หัวตารางเลิกติดจอ (และหัวตารางเลื่อนลงไปทับแถว 88px)
+              — ปล่อยเลื่อนข้างได้เฉพาะจอเล็กกว่า iPad · iPad ขึ้นไปตารางพอดีจอแล้ว (คอลัมน์ยุบด้านบน) */}
+          <div className="overflow-x-auto md:overflow-x-visible">
           <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           {/* top-22 (88px) = แถบหัวโครงการ 48 + แถบหมวด 40 — เลื่อนลึกแค่ไหนก็เห็นหมวด ยอดหมวด และชื่อคอลัมน์ */}
           <thead className="sticky top-22 z-10 text-left text-xs font-medium text-slate-600">
             {/* ชื่อหมวดเป็นแถวแรกของหัวตาราง (แบบเดียวกับหน้าแม่แบบ) + ยอดรวมหมวดชิดขวาตรงคอลัมน์ "รวม" */}
             <tr>
-              <th colSpan={6} scope="colgroup" className="bg-[#ececf7] px-3 py-2.5 font-normal shadow-[inset_0_-1px_0_0_rgb(203,213,225)]">
+              <th colSpan={cols - 2} scope="colgroup" className="bg-[#ececf7] px-3 py-2.5 font-normal shadow-[inset_0_-1px_0_0_rgb(203,213,225)]">
                 <div id="boq-group-title" className="flex items-baseline gap-3">
                   {activeBoqGroup.code && (
                     <span className="font-mono text-sm font-semibold text-brand">{activeBoqGroup.code}</span>
@@ -3097,20 +4209,21 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
               <th className="px-3 py-2">รหัส</th>
               <th className="px-3 py-2">รายการ</th>
               <th className="px-3 py-2 text-right">จำนวน</th>
-              <th className="px-3 py-2">หน่วย</th>
-              <th className="px-3 py-2 text-right">ราคาวัสดุ/หน่วย</th>
-              <th className="px-3 py-2 text-right">ค่าแรง/หน่วย</th>
+              {!narrow && <th className="px-3 py-2">หน่วย</th>}
+              <th className="px-3 py-2 text-right">{narrow ? "วัสดุ / ค่าแรง" : "ราคาวัสดุ/หน่วย"}</th>
+              {!narrow && <th className="px-3 py-2 text-right">ค่าแรง/หน่วย</th>}
               <th className="px-3 py-2 text-right">รวม</th>
-              <th className="px-3 py-2"></th>
+              <th className="px-3 py-2"><span className="sr-only">คำสั่ง</span></th>
             </tr>
           </thead>
           <tbody>
-            {boqRenderRows.map((row) => {
+            {boqPageRows.map((row) => {
               if (row.type === "subheader") {
+                const countText = subheaderCountText(row);
                 // แถบคั่นบาง ๆ บอกหมวดย่อย + จำนวนบรรทัด แล้วลากเส้นไปจนสุดขวา (อ่านเป็นชั้นเหมือนเอกสาร BOQ)
                 return (
-                  <tr key={`s-${row.key}`}>
-                    <td colSpan={8} className="px-3 pt-3 pb-1">
+                  <tr key={`s-${row.key}${row.continued ? "-cont" : ""}`}>
+                    <td colSpan={cols} className="px-3 pt-3 pb-1">
                       <button
                         type="button"
                         onClick={() => toggleSub(row.key, row.itemIds)}
@@ -3121,11 +4234,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
                           {row.collapsed ? "▸" : "▾"}
                         </span>
                         <span className="text-xs font-medium text-slate-500">{row.name}</span>
-                        {row.count > 0 && (
-                          <span className="shrink-0 text-xs text-slate-400">
-                            ({row.count} รายการ)
-                          </span>
-                        )}
+                        {countText && <span className="shrink-0 text-xs text-slate-400">{countText}</span>}
                         <span className="h-px flex-1 bg-slate-200" />
                       </button>
                     </td>
@@ -3136,7 +4245,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
               return editingId === item.id ? (
                 <BoqEditRow key={item.id} vm={vm} item={item} />
               ) : (
-                <tr key={item.id} className="border-t border-slate-100">
+                <tr key={item.id} data-boq-row-id={item.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
                     {categoryById.get(item.categoryId)?.code ?? "—"}
                   </td>
@@ -3167,7 +4276,21 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
                   </td>
                   <td className="px-3 py-2 text-right text-slate-800">
                     {item.quantity}
+                    {narrow && <span className="whitespace-nowrap text-slate-600"> {item.unit}</span>}
+                    {item.qtyBasis === "SHEET" && (
+                      <button
+                        type="button"
+                        onClick={() => setSheetItem(item)}
+                        title="เปิดใบถอดแบบ — ดูว่าจำนวนนี้มาจากชิ้นไหนบ้าง และแก้ได้"
+                        className="link-pill -mb-1 -mr-2.5 -mt-0.5 ml-auto flex w-fit items-center gap-1 text-xs text-brand"
+                      >
+                        <Ruler size={11} /> ใบถอดแบบ {item.takeoffRows.length} แถว
+                      </button>
+                    )}
+                    <RebarCompareTag compare={rebarCompare} itemId={item.id} />
+                    <TileLink item={item} onOpen={() => setTileItem(item)} />
                     {item.qtyBasis !== "MANUAL" &&
+                      item.qtyBasis !== "SHEET" &&
                       (driverValueOf(item.qtyBasis) == null ? (
                         <span
                           className="mt-0.5 block text-xs text-amber-600"
@@ -3186,10 +4309,13 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
                         </span>
                       ))}
                   </td>
-                  <td className="px-3 py-2 text-slate-700">{item.unit}</td>
-                  <td className="px-3 py-2 text-right text-slate-800">{money(item.materialUnitPrice)}</td>
-                  <td className="px-3 py-2 text-right text-slate-800">{money(item.laborUnitPrice)}</td>
-                  <td className="px-3 py-2 text-right text-slate-800 font-medium">{money(item.lineTotal)}</td>
+                  {!narrow && <td className="px-3 py-2 text-slate-700">{item.unit}</td>}
+                  <td className="px-3 py-2 text-right text-slate-800 whitespace-nowrap">
+                    {money(item.materialUnitPrice)}
+                    {narrow && <span className="block text-xs text-slate-500">แรง {money(item.laborUnitPrice)}</span>}
+                  </td>
+                  {!narrow && <td className="px-3 py-2 text-right text-slate-800">{money(item.laborUnitPrice)}</td>}
+                  <td className="px-3 py-2 text-right text-slate-800 font-medium whitespace-nowrap">{money(item.lineTotal)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       {(() => {
@@ -3223,12 +4349,24 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
                           </div>
                         );
                       })()}
-                      <Button variant="ghost" size="sm" onClick={() => startEdit(item)}>
-                        <Pencil size={14} /> แก้ไข
-                      </Button>
-                      <Button variant="dangerQuiet" size="sm" onClick={() => handleDelete(item.id)}>
-                        <Trash2 size={14} /> ลบ
-                      </Button>
+                      {narrow ? (
+                        <RowMenu
+                          label={`คำสั่งของ ${item.name}`}
+                          items={[
+                            { key: "edit", label: "แก้ไข", onSelect: () => startEdit(item) },
+                            { key: "delete", label: "ลบ", danger: true, onSelect: () => void handleDelete(item.id) },
+                          ]}
+                        />
+                      ) : (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => startEdit(item)}>
+                            <Pencil size={14} /> แก้ไข
+                          </Button>
+                          <Button variant="dangerQuiet" size="sm" onClick={() => handleDelete(item.id)}>
+                            <Trash2 size={14} /> ลบ
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -3239,7 +4377,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
           {boqGroups.length > 1 && (
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-50">
-                <td colSpan={6} className="px-3 py-2 text-right font-medium text-slate-700">
+                <td colSpan={cols - 2} className="px-3 py-2 text-right font-medium text-slate-700">
                   รวมต้นทุนตรงทั้งหมด
                 </td>
                 <td className="px-3 py-2 text-right font-semibold text-slate-800 tabular-nums">
@@ -3251,6 +4389,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
           )}
         </table>
           </div>
+          <BoqPager vm={vm} />
           </div>
           {/* อ่านหมวดยาวจบแล้วไปต่อได้เลย ไม่ต้องเลื่อนกลับขึ้นไปที่แถบ */}
           <nav aria-label="เปลี่ยนหมวด" className="mt-3 flex items-center justify-between gap-3 text-sm">
@@ -3287,6 +4426,26 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
           )}
         </>
       )}
+      {tileItem && (
+        <TileCalcDialog
+          item={tileItem}
+          materials={materials}
+          onApply={(payload) => saveItemTile(tileItem, payload)}
+          onDetach={tileItem.tileCalc ? (price) => saveItemTile(tileItem, null, price) : undefined}
+          onClose={() => setTileItem(null)}
+        />
+      )}
+      {sheetItem && (
+        <TakeoffSheetDialog
+          lineName={sheetItem.name}
+          unit={sheetItem.unit}
+          initialRows={sheetItem.takeoffRows}
+          initialWaste={sheetItem.wasteFactorPct ?? "0"}
+          onApply={(rows, waste) => saveItemSheet(sheetItem, rows, waste)}
+          onDetach={() => saveItemSheet(sheetItem, null, null)}
+          onClose={() => setSheetItem(null)}
+        />
+      )}
     </>
   );
 }
@@ -3294,6 +4453,10 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
 /** รายละเอียดโครงการ: ดูอย่างเดียว หรือฟอร์มแก้ไข */
 function ProjectInfoCard({ vm }: Readonly<{ vm: ProjectVM }>) {
   const { showEditInfo, infoForm, setInfoForm, handleSaveInfo, savingInfo, setShowEditInfo, project } = vm;
+  const { infoOpenings, setInfoOpenings, showOpenings, setShowOpenings } = vm;
+  // รายการที่จะบันทึก: ที่แก้ในฟอร์มนี้ ไม่งั้นของเดิมในโครงการ
+  const openings = infoOpenings ?? project.openings ?? [];
+  const wallInput = infoForm.wallAreaSqm.trim() === "" ? null : Number(infoForm.wallAreaSqm);
   return (
     <>
       {showEditInfo ? (
@@ -3401,22 +4564,43 @@ function ProjectInfoCard({ vm }: Readonly<{ vm: ProjectVM }>) {
                 />
               </label>
             </div>
+            {/* ช่องเปิดหักจากพื้นที่ผนัง — งานก่อ/ฉาบ/ทาสีทุกบรรทัดที่คิดต่อผนังลดตาม */}
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-xs">
+              <span className="text-slate-700">ช่องเปิดประตู/หน้าต่าง</span>
+              <span className="text-slate-800 tabular-nums">
+                {openings.length > 0
+                  ? `${openingsTotal(openings).toLocaleString("th-TH", { minimumFractionDigits: 2 })} ตร.ม. (${openings.reduce((n, o) => n + o.count, 0)} ช่อง)`
+                  : "ยังไม่ได้ใส่ — ผนังคิดเต็มพื้นที่"}
+              </span>
+              <Button variant="ghost" size="sm" onClick={() => setShowOpenings(true)}>
+                {openings.length > 0 ? "แก้รายการ" : "ใส่รายการช่องเปิด"}
+              </Button>
+              {showOpenings && (
+                <OpeningsDialog
+                  initial={openings}
+                  wallArea={wallInput}
+                  onApply={(next) => {
+                    setInfoOpenings(next);
+                    setShowOpenings(false);
+                  }}
+                  onClose={() => setShowOpenings(false)}
+                />
+              )}
+            </div>
           </div>
           <label className="flex flex-col gap-1 text-xs text-slate-700">
             <span>วันเริ่มก่อสร้าง</span>
-            <input
-              type="date"
+            <DateInput
               value={infoForm.startDate}
-              onChange={(e) => setInfoForm((f) => ({ ...f, startDate: e.target.value }))}
+              onChange={(v) => setInfoForm((f) => ({ ...f, startDate: v }))}
               className="border border-slate-300 rounded-md px-2 py-1 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-700">
             <span>วันคาดว่าแล้วเสร็จ</span>
-            <input
-              type="date"
+            <DateInput
               value={infoForm.targetEndDate}
-              onChange={(e) => setInfoForm((f) => ({ ...f, targetEndDate: e.target.value }))}
+              onChange={(v) => setInfoForm((f) => ({ ...f, targetEndDate: v }))}
               className="border border-slate-300 rounded-md px-2 py-1 text-sm"
             />
           </label>
@@ -3463,7 +4647,9 @@ function ProjectInfoCard({ vm }: Readonly<{ vm: ProjectVM }>) {
               <dd className="text-slate-800">
                 {[
                   project.wallAreaSqm &&
-                    `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} ตร.ม.`,
+                    (project.openingAreaSqm
+                      ? `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} − ช่องเปิด ${Number(project.openingAreaSqm).toLocaleString("th-TH")} = ${(Number(project.wallAreaSqm) - Number(project.openingAreaSqm)).toLocaleString("th-TH", { maximumFractionDigits: 2 })} ตร.ม.`
+                      : `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} ตร.ม.`),
                   project.perimeterM &&
                     `รอบรูป ${Number(project.perimeterM).toLocaleString("th-TH")} ม.`,
                   project.concreteVolumeM3 &&
@@ -3498,7 +4684,7 @@ function ProjectInfoCard({ vm }: Readonly<{ vm: ProjectVM }>) {
 
 /** แท็บใบเสนอราคา: ตารางทุกฉบับ + เปลี่ยนสถานะ/แก้วันยืนราคา/ไฟล์แนบ */
 function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { activeTab, handleCreateQuote, isCustom, hasCustomPrice, items, quotes, openValidity, handleQuoteTransition, projectId, handleDeleteQuote, validityEdit, setValidityEdit, saveValidity, savingValidity, reloadQuotes } = vm;
+  const { activeTab, handleCreateQuote, quoteBlocker, scrollToSection, quotes, openValidity, handleQuoteTransition, projectId, handleDeleteQuote, validityEdit, setValidityEdit, saveValidity, savingValidity, reloadQuotes, exportingExcel, exportQuoteExcel } = vm;
   return (
     <>
       {activeTab === "quotes" && (
@@ -3508,26 +4694,49 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
         <button
           type="button"
           onClick={handleCreateQuote}
-          disabled={isCustom ? !hasCustomPrice : items.length === 0}
+          disabled={quoteBlocker != null}
           className="text-sm bg-slate-800 text-white rounded-md px-3 py-1.5 disabled:opacity-40"
         >
           + สร้างใบเสนอราคาใหม่
         </button>
       </div>
 
+      {/* ปุ่มจางที่ไม่บอกเหตุผล = คนใช้ยืนงงอยู่ตรงนี้โดยไม่รู้ว่าต้องไปทำอะไรก่อน */}
+      {quoteBlocker && (
+        <p className="mb-2 text-sm text-amber-700">
+          ยังสร้างใบเสนอราคาไม่ได้ — {BLOCKER_TEXT[quoteBlocker].detail}{" "}
+          <button
+            type="button"
+            onClick={() => scrollToSection(BLOCKER_TEXT[quoteBlocker].section)}
+            className="underline decoration-dotted underline-offset-2 hover:text-brand"
+          >
+            {BLOCKER_TEXT[quoteBlocker].action}
+          </button>
+        </p>
+      )}
+
       {quotes.length === 0 && <p className="text-slate-500">ยังไม่มีใบเสนอราคา</p>}
 
+      {/* ไฟล์แนบอยู่ใต้ใบแต่ละใบ ไม่ใช่ที่ตัวโครงการ — ไม่มีใบก็ไม่มีที่อัป ต้องบอกไว้ตรงนี้ */}
+      {quotes.length === 0 && !quoteBlocker && (
+        <p className="mt-1 text-sm text-slate-500">
+          สร้างใบเสนอราคาก่อน แล้วช่องแนบไฟล์ BOQ/แบบ (Excel หรือ PDF) จะอยู่ใต้ใบนั้น
+        </p>
+      )}
+
       {quotes.length > 0 && (
-        <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70 mb-8">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-8">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
             <tr>
               {/* whitespace-nowrap: พอเพิ่มคอลัมน์ "ลูกค้าเปิดดู" ที่เหลือถูกบีบจน "ตอบรับเมื่อ" ตกบรรทัด */}
-              <th className="whitespace-nowrap px-3 py-2">ฉบับที่</th>
+              {/* iPad (<1280): ฉบับที่ไปใต้เลขที่ · เวลาตอบรับไปใต้สถานะ — เลขที่ไม่ตกเป็นสามบรรทัด (ผู้ใช้สั่ง 18 ต.ค.) */}
+              <th className="hidden whitespace-nowrap px-3 py-2 xl:table-cell">ฉบับที่</th>
               <th className="whitespace-nowrap px-3 py-2">เลขที่</th>
               <th className="whitespace-nowrap px-3 py-2">สถานะ</th>
               <th className="whitespace-nowrap px-3 py-2">ส่งเมื่อ</th>
               <th className="whitespace-nowrap px-3 py-2">ลูกค้าเปิดดู</th>
-              <th className="whitespace-nowrap px-3 py-2">ตอบรับเมื่อ</th>
+              <th className="hidden whitespace-nowrap px-3 py-2 xl:table-cell">ตอบรับเมื่อ</th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
@@ -3535,12 +4744,21 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
             {quotes.map((q) => (
               <Fragment key={q.id}>
                 <tr className="border-t border-slate-100">
-                  <td className="px-3 py-2 text-slate-700">ฉบับที่ {q.revisionNo}</td>
-                  <td className="px-3 py-2 text-slate-800">{q.quoteNo}</td>
+                  <td className="hidden px-3 py-2 text-slate-700 xl:table-cell">ฉบับที่ {q.revisionNo}</td>
+                  <td className="px-3 py-2 text-slate-800">
+                    <span className="whitespace-nowrap">{q.quoteNo}</span>
+                    <span className="block text-xs text-slate-500 xl:hidden">ฉบับที่ {q.revisionNo}</span>
+                  </td>
                   <td className="px-3 py-2">
                     <span className={badgeClass(QUOTE_STATUS_COLOR[q.status])}>
                       {QUOTE_STATUS_LABEL[q.status]}
                     </span>
+                    <QuoteApprovalStatus quote={q} />
+                    {q.respondedAt && (
+                      <span className="mt-1 block text-xs text-slate-500 xl:hidden">
+                        ตอบรับ {formatDateTime(q.respondedAt)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-slate-700">
                     {formatDateTime(q.sentAt)}
@@ -3563,13 +4781,21 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
                   <td className="px-3 py-2">
                     <QuoteViewCell quote={q} />
                   </td>
-                  <td className="px-3 py-2 text-slate-700">{formatDateTime(q.respondedAt)}</td>
+                  <td className="hidden px-3 py-2 text-slate-700 xl:table-cell">{formatDateTime(q.respondedAt)}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center flex-wrap gap-2">
-                      {QUOTE_NEXT_TRANSITIONS[q.status].map((s) => (
+                      {q.status === "DRAFT" && (
+                        <QuoteApprovalControls
+                          projectId={projectId}
+                          quote={q}
+                          onChanged={reloadQuotes}
+                          onSend={() => handleQuoteTransition(q.id, "SENT")}
+                        />
+                      )}
+                      {q.status !== "DRAFT" && QUOTE_NEXT_TRANSITIONS[q.status].map((s) => (
                         <Button
                           key={s}
-                          variant={s === "SENT" ? "secondary" : "ghost"}
+                          variant={s === "SENT" ? "brand" : "ghost"}
                           size="sm"
                           onClick={() => handleQuoteTransition(q.id, s)}
                         >
@@ -3583,13 +4809,23 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
                         href={pdfViewerPath("quote", projectId, q.id)}
                         target="_blank"
                         rel="noopener"
-                        className={buttonClasses("ghost", "sm")}
+                        className={`${buttonClasses("ghost", "sm")} whitespace-nowrap`}
                       >
                         <FileText size={14} /> เปิด PDF
                       </a>
+                      {/* ฉบับลูกค้า — ตัวเลขชุดเดียวกับ PDF ไม่มีราคาทุน ส่งต่อให้ลูกค้า/ผู้ควบคุมงานได้ */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => exportQuoteExcel(q.id, q.quoteNo)}
+                        disabled={exportingExcel === q.id}
+                        title="BOQ ราคาตามใบเสนอราคานี้ ไม่มีราคาทุน ส่งให้ลูกค้าได้"
+                      >
+                        <FileSpreadsheet size={14} /> {exportingExcel === q.id ? "กำลังสร้าง..." : "Excel"}
+                      </Button>
                       {q.status === "DRAFT" && (
                         <Button variant="dangerQuiet" size="sm" onClick={() => handleDeleteQuote(q.id, q.quoteNo)}>
-                          <Trash2 size={14} /> ลบฉบับร่าง
+                          <Trash2 size={14} /> ลบฉบับร่างถาวร
                         </Button>
                       )}
                     </div>
@@ -3601,13 +4837,12 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
                       <div className="flex flex-wrap items-center gap-2">
                         <label className="flex items-center gap-2 text-xs text-slate-600">
                           <span>ยืนราคาถึงวันที่</span>
-                          <input
-                            type="date"
+                          <DateInput
                             min={todayBangkok()}
                             max={addDaysIso(todayBangkok(), 365)}
                             value={validityEdit.value}
-                            onChange={(e) =>
-                              setValidityEdit({ quoteId: q.id, value: e.target.value })
+                            onChange={(v) =>
+                              setValidityEdit({ quoteId: q.id, value: v })
                             }
                             className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
                           />
@@ -3644,6 +4879,8 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
                 )}
                 <tr>
                   <td colSpan={7} className="px-3 pb-3 pt-0 bg-white">
+                    <QuoteReturnNote quote={q} />
+                    <QuoteLockedNote quote={q} />
                     <QuoteAttachmentsPanel
                       projectId={projectId}
                       quoteId={q.id}
@@ -3656,6 +4893,7 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
         </>
@@ -3665,155 +4903,343 @@ function QuotesTab({ vm }: Readonly<{ vm: ProjectVM }>) {
 }
 
 /** แท็บสัญญา: ออกสัญญาจากแม่แบบ + รายการสัญญา + แผงแก้ข้อความ/งวดเงิน */
-function ContractsTab({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { activeTab, contractTemplates, newContractTemplateId, setNewContractTemplateId, handleCreateContract, contracts, handleSignContract, setEditingContractId, editingContractId, projectId, silentRefresh } = vm;
+const money2 = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * แท็บ "สัญญาและการเงิน" — ทุกเรื่องของสัญญาอยู่ที่เดียว (แบบ Procore/Buildertrend)
+ *
+ * หัวการ์ด = สัญญาที่ลงนามแล้ว + มูลค่าเดิม → ปัจจุบัน (รวมงานเพิ่ม-ลด) · ข้างในแยกเป็น 3 มุมมองย่อย
+ * งวดและรับเงิน (ค่าเริ่มต้น) → งานเพิ่ม-ลด → เอกสารสัญญา (ข้อความ/PDF/ฉบับร่าง)
+ * ยังไม่ลงนามสักฉบับ = มีแต่งานเอกสาร จึงแสดงรายการสัญญาตรง ๆ ไม่มีหัวการ์ดกับมุมมองย่อย
+ * มีสัญญาที่ลงนามหลายฉบับ (เช่น ออกแบบ + ก่อสร้างแยกกัน) = หัวการ์ดกลายเป็นช่องเลือกฉบับ
+ */
+function ContractFinanceTab({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { contracts, contractMoney, projectId, signedContracts, activeContract, contractView, setContractParams, silentRefresh, goTab } = vm;
+
+  if (!activeContract) {
+    return (
+      <div id="contracts-section" className="scroll-mt-16">
+        <ContractDocuments vm={vm} title="สัญญา" />
+        <p className="mt-3 text-xs text-slate-500">ลงนามสัญญาแล้ว งวดรับเงินและงานเพิ่ม-ลดจะอยู่ในแท็บนี้</p>
+      </div>
+    );
+  }
+
+  const view = contractMoney.get(activeContract.id);
+  const legacy = Boolean(view && !view.hasPlan && view.contractAmount == null);
+  const original = activeContract.amount == null ? null : Number(activeContract.amount);
+  // มูลค่าปัจจุบัน = ผลรวมแผนงวดหลังงานเพิ่ม-ลด (ระบบบังคับให้เท่ามูลค่าสัญญาเสมอ)
+  const current = view?.hasPlan ? view.summary.planTotal : null;
+  const delta = original != null && current != null ? Math.round((current - original) * 100) / 100 : 0;
+  const drafts = contracts.filter((c) => !c.signedAt).length;
+  const views: { key: ContractView; label: string }[] = [
+    { key: "payments", label: "งวดและรับเงิน" },
+    { key: "changes", label: "งานเพิ่ม-ลด" },
+    { key: "documents", label: drafts > 0 ? `เอกสารสัญญา · ร่าง ${drafts}` : "เอกสารสัญญา" },
+  ];
+
+  return (
+    <div id="contracts-section" className="scroll-mt-16">
+      <div className="mb-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            {signedContracts.length > 1 ? (
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <span>สัญญา</span>
+                <select
+                  value={activeContract.id}
+                  onChange={(e) => setContractParams({ contract: e.target.value })}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-medium text-slate-800"
+                >
+                  {signedContracts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.contractNo}
+                      {c.templateName ? ` · ${c.templateName}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="text-sm text-slate-700">
+                สัญญา <span className="font-semibold text-slate-800">{activeContract.contractNo}</span>
+              </p>
+            )}
+            <p className="mt-0.5 text-xs text-slate-500">
+              ลงนาม {formatDateTime(activeContract.signedAt)}
+              {/* มีช่องเลือกฉบับ = ชื่อแม่แบบอยู่ในตัวเลือกแล้ว ไม่พิมพ์ซ้ำ */}
+              {signedContracts.length === 1 && activeContract.templateName && ` · ${activeContract.templateName}`}
+            </p>
+          </div>
+          <a
+            href={pdfViewerPath("contract", projectId, activeContract.id)}
+            target="_blank"
+            rel="noopener"
+            className="link-pill -mr-2.5 inline-flex items-center gap-1 text-xs font-medium text-brand"
+          >
+            <FileText size={13} /> เปิดสัญญา (PDF)
+          </a>
+        </div>
+        <p className="mt-2 text-sm text-slate-700 tabular-nums">
+          {original == null ? (
+            <span className="text-slate-500">สัญญาเก่าที่ไม่ได้บันทึกมูลค่าไว้</span>
+          ) : Math.abs(delta) >= 0.01 && current != null ? (
+            <>
+              มูลค่าตามสัญญา {money2(original)} → ปัจจุบัน <b className="font-semibold text-slate-800">{money2(current)}</b> บาท{" "}
+              <span className={delta > 0 ? "text-emerald-700" : "text-red-700"}>
+                (งานเพิ่ม-ลด {delta > 0 ? "+" : "−"}
+                {money2(Math.abs(delta))})
+              </span>
+            </>
+          ) : (
+            <>
+              มูลค่าสัญญา <b className="font-semibold text-slate-800">{money2(original)}</b> บาท
+            </>
+          )}
+        </p>
+      </div>
+
+      {/* มุมมองย่อย — ปุ่มแคปซูล ไม่ใช่แท็บซ้อนแท็บ (เส้นใต้ซ้อนสองชั้นอ่านยาก) */}
+      <div role="group" aria-label="เรื่องของสัญญา" className="mb-3 flex flex-wrap gap-1.5">
+        {views.map((v) => {
+          const on = v.key === contractView;
+          return (
+            <button
+              key={v.key}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setContractParams({ view: v.key })}
+              className={`rounded-full border px-3 py-1 text-sm ${
+                on ? "border-brand/30 bg-brand/10 font-medium text-brand" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {v.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {contractView === "payments" &&
+        (legacy ? (
+          <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+            สัญญาเก่าที่ไม่ได้บันทึกมูลค่าและงวดเงินไว้ — ยังติดตามรับเงินในระบบไม่ได้
+          </p>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <ContractPaymentsPanel key={activeContract.id} projectId={projectId} contractId={activeContract.id} />
+          </div>
+        ))}
+
+      {/* งานเพิ่ม-ลด = บันทึกแนบท้ายสัญญาฉบับนี้ (เปลี่ยนมูลค่าและงวดเงิน) — มีได้เฉพาะสัญญาที่ลงนามแล้ว */}
+      {contractView === "changes" && (
+        <ChangeOrdersPanel
+          key={activeContract.id}
+          projectId={projectId}
+          contract={activeContract}
+          onChanged={() => void silentRefresh()}
+          onGoToBoq={() => goTab("boq")}
+        />
+      )}
+
+      {contractView === "documents" && <ContractDocuments vm={vm} title="เอกสารสัญญาทั้งหมด" />}
+    </div>
+  );
+}
+
+/** รายการสัญญาทุกฉบับ (ร่าง + ลงนามแล้ว) — ออกฉบับใหม่ · แก้ถ้อยคำ/แผนงวดก่อนลงนาม · ลงนาม · PDF */
+function ContractDocuments({ vm, title }: Readonly<{ vm: ProjectVM; title: string }>) {
+  const { contractTemplates, newContractTemplateId, setNewContractTemplateId, handleCreateContract, contracts, handleSignContract, setEditingContractId, editingContractId, projectId, silentRefresh } = vm;
   return (
     <>
-      {activeTab === "contracts" && (
-        <>
-          <div
-            id="contracts-section"
-            className="mb-2 flex flex-wrap items-center justify-between gap-2 scroll-mt-16"
-          >
-            <h2 className="text-lg font-medium text-slate-800">สัญญา</h2>
-            <div className="flex flex-wrap items-center gap-2">
-              {/* ช่องเลือกโผล่เฉพาะตอนมีให้เลือกจริง — มีแม่แบบเดียวหน้าตาเหมือนเดิมเป๊ะ */}
-              {contractTemplates.length > 1 && (
-                <label className="flex items-center gap-1.5 text-sm text-slate-600">
-                  <span>ใช้แม่แบบ</span>
-                  <select
-                    value={newContractTemplateId}
-                    onChange={(e) => setNewContractTemplateId(e.target.value)}
-                    // คุมความกว้างไว้ ไม่งั้น <select> ขยายตามชื่อแม่แบบที่ยาวที่สุด
-                    // แล้วไปกินพื้นที่แถบหัวเกือบครึ่ง (ชื่อเต็มยังเห็นตอนกางรายการ)
-                    className="max-w-[240px] truncate rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800"
-                  >
-                    {contractTemplates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                        {t.isDefault ? " (ค่าเริ่มต้น)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <button
-                type="button"
-                onClick={handleCreateContract}
-                className="text-sm bg-slate-800 text-white rounded-md px-3 py-1.5"
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-medium text-slate-800">{title}</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* ช่องเลือกโผล่เฉพาะตอนมีให้เลือกจริง — มีแม่แบบเดียวหน้าตาเหมือนเดิมเป๊ะ */}
+          {contractTemplates.length > 1 && (
+            <label className="flex items-center gap-1.5 text-sm text-slate-600">
+              <span>ใช้แม่แบบ</span>
+              <select
+                value={newContractTemplateId}
+                onChange={(e) => setNewContractTemplateId(e.target.value)}
+                // คุมความกว้างไว้ ไม่งั้น <select> ขยายตามชื่อแม่แบบที่ยาวที่สุด
+                // แล้วไปกินพื้นที่แถบหัวเกือบครึ่ง (ชื่อเต็มยังเห็นตอนกางรายการ)
+                className="max-w-[240px] truncate rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800"
               >
-                + สร้างสัญญาใหม่
-              </button>
-            </div>
-          </div>
-
-          {contracts.length === 0 && <p className="text-slate-500">ยังไม่มีสัญญา</p>}
-
-          {contracts.length > 0 && (
-            <table className="w-full text-sm bg-white border border-slate-200 rounded-lg overflow-hidden [&_tbody_tr:hover]:bg-slate-50/70">
-              <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
-                <tr>
-                  <th className="px-3 py-2">เลขที่</th>
-                  <th className="px-3 py-2">แม่แบบ</th>
-                  <th className="px-3 py-2">ลงนามเมื่อ</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((c) => (
-                  <Fragment key={c.id}>
-                    <tr className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-800">{c.contractNo}</td>
-                      {/* สัญญาที่ออกก่อนมีระบบแม่แบบค่าเป็น null จริง — ขีดไว้ ไม่เดาชื่อใส่แทน */}
-                      <td className="px-3 py-2 text-slate-600">{c.templateName ?? "—"}</td>
-                      <td className="px-3 py-2 text-slate-700">{formatDateTime(c.signedAt)}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center flex-wrap gap-2">
-                          {!c.signedAt && (
-                            <Button variant="secondary" size="sm" onClick={() => handleSignContract(c.id)}>
-                              <Check size={14} /> ลงนาม
-                            </Button>
-                          )}
-                          {/* ทางเข้าเดียวของการเติมยอดงวดเงิน — แม่แบบใส่ยอดจริงไม่ได้
-                              เพราะใช้ร่วมกันทุกโครงการ */}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              setEditingContractId((id) => (id === c.id ? null : c.id))
-                            }
-                          >
-                            <Pencil size={14} />{" "}
-                            {/* หลังลงนามแล้ว สิ่งที่อยู่หลังปุ่มนี้คือการติดตามรับเงิน ไม่ใช่ถ้อยคำ
-                                (ถ้อยคำแก้ไม่ได้แล้ว) ชื่อปุ่มต้องบอกสิ่งที่จะได้เจอจริง ๆ */}
-                            {contractPanelLabel(editingContractId === c.id, Boolean(c.signedAt))}
-                          </Button>
-                          <a
-                            href={pdfViewerPath("contract", projectId, c.id)}
-                            target="_blank"
-                            rel="noopener"
-                            className={buttonClasses("ghost", "sm")}
-                          >
-                            <FileText size={14} /> เปิด PDF
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                    {editingContractId === c.id && (
-                      <tr className="border-t border-slate-100">
-                        <td colSpan={4} className="bg-slate-50 px-3 py-4">
-                          <ContractBodyEditor
-                            projectId={projectId}
-                            contract={c}
-                            onSaved={async () => {
-                              setEditingContractId(null);
-                              await silentRefresh();
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                {contractTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                    {t.isDefault ? " (ค่าเริ่มต้น)" : ""}
+                  </option>
                 ))}
-              </tbody>
-            </table>
+              </select>
+            </label>
           )}
-        </>
+          <button
+            type="button"
+            onClick={handleCreateContract}
+            className="text-sm bg-slate-800 text-white rounded-md px-3 py-1.5"
+          >
+            + สร้างสัญญาใหม่
+          </button>
+        </div>
+      </div>
+
+      {contracts.length === 0 && <p className="text-slate-500">ยังไม่มีสัญญา</p>}
+
+      {contracts.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
+          <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-200 [&_th]:border-b [&_th]:border-slate-300">
+            <tr>
+              <th className="px-3 py-2">เลขที่</th>
+              <th className="px-3 py-2">แม่แบบ</th>
+              <th className="px-3 py-2">สถานะ</th>
+              <th className="px-3 py-2 text-right">มูลค่าสัญญา</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {contracts.map((c) => {
+              const open = editingContractId === c.id;
+              // แท็บสัญญา = งานเอกสารอย่างเดียว · เงินที่เก็บได้อยู่แท็บ "รับเงิน" ที่เดียว (ไม่โชว์ตัวเลขซ้ำตรงนี้)
+              // กางได้เฉพาะสัญญาที่ยังไม่ลงนาม (แก้ถ้อยคำ/แผนงวด) — ลงนามแล้วถ้อยคำแก้ไม่ได้
+              const expandable = !c.signedAt;
+              const toggle = () => setEditingContractId((id) => (id === c.id ? null : c.id));
+              return (
+              <Fragment key={c.id}>
+                {/* ทั้งแถวกดกาง/พับได้ (ปุ่มลงนามกับ PDF ในแถวไม่นับ) — ลูกศรท้ายแถวคือปุ่มจริงสำหรับคีย์บอร์ด */}
+                <tr
+                  id={`contract-row-${c.id}`}
+                  onClick={(e) => {
+                    if (!expandable || (e.target as HTMLElement).closest("a,button")) return;
+                    toggle();
+                  }}
+                  className={`border-t border-slate-100 scroll-mt-14 ${expandable ? "cursor-pointer" : ""} ${open ? "bg-slate-50" : ""}`}
+                >
+                  <td className="px-3 py-2 whitespace-nowrap text-slate-800">{c.contractNo}</td>
+                  {/* สัญญาที่ออกก่อนมีระบบแม่แบบค่าเป็น null จริง — ขีดไว้ ไม่เดาชื่อใส่แทน */}
+                  <td className="px-3 py-2 text-slate-600">{c.templateName ?? "—"}</td>
+                  <td className="px-3 py-2 text-slate-700">
+                    {c.signedAt ? (
+                      <>ลงนาม {formatDateTime(c.signedAt)}</>
+                    ) : (
+                      <span className="text-slate-500">ร่าง — ยังไม่ลงนาม</span>
+                    )}
+                  </td>
+                  {/* มูลค่าที่ตรึงลงสัญญาตอนออก (ข้อมูลของตัวเอกสาร) · สัญญาเก่าก่อนระบบงวดเงินไม่มีค่า = ขีด ไม่เดา */}
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-800">
+                    {c.amount == null ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      Number(c.amount).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    )}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1">
+                      {!c.signedAt && (
+                        <Button variant="brand" size="sm" onClick={() => handleSignContract(c.id)}>
+                          <Check size={14} /> ลงนาม
+                        </Button>
+                      )}
+                      <a
+                        href={pdfViewerPath("contract", projectId, c.id)}
+                        target="_blank"
+                        rel="noopener"
+                        title="เปิด PDF"
+                        aria-label={`เปิด PDF สัญญา ${c.contractNo}`}
+                        className={iconButtonClasses()}
+                      >
+                        <FileText size={16} />
+                      </a>
+                      {/* ทางเข้าเดียวของการเติมยอดงวดเงินก่อนลงนาม — แม่แบบใส่ยอดจริงไม่ได้เพราะใช้ร่วมกันทุกโครงการ */}
+                      {expandable ? (
+                        <button
+                          type="button"
+                          onClick={toggle}
+                          aria-expanded={open}
+                          aria-label={`${contractPanelLabel(open, Boolean(c.signedAt))} ${c.contractNo}`}
+                          title={contractPanelLabel(open, Boolean(c.signedAt))}
+                          className={iconButtonClasses()}
+                        >
+                          <ChevronDown size={16} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+                        </button>
+                      ) : (
+                        <span className="inline-block w-8" aria-hidden />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                {open && (
+                  <tr className="border-t border-slate-100">
+                    <td colSpan={5} className="bg-slate-50 px-3 py-4">
+                      <ContractBodyEditor
+                        projectId={projectId}
+                        contract={c}
+                        onSaved={async () => {
+                          setEditingContractId(null);
+                          await silentRefresh();
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
       )}
+
     </>
   );
 }
 
-/** แท็บสรุปวัสดุ (ถอดปริมาณ) สำหรับสั่งซื้อ */
-function MaterialsTab({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { activeTab, isCustom, items, showMaterialSummary, materialSummary } = vm;
-  return (
-    <>
-      {activeTab === "materials" && !isCustom && items.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-lg">
-          {/* เดิมเป็นแผงพับได้ที่ท้ายหน้า ตอนนี้แท็บทำหน้าที่เปิด/ปิดแทน หัวข้อจึงเป็นแค่ป้ายชื่อ */}
-          <div className="flex items-center justify-between gap-2 px-4 py-3">
-            <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <Layers size={16} className="text-brand" />
-              สรุปวัสดุ (ถอดปริมาณ)
-              <span className="font-normal text-slate-500">— ปริมาณวัสดุรวมทั้งโครงการสำหรับสั่งซื้อ</span>
-            </span>
-          </div>
+const WARN_PILL = "inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 ring-1 ring-amber-200";
 
-          {showMaterialSummary && (
-            <div className="border-t border-slate-100 px-4 py-3">
-              <MaterialSummaryBody summary={materialSummary} />
-            </div>
-          )}
-        </div>
-      )}
-    </>
+/** ทางเลือกหนึ่งในคำถาม "งานนี้ของลูกค้าคนไหน?" — บอกว่ากดแล้วได้อะไรก่อนกด */
+function OwnerChoice({
+  title,
+  description,
+  action,
+  active,
+  onClick,
+}: Readonly<{ title: string; description: string; action: string; active: boolean; onClick: () => void }>) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={active}
+      className={`flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors ${
+        active ? "border-slate-800 ring-1 ring-slate-800" : "border-slate-200 hover:border-slate-400 hover:bg-slate-50"
+      }`}
+    >
+      <span className="font-medium text-slate-800">{title}</span>
+      <span className="text-xs text-slate-500">{description}</span>
+      <span className="mt-auto pt-1 text-xs font-medium text-brand">{action} ›</span>
+    </button>
   );
 }
 
 /** หัวโครงการ: ชื่อ/สถานะ/ผู้ติดต่อ + ผูกลูกค้า/คำขอ/ออกลิงก์เข้าใช้ + ปุ่มยกเลิกโครงการ */
 function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { project, isCustom, currentVersion, editable, contactName, contactEmail, contactPhone, differentRequester, lead, openCustomerSearch, handleIssueAccessLink, issuingLink, openCreateCustomer, openLeadPicker, showLeadPicker, loadingLeads, unlinkedLeads, linkingLead, handleLinkLead, setShowLeadPicker, showCreateCustomer, accessLinkForm, setAccessLinkForm, setShowCreateCustomer, accessLink, copyAccessLink, linkCopied, showCustomerSearch, customerQuery, setCustomerQuery, searchingCustomers, customerResults, assigningCustomer, handleAssignCustomer, setShowCustomerSearch, nextStatuses, handleTransition, transitioning } = vm;
+  const { project, isCustom, currentVersion, editable, contactName, contactEmail, contactPhone, differentRequester, lead, pendingLeadCount, openCustomerSearch, handleIssueAccessLink, issuingLink, openCreateCustomer, openLeadPicker, showLeadPicker, loadingLeads, unlinkedLeads, linkingLead, handleLinkLead, setShowLeadPicker, showCreateCustomer, accessLinkForm, setAccessLinkForm, setShowCreateCustomer, accessLink, copyAccessLink, linkCopied, showCustomerSearch, customerQuery, setCustomerQuery, searchingCustomers, customerResults, assigningCustomer, handleAssignCustomer, setShowCustomerSearch, nextStatuses, handleTransition, transitioning } = vm;
+  // "สร้างลูกค้าใหม่" ใช้กับโครงการที่ยังไม่มีลูกค้าเท่านั้น (ออกลิงก์ตอนผูกอยู่ เซิร์ฟเวอร์ใช้ลูกค้าเดิม)
+  const customerPicker = (embedded: boolean) => (
+    <CustomerPicker
+      embedded={embedded}
+      className={embedded ? "" : "mt-2"}
+      current={project.customer ?? null}
+      query={customerQuery}
+      onQuery={setCustomerQuery}
+      results={customerResults}
+      searching={searchingCustomers}
+      busy={assigningCustomer}
+      onPick={(c) => void handleAssignCustomer(c)}
+      onUnlink={project.customer ? () => void handleAssignCustomer(null) : undefined}
+      onCreateNew={project.customer ? undefined : openCreateCustomer}
+      onClose={() => setShowCustomerSearch(false)}
+    />
+  );
   return (
     <>
       <div className="flex items-start justify-between mb-4 mt-3">
@@ -3830,111 +5256,138 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
               <span className="text-slate-500">(ส่งใบเสนอราคาแล้ว — แก้ไขจะสร้างเวอร์ชันใหม่)</span>
             )}
           </div>
-          {/* การ์ดผู้ติดต่อ: คนหนึ่งคน = กล่องเดียว
-              เดิมแยกเป็น "การ์ดจากคำขอ" กับ "บรรทัดลูกค้า" คนละที่คนละหน้าตา ทั้งที่วัดจากข้อมูลจริง
-              แล้วชื่อและอีเมลซ้ำกัน 3 ใน 3 โครงการที่มีทั้งสองอย่าง = พิมพ์คนเดิมสองรอบ */}
-          <div className="mt-3 max-w-xl overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-            <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-2.5">
-              <div className="min-w-0">
-                {contactName ? (
-                  <p className="text-xs text-slate-500">
-                    {project.customer ? "ลูกค้า" : "ผู้ยื่นคำขอ"}
-                  </p>
-                ) : (
-                  <p className="text-slate-500">ยังไม่มีข้อมูลผู้ติดต่อ</p>
-                )}
-
-                {/* ชื่อกับช่องทางติดต่ออยู่บรรทัดเดียวกัน — เป็นข้อมูลชุดเดียวกันและประหยัดความสูง
-                    ของหัวหน้าซึ่งอยู่เหนือแท็บ (ทุกแท็บต้องแบกความสูงนี้ร่วมกัน) */}
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                  {contactName && <span className="font-medium text-slate-800">{contactName}</span>}
-                  {contactEmail && (
-                    <InfoChip>
-                      <Mail size={12} className="text-brand" /> {contactEmail}
-                    </InfoChip>
-                  )}
-                  {contactPhone && (
-                    <InfoChip>
-                      <Phone size={12} className="text-brand" /> {contactPhone}
-                    </InfoChip>
-                  )}
+          {project.customer || lead ? (
+            // E: ผูกแล้ว (หรือมีแค่คำขอ) — การ์ดคน: ชื่อเด่น ช่องทางติดต่อเป็นแถว ที่มาของงานเป็นบรรทัดเล็กล่าง
+            <div className="mt-3 max-w-xl overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5">
+                <div className="flex min-w-0 items-start gap-3">
+                  <Avatar name={contactName ?? ""} src={project.customer?.avatarUrl} size={36} />
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-500">
+                      {project.customer ? "ลูกค้า" : "ผู้ยื่นคำขอ · ยังไม่มีบัญชีลูกค้า"}
+                    </p>
+                    <p className="truncate font-semibold text-slate-800">{contactName}</p>
+                    {(contactEmail || contactPhone) && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {contactEmail && (
+                          <InfoChip>
+                            <Mail size={12} className="text-brand" /> {contactEmail}
+                          </InfoChip>
+                        )}
+                        {contactPhone && (
+                          <InfoChip>
+                            <Phone size={12} className="text-brand" /> {contactPhone}
+                          </InfoChip>
+                        )}
+                      </div>
+                    )}
+                    {/* คนยื่นคำขอไม่ใช่เจ้าของบัญชีลูกค้า — ต้องบอก ไม่งั้นข้อมูลหายไปตอนรวมการ์ด */}
+                    {differentRequester && (
+                      <p className="mt-1.5 text-xs text-slate-500">
+                        ผู้ยื่นคำขอ: <span className="text-slate-700">{lead!.name}</span>
+                        {lead!.email && lead!.email !== contactEmail ? ` (${lead!.email})` : ""}
+                      </p>
+                    )}
+                    {!project.customer && (
+                      <p className="mt-1.5">
+                        <span className={WARN_PILL}>ลูกค้ายังมองไม่เห็นโครงการนี้</span>
+                      </p>
+                    )}
+                  </div>
                 </div>
 
-                {/* คนยื่นคำขอไม่ใช่เจ้าของบัญชีลูกค้า — ต้องบอก ไม่งั้นข้อมูลหายไปตอนรวมการ์ด */}
-                {differentRequester && (
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    ผู้ยื่นคำขอ: <span className="text-slate-700">{lead!.name}</span>
-                    {lead!.email && lead!.email !== contactEmail ? ` (${lead!.email})` : ""}
-                  </p>
-                )}
-
-                {!project.customer && (
-                  <p className="mt-1.5 text-xs text-amber-600">
-                    ยังไม่ได้ระบุลูกค้า — ลูกค้าจะยังไม่เห็นโครงการนี้
-                  </p>
-                )}
+                <div className="flex shrink-0 flex-wrap gap-1">
+                  {project.customer ? (
+                    <>
+                      {/* ทางเข้าหลักของแฟ้มลูกค้า — จุดที่พนักงานกำลังมองชื่อลูกค้าอยู่พอดี */}
+                      <Link to={`/customers/${project.customer.id}`} className={buttonClasses("ghost", "sm")}>
+                        <UserRound size={14} /> ดูแฟ้มลูกค้า
+                      </Link>
+                      <Button variant="ghost" size="sm" onClick={openCustomerSearch} aria-expanded={showCustomerSearch} data-customer-picker-trigger>
+                        เปลี่ยนลูกค้า <ChevronDown size={14} className={`transition-transform ${showCustomerSearch ? "rotate-180" : ""}`} />
+                      </Button>
+                      <Button variant="brand" size="sm" onClick={() => handleIssueAccessLink(false)} disabled={issuingLink}>
+                        {issuingLink ? "กำลังสร้าง..." : "ออกลิงก์เข้าใช้"}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={openCustomerSearch} aria-expanded={showCustomerSearch} data-customer-picker-trigger>
+                        เลือกลูกค้าที่มีบัญชี <ChevronDown size={14} className={`transition-transform ${showCustomerSearch ? "rotate-180" : ""}`} />
+                      </Button>
+                      <Button variant="brand" size="sm" onClick={openCreateCustomer}>
+                        สร้างบัญชีจากคำขอ
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="flex shrink-0 flex-wrap gap-1">
-                {project.customer ? (
+              {/* กล่องเลือกลูกค้ากางในการ์ด (ดันเนื้อหาข้างล่างลง) — แบบลอยเคยทับเมนูข้างและการ์ดราคา */}
+              {showCustomerSearch && customerPicker(true)}
+
+              {/* ที่มาของงาน: ข้อมูลประกอบ จึงเป็นบรรทัดเล็กล่างการ์ด */}
+              <div className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
+                {lead ? (
                   <>
-                    {/* ทางเข้าหลักของแฟ้มลูกค้า — จุดที่พนักงานกำลังมองชื่อลูกค้าอยู่พอดี */}
-                    <Link
-                      to={`/customers/${project.customer.id}`}
-                      className={buttonClasses("ghost", "sm")}
-                    >
-                      <UserRound size={14} /> ดูแฟ้มลูกค้า
-                    </Link>
-                    <Button variant="ghost" size="sm" onClick={openCustomerSearch}>
-                      เปลี่ยนลูกค้า
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleIssueAccessLink(false)}
-                      disabled={issuingLink}
-                    >
-                      {issuingLink ? "กำลังสร้าง..." : "ออกลิงก์เข้าใช้"}
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button variant="ghost" size="sm" onClick={openCustomerSearch}>
-                      เลือกลูกค้า
-                    </Button>
-                    {lead && (
-                      <Button variant="ghost" size="sm" onClick={openCreateCustomer}>
-                        สร้างบัญชีลูกค้าจากคำขอ
-                      </Button>
+                    <span>
+                      มาจากคำขอ · สนใจ {lead.serviceType}
+                      {lead.houseDesignName && ` · แบบ ${lead.houseDesignName}`}
+                    </span>
+                    {lead.message && (
+                      <p className="mt-0.5 line-clamp-2 text-slate-600" title={lead.message}>
+                        “{lead.message}”
+                      </p>
                     )}
                   </>
+                ) : (
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    ไม่ได้มาจากคำขอ
+                    <button type="button" onClick={openLeadPicker} className="text-brand underline-offset-2 hover:underline">
+                      ผูกกับคำขอ
+                    </button>
+                  </span>
                 )}
               </div>
             </div>
-
-            {/* ที่มาของงาน: เดิมเป็น "หัวเรื่อง" ของการ์ด ทั้งที่เป็นข้อมูลประกอบ จึงย้ายลงมาเป็นแถบล่าง */}
-            <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
-              {lead ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-slate-500">
-                    <span>มาจากคำขอ</span>
-                    <span>· สนใจ {lead.serviceType}</span>
-                    {lead.houseDesignName && <span>· แบบ {lead.houseDesignName}</span>}
-                  </div>
-                  {lead.message && (
-                    <p className="mt-1.5 text-slate-700">ข้อความ: “{lead.message}”</p>
-                  )}
-                </>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span>ยังไม่ได้ระบุว่ามาจากคำขอของลูกค้ารายใด</span>
-                  <Button variant="ghost" size="sm" onClick={openLeadPicker}>
-                    เลือกคำขอลูกค้า
-                  </Button>
-                </div>
-              )}
+          ) : (
+            // A: ยังไม่ผูกอะไรเลย — ถามคำถามเดียว แต่ละทางบอกว่ากดแล้วได้อะไร
+            <div className="mt-3 max-w-2xl rounded-lg border border-slate-200 bg-white p-3 text-sm">
+              <div className="mb-2.5 flex flex-wrap items-center gap-2">
+                <p className="font-semibold text-slate-800">งานนี้ของลูกค้าคนไหน?</p>
+                <span className={WARN_PILL}>ลูกค้ายังมองไม่เห็นโครงการนี้</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <OwnerChoice
+                  title="มาจากคำขอ"
+                  description="ดึงชื่อ เบอร์ และแบบบ้านที่ลูกค้าส่งเข้ามาให้"
+                  action={
+                    pendingLeadCount == null
+                      ? "เลือกคำขอ"
+                      : pendingLeadCount > 0
+                        ? `รอโครงการ ${pendingLeadCount} คำขอ`
+                        : "ยังไม่มีคำขอที่รอโครงการ"
+                  }
+                  active={showLeadPicker}
+                  onClick={openLeadPicker}
+                />
+                <OwnerChoice
+                  title="ลูกค้าที่มีบัญชีแล้ว"
+                  description="ค้นจากชื่อหรืออีเมล — ใบเสนอราคาที่ส่งจะเข้าพอร์ทัลของลูกค้าคนนี้"
+                  action="ค้นหาลูกค้า"
+                  active={showCustomerSearch}
+                  onClick={openCustomerSearch}
+                />
+                <OwnerChoice
+                  title="ลูกค้าใหม่ ไม่มีคำขอ"
+                  description="ลูกค้าที่โทรมาหรือเดินเข้ามาเอง — กรอกชื่อ อีเมล แล้วออกลิงก์ให้ตั้งรหัสผ่าน"
+                  action="สร้างบัญชีลูกค้า"
+                  active={showCreateCustomer}
+                  onClick={openCreateCustomer}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {showLeadPicker && (
             <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white">
@@ -3942,7 +5395,7 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
                 เลือกคำขอของลูกค้าที่ตรงกับโครงการนี้ — ระบบจะดึงชื่อลูกค้าและแบบบ้านมาให้อัตโนมัติ
               </p>
               <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-                {loadingLeads && <p className="text-xs text-slate-500">กำลังโหลด...</p>}
+                {loadingLeads && <PanelSkeleton lines={2} />}
                 {!loadingLeads && unlinkedLeads.length === 0 && (
                   <p className="text-xs text-slate-500">ยังไม่มีคำขอที่ว่างให้เลือก</p>
                 )}
@@ -3960,7 +5413,7 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
               </div>
               <div className="mt-2 border-t border-slate-100 pt-2">
                 <Button variant="ghost" size="sm" onClick={() => setShowLeadPicker(false)}>
-                  ปิด
+                  ยกเลิก
                 </Button>
               </div>
             </div>
@@ -3968,7 +5421,10 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
           {showCreateCustomer && !project.customer && (
             <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white flex flex-col gap-2">
               <p className="text-xs text-slate-700">
-                สร้างบัญชีให้ลูกค้าจากข้อมูลในคำขอ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง (ถ้าอีเมลนี้มีบัญชีอยู่แล้วระบบจะผูกบัญชีเดิมให้)
+                {lead
+                  ? "สร้างบัญชีให้ลูกค้าจากข้อมูลในคำขอ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง"
+                  : "สร้างบัญชีให้ลูกค้าใหม่ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง"}{" "}
+                (ถ้าอีเมลนี้มีบัญชีอยู่แล้ว ระบบจะผูกบัญชีเดิมให้)
               </p>
               <input
                 placeholder="อีเมล"
@@ -3989,11 +5445,11 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
                 className="border border-slate-300 rounded-md px-2 py-1 text-sm"
               />
               <div className="flex gap-2 border-t border-slate-100 pt-2">
-                <Button size="sm" onClick={() => handleIssueAccessLink(true)} disabled={issuingLink}>
+                <Button variant="brand" size="sm" onClick={() => handleIssueAccessLink(true)} disabled={issuingLink}>
                   {issuingLink ? "กำลังสร้าง..." : "สร้างบัญชี + ลิงก์เข้าใช้"}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setShowCreateCustomer(false)}>
-                  ปิด
+                  ยกเลิก
                 </Button>
               </div>
             </div>
@@ -4022,49 +5478,7 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
               </p>
             </div>
           )}
-          {showCustomerSearch && (
-            <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white">
-              <SearchInput
-                autoFocus
-                placeholder="ค้นหาจากชื่อหรืออีเมลลูกค้า"
-                value={customerQuery}
-                onChange={setCustomerQuery}
-                inputClassName="py-1"
-              />
-              <div className="mt-2 flex flex-col gap-1 max-h-48 overflow-y-auto">
-                {searchingCustomers && <p className="text-xs text-slate-500">กำลังค้นหา...</p>}
-                {!searchingCustomers && customerResults.length === 0 && (
-                  <p className="text-xs text-slate-500">ไม่พบลูกค้า (ต้องเป็นบัญชีที่สมัครแล้วเท่านั้น)</p>
-                )}
-                {customerResults.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    disabled={assigningCustomer}
-                    onClick={() => handleAssignCustomer(c.id)}
-                    className="text-left text-sm px-2 py-1 rounded-md hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    {c.fullName} <span className="text-slate-500">({c.email})</span>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2 flex gap-2 border-t border-slate-100 pt-2">
-                {project.customer && (
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => handleAssignCustomer(null)}
-                    disabled={assigningCustomer}
-                  >
-                    เลิกผูกลูกค้า
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" onClick={() => setShowCustomerSearch(false)}>
-                  ปิด
-                </Button>
-              </div>
-            </div>
-          )}
+          {showCustomerSearch && !project.customer && !lead && customerPicker(false)}
         </div>
         {/* การเดินหน้าสถานะทำผ่าน auto (ส่งใบเสนอราคา/ลูกค้ายอมรับ) + การ์ด "ขั้นตอนถัดไป" แล้ว
             จึงเหลือเฉพาะ "ยกเลิกโครงการ" ที่เป็นการตัดสินใจของคน — ทำให้เงียบ (danger เบา ๆ) */}
@@ -4087,7 +5501,11 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
     ฟังคีย์ที่ document แทนการดักบนแถวตาราง (แถวไม่ใช่ตัวรับคีย์) แต่จำกัดเฉพาะคีย์ที่เกิดในแถวนี้
     เท่ากับตอนที่ยังดักบนแถว · dropdown ค้นหาหยุดคีย์ของมันเองไว้แล้วจึงไม่รั่วมาถึงตรงนี้ */
 function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>) {
-  const { setEditingId, submitEdit, categoryById, materialOptions, editMaterialId, selectEditMaterial, editName, editUnit, editHasRecipe, editDerivedPrice, editMaterialPrice, setEditMaterialPrice, editLaborPrice, setEditLaborPrice, editBasis, editCoefficient, setEditCoefficient, editWaste, setEditWaste, driverValueOf, editQuantity, setEditQuantity, editRebarOpen, setEditRebarOpen, editRebarDia, setEditRebarDia, editRebarLen, setEditRebarLen, editComponents, setEditComponents, materialById, previewLineTotal } = vm;
+  const openTileFromEdit = (target: BoqItemDto) => {
+    vm.setEditingId(null);
+    vm.setTileItem(target);
+  };
+  const { setEditingId, submitEdit, categoryById, materialOptions, editMaterialId, selectEditMaterial, editName, editUnit, editHasRecipe, editDerivedPrice, editMaterialPrice, setEditMaterialPrice, editLaborPrice, setEditLaborPrice, editBasis, editCoefficient, setEditCoefficient, editWaste, setEditWaste, driverValueOf, editQuantity, setEditQuantity, editRebarOpen, setEditRebarOpen, editRebarDia, setEditRebarDia, editRebarLen, setEditRebarLen, editComponents, setEditComponents, materialById, previewLineTotal, previewQty, recipeSources, editSheetRows, setEditSheetRows, setEditBasis } = vm;
   const rowRef = useRef<HTMLTableRowElement>(null);
 
   useEffect(() => {
@@ -4111,6 +5529,7 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
   return (
     <tr
       ref={rowRef}
+      data-boq-edit-row
       className="border-t border-brand/40 bg-brand/5"
     >
       {/* แก้ไขแบบแผงขยายเต็มความกว้าง (Inline expand) — ใช้เลย์เอาต์การ์ดเหมือนฟอร์มเพิ่มรายการ
@@ -4180,7 +5599,23 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
           {/* บล็อกปริมาณ — ตามฐานคำนวณเดิมของบรรทัด (MANUAL = จำนวน + เครื่องมือเหล็ก;
               อื่น ๆ = สัมประสิทธิ์ + เผื่อเสีย + พรีวิวปริมาณสด) */}
           <div className="mt-3 rounded-lg bg-slate-50 p-3">
-            {editBasis !== "MANUAL" ? (
+            {editBasis === "SHEET" ? (
+              <SheetQuantityBlock
+                lineName={editName}
+                unit={editUnit}
+                rows={editSheetRows}
+                waste={editWaste}
+                previousQuantity={item.qtyBasis === "MANUAL" ? item.quantity : null}
+                onChange={(rows, waste) => {
+                  setEditSheetRows(rows);
+                  setEditWaste(waste);
+                }}
+                onUseManual={(q) => {
+                  setEditBasis("MANUAL");
+                  if (q != null) setEditQuantity(String(q));
+                }}
+              />
+            ) : editBasis !== "MANUAL" ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-end">
                 <label className="flex flex-col gap-1 text-xs text-slate-700">
                   {basisConfig(editBasis).perLabel}
@@ -4229,15 +5664,30 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
               // วางเรียงลงมาเป็นแถว ไม่ใช่วางข้าง ๆ กัน — กล่องเครื่องมือกว้างกว่าช่องจำนวนมาก
               // ถ้าวางข้างกันช่องจำนวนจะลอยอยู่ซ้ายห่างจากกล่อง จนดูเหมือนคนละเรื่อง
               <div className="flex flex-col items-start gap-2">
-                <label className="flex flex-col gap-1 text-xs text-slate-700">
-                  <span>จำนวน</span>
-                  <input
-                    type="number"
-                    value={editQuantity}
-                    onChange={(e) => setEditQuantity(e.target.value)}
-                    className="w-32 border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
-                  />
-                </label>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-slate-700">
+                    <span>จำนวน</span>
+                    <input
+                      type="number"
+                      value={editQuantity}
+                      onChange={(e) => setEditQuantity(e.target.value)}
+                      className="w-32 border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+                    />
+                  </label>
+                  {/* เปลี่ยนเป็นใบถอดแบบ: ใบเปิดขึ้นทันที ยกเลิกได้โดยไม่เสียจำนวนเดิม */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditSheetRows([]);
+                      setEditWaste("0");
+                      setEditBasis("SHEET");
+                    }}
+                    title="กรอกขนาดทีละชิ้นจากแบบ ระบบคูณและรวมเป็นจำนวนให้"
+                  >
+                    <Ruler size={14} /> ถอดจากแบบ
+                  </Button>
+                </div>
                 {/* เครื่องมือเดียวกับฟอร์มเพิ่มบรรทัด (components/RebarCalculator)
                     แผงแก้ไขไม่มีช่องหน่วยนับให้แก้ จึงไม่ส่ง onUnitChange — ได้แค่เตือน */}
                 <RebarCalculator
@@ -4257,16 +5707,40 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
             )}
           </div>
 
-          {/* สูตรวัสดุย่อย (ถอดปริมาณวัสดุ) */}
+          {/* สูตรวัสดุย่อย (ถอดปริมาณวัสดุ) — บรรทัดที่ตัวคิดกระเบื้องตั้งราคา วัสดุย่อยเป็นผลของตัวคิด
+              แก้ที่นี่ไม่ได้ (เซิร์ฟเวอร์คิดทับทุกครั้งที่บันทึก) จึงพาไปแก้ที่ตัวคิดแทน */}
           <div className="mt-3 border-t border-slate-200 pt-3">
-            <MaterialComponentsEditor
-              rows={editComponents}
-              onChange={setEditComponents}
-              materialOptions={materialOptions}
-              materialById={materialById}
-              unitLabel={editUnit}
-              unitDatalistId="boq-units"
-            />
+            {item.tileCalc?.priced ? (
+              <p className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <Layers size={14} className="text-brand" />
+                วัสดุย่อย {item.components.length} รายการมาจากตัวคิดกระเบื้อง — เปลี่ยนขนาดแผ่น/ราคาที่ตัวคิด
+                <button type="button" onClick={() => openTileFromEdit(item)} className="font-medium text-brand hover:underline">
+                  เปิดตัวคิดกระเบื้อง
+                </button>
+              </p>
+            ) : (
+              <>
+                <MaterialComponentsEditor
+                  rows={editComponents}
+                  onChange={setEditComponents}
+                  materialById={materialById}
+                  unitLabel={editUnit}
+                  unitDatalistId="boq-units"
+                  lineQuantity={previewQty}
+                  copySources={recipeSources.filter((r) => r.value !== `i:${item.id}`)}
+                />
+                {isAreaUnit(editUnit) && (
+                  <button
+                    type="button"
+                    onClick={() => openTileFromEdit(item)}
+                    title="ปิดแผงแก้ไข (สิ่งที่ยังไม่บันทึกจะหาย) แล้วเปิดตัวคิดกระเบื้อง"
+                    className="link-pill -ml-2.5 mt-1 flex w-fit items-center gap-1 text-xs font-medium text-brand"
+                  >
+                    <Grid3x3 size={12} /> {item.tileCalc ? "ตัวคิดกระเบื้อง (ใช้อยู่)" : "ตัวคิดกระเบื้อง — นับแผ่น/กล่อง ปูนกาว ยาแนว"}
+                  </button>
+                )}
+              </>
+            )}
           </div>
 
           {/* แถบล่าง: ยอดรวมสด + ปุ่มบันทึก/ยกเลิก (ชิดขวา) */}
@@ -4293,7 +5767,10 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
 }
 
 function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { stuck, project, currentVersion, showNetPreview, previewNet, isCustom, handleTransition, transitioning, priceCells, showRates, setShowRates, openRates, sentinelRef, visibleTabs, goTab, activeTab, stepDates, quotes, rejectionReason, scrollToSection, projectId, showEditInfo, openEditInfo, customPriceInput, setCustomPriceInput, handleSetCustomPrice, savingCustomPrice, hasCustomPrice, items, silentRefresh, detail, setShowVersionCompare, showVersionCompare, setShowSaveTemplateForm, setShowAddForm, setDriftItemIds, showSaveTemplateForm, newTemplateName, setNewTemplateName, newTemplateDescription, setNewTemplateDescription, submitSaveTemplate, savingTemplate, templates, handleApplyTemplate, applyingTemplateId, handleDeleteTemplate, showAddForm } = vm;
+  // การ์ดขั้นตอนถัดไปของใบร่างต่างกันตามบทบาท: เจ้าของ = อนุมัติ · พนักงาน = ขออนุมัติ/รออนุมัติ
+  const { user } = useAuth();
+  const { stuck, project, currentVersion, showNetPreview, previewNet, isCustom, handleTransition, transitioning, priceCells, showRates, setShowRates, openRates, sentinelRef, visibleTabs, goTab, activeTab, stepDates, quotes, rejectionReason, quoteBlocker, scrollToSection, projectId, showEditInfo, openEditInfo, hasCustomPrice, items, silentRefresh, detail, setShowVersionCompare, showVersionCompare, setShowSaveTemplateForm, setShowAddForm, setDriftItemIds, showSaveTemplateForm, newTemplateName, setNewTemplateName, newTemplateDescription, setNewTemplateDescription, submitSaveTemplate, savingTemplate, templates, handleApplyTemplate, applyingTemplateId, handleDeleteTemplate, showAddForm, exportingExcel, exportBoqExcel, showImport, setShowImport, categoryOptions, subgroupOptions, topCategoryOf, showBulkAdd, setShowBulkAdd, revealCategory } = vm;
+  const { showStructural, setShowStructural, materials } = vm;
   return (
     <Layout>
       {/* หน้านี้ยาวเกือบ 8 หน้าจอเมื่อ BOQ เยอะ — แถบนี้คือสิ่งเดียวที่บอกว่าอยู่โครงการไหน
@@ -4323,65 +5800,82 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
       {/* ตัวเลขเงินอยู่เหนือแท็บ ไม่ใช่ในแท็บใดแท็บหนึ่ง — มันคือตัวตนของโครงการเหมือนชื่อกับสถานะ
           เดิมกองอยู่ท้ายแท็บภาพรวม (ต้องเลื่อนลง 413px ถึงจะเห็น) และแท็บ BOQ ไม่มีเลขนี้เลย
           ย่อ 3 ตัวประกอบเป็นบรรทัดเดียว เหลือราคาสุทธิเป็นก้อนเด่นก้อนเดียวที่ต้องอ่านเร็ว */}
-      <div className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <div className="flex flex-col lg:flex-row">
-          {/* ตัวประกอบ: เส้นคั่นบาง ๆ เส้นเดียวเหมือนตารางไร้กรอบ (C1) — จอแคบพับเป็นแถวซ้อนกัน
-              เส้นคั่นจึงต้องสลับจากแนวตั้งเป็นแนวนอนด้วย */}
-          <div className="flex min-w-0 flex-1 flex-col divide-y divide-slate-200 lg:flex-row lg:divide-x lg:divide-y-0">
-            {priceCells.map((cell) => (
-              <div key={cell.label} className="min-w-0 flex-1 px-4 py-3">
-                {/* ป้ายที่มี % กดได้ = ทางเข้าเดียวของการแก้อัตรา วางไว้ตรงเลขที่มันควบคุมอยู่
-                    ไม่ต้องเพิ่มปุ่มใหม่เข้าหน้าที่มีปุ่มเยอะอยู่แล้ว */}
-                {cell.rate ? (
-                  <button
-                    type="button"
-                    onClick={() => (showRates ? setShowRates(false) : openRates())}
-                    className="group inline-flex items-center gap-1 text-xs text-slate-500 transition-colors hover:text-brand"
-                  >
-                    <span className="underline decoration-slate-300 decoration-dotted underline-offset-2 group-hover:decoration-brand">
-                      {cell.label}
-                    </span>
-                    <Pencil size={11} className="opacity-0 transition-opacity group-hover:opacity-100" />
-                  </button>
-                ) : (
-                  <p className="text-xs text-slate-500">{cell.label}</p>
-                )}
+      {/* การ์ดแยกใบ พื้นสีอ่อนตามความหมาย + วงกลมจางมุมล่างขวา — ดีไซน์เดียวกับการ์ดแดชบอร์ด (ผู้ใช้ขอ)
+          จอแคบเรียง 2 คอลัมน์ ราคาสุทธิกินเต็มแถวล่าง · จอกว้างเรียงแถวเดียว ราคาสุทธิกว้างกว่าเล็กน้อย */}
+      <div className="mb-4">
+        {/* iPad แนวนอน (1024–1279) ยังเรียง 2 คอลัมน์ — 5 ใบแถวเดียวบีบป้าย "ค่าดำเนินการ+กำไร" ตก 3 บรรทัด */}
+        <div className="grid grid-cols-2 gap-3 xl:flex">
+          {priceCells.map((cell) => {
+            const tone = PRICE_TONE[cell.tone ?? "slate"];
+            const Icon = cell.icon;
+            return (
+              <div key={cell.label} className={`relative min-w-0 overflow-hidden rounded-lg p-4 xl:flex-1 ${tone.card}`}>
+                <span
+                  aria-hidden
+                  className={`pointer-events-none absolute -bottom-10 -right-8 h-28 w-28 rounded-full bg-current opacity-[0.07] ${tone.icon}`}
+                />
+                <div className="relative flex items-start justify-between gap-2">
+                  {/* ป้ายที่มี % กดได้ = ทางเข้าเดียวของการแก้อัตรา วางไว้ตรงเลขที่มันควบคุมอยู่
+                      ไม่ต้องเพิ่มปุ่มใหม่เข้าหน้าที่มีปุ่มเยอะอยู่แล้ว */}
+                  {cell.rate ? (
+                    <button
+                      type="button"
+                      onClick={() => (showRates ? setShowRates(false) : openRates())}
+                      className="group inline-flex min-w-0 items-center gap-1 text-left text-xs text-slate-600 transition-colors hover:text-brand"
+                    >
+                      <span className="underline decoration-slate-400 decoration-dotted underline-offset-2 group-hover:decoration-brand">
+                        {cell.label}
+                      </span>
+                      <Pencil size={11} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 touch:opacity-100" />
+                    </button>
+                  ) : (
+                    <p className="text-xs text-slate-600">{cell.label}</p>
+                  )}
+                  {Icon && <Icon size={18} className={`shrink-0 ${tone.icon}`} aria-hidden />}
+                </div>
                 {/* ส่วนลดเป็นตัว "หัก" — ถ้าโชว์เป็นเลขบวกเฉย ๆ คนไล่อ่านซ้ายไปขวาจะบวกทุกช่อง
                     แล้วได้ยอดไม่ตรงกับราคาสุทธิที่อยู่ข้าง ๆ กันนั่นเอง */}
                 {cell.empty ? (
-                  <p className="mt-0.5 text-lg font-medium text-slate-300">—</p>
+                  <p className="relative mt-1 text-xl font-semibold text-slate-400">—</p>
                 ) : (
-                  <p className="mt-0.5 text-lg font-medium tabular-nums text-slate-800">
+                  <p className={`relative mt-1 text-xl font-semibold tabular-nums ${tone.value}`}>
                     {cell.negative ? "−" : ""}
                     {money(cell.value)}
                   </p>
                 )}
                 {cell.hint && (
-                  <p className="mt-0.5 text-xs tabular-nums text-slate-500">{cell.hint}</p>
+                  <p className="relative mt-0.5 text-xs tabular-nums text-slate-600">{cell.hint}</p>
                 )}
               </div>
-            ))}
-          </div>
+            );
+          })}
 
-          {/* ช่องสุดท้ายถมสีชนขอบการ์ดพอดี (การ์ดมี overflow-hidden) จึงไม่เกิดกล่องซ้อนกล่อง
-              ไล่เฉดจาก brand ไป brand-dark ให้มีมิติ โดยไม่ต้องเพิ่มสีใหม่เข้าระบบ */}
-          <div className="shrink-0 bg-linear-to-br from-brand to-brand-dark px-5 py-3 text-white lg:min-w-56">
-            <p className="text-xs text-white/70">ราคาสุทธิ</p>
-            <p className="mt-0.5 text-xl font-semibold tabular-nums leading-tight">
+          {/* ราคาสุทธิ = การ์ดหลักสีนาวีแบรนด์ (เหมือนการ์ดหลักของแดชบอร์ด) */}
+          <div className="relative col-span-2 overflow-hidden rounded-lg bg-brand p-4 text-white shadow-sm xl:col-span-1 xl:flex-[1.25]">
+            <span aria-hidden className="pointer-events-none absolute -bottom-10 -right-8 h-28 w-28 rounded-full bg-white opacity-10" />
+            <div className="relative flex items-start justify-between gap-2">
+              <p className="text-xs text-white/75">ราคาสุทธิ</p>
+              <Banknote size={18} className="shrink-0 text-white/70" aria-hidden />
+            </div>
+            <p className="relative mt-1 text-2xl font-semibold leading-tight tabular-nums">
               {money(currentVersion.netPrice)}
             </p>
             {showNetPreview && (
-              <p className="mt-1 text-xs tabular-nums text-white/80">
+              <p className="relative mt-1 text-xs tabular-nums text-white/80">
                 → หลังบันทึก ≈ {money(previewNet!)}
               </p>
             )}
           </div>
         </div>
 
-        {/* แผงแก้อัตรา — อยู่ในการ์ดเดียวกับตัวเลขที่มันเปลี่ยน ไม่ใช่กล่องลอยที่อื่น
+        {/* แผงแก้อัตรา — กางใต้การ์ดตัวเลขที่มันเปลี่ยน ไม่ใช่กล่องลอยที่อื่น
             เดิมอัตราทั้งสองตั้งได้ครั้งเดียวตอนสร้างโครงการ (VAT ตั้งไม่ได้ด้วยซ้ำ) พอต่อรอง
             ราคากับลูกค้าจึงต้องสร้างโครงการใหม่ทั้งใบ */}
-        <RatesPanel vm={vm} />
+        {showRates && (
+          <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white [&>div]:border-t-0">
+            <RatesPanel vm={vm} />
+          </div>
+        )}
       </div>
 
       {/* หมุดวัดว่าหัวเรื่อง (รวมตัวเลขเงิน) พ้นจอไปหรือยัง → ใช้สั่งให้แถบด้านบนโผล่
@@ -4391,20 +5885,27 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
       {/* แถบแท็บถูกขนาบด้วยการ์ดตัวเลขเงินด้านบนและการ์ดแถบขั้นตอนด้านล่าง ของเดิมเป็นข้อความเปล่า
           ระยะห่างแค่ 4px จึงอ่านเป็นประโยคเรียงกันมากกว่าปุ่ม และตัวเลขนับจางถึงขั้นอ่านไม่ออก
           (วัดได้ 2.51:1 ต่ำกว่าเกณฑ์ 4.5:1) — เพิ่มน้ำหนัก/ความเข้ม/ระยะห่าง โดยคงรูปแบบเส้นใต้เดิม */}
-      <div className="mb-6 flex gap-3 overflow-x-auto border-b border-slate-300">
+      {/* เส้นฐานเป็นเงาด้านใน (ไม่ใช่ border + แท็บ -mb-px) — แบบเดิมแท็บยื่นเลยกล่อง 1px บนจอแคบที่กล่อง
+          เลื่อนแนวนอนได้ Windows เลยวาดแถบเลื่อนแนวตั้ง ▲●▼ ที่ปลายแถบ (ผู้ใช้ทัก 19 ต.ค.) */}
+      <div className="mb-6 flex gap-3 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-slate-300)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {visibleTabs.map((t) => (
           <button
             key={t.key}
             type="button"
             onClick={() => goTab(t.key)}
             aria-current={t.key === activeTab ? "page" : undefined}
-            className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors ${
+            className={`shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors ${
               t.key === activeTab
                 ? "border-brand font-semibold text-brand"
                 : "border-transparent text-slate-600 hover:border-slate-400 hover:text-slate-900"
             }`}
           >
             {t.label}
+            {t.badge && (
+              <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-normal text-slate-600">
+                {t.badge}
+              </span>
+            )}
             {t.count != null && (
               <span
                 className={`ml-1.5 text-xs tabular-nums ${
@@ -4420,24 +5921,32 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
 
       {activeTab === "overview" && (
         <>
+      {/* ยังไม่มีราคา = สิ่งเดียวที่ทำได้ จึงต้องอยู่ก่อนทุกอย่าง ไม่ใช่ล่างสุดของหน้า */}
+      {isCustom && !hasCustomPrice && <CustomPriceCard vm={vm} />}
+
       {/* (A) แถบขั้นตอน + (B) การ์ด "ขั้นตอนถัดไป" — ให้เห็นว่าสถานะเดินอัตโนมัติมาถึงไหน และควรทำอะไรต่อ */}
       <div className="mb-6 flex flex-col gap-5 rounded-lg border border-slate-200 bg-white p-5">
         <ProjectStatusStepper status={project.status} stepDates={stepDates} />
         <ProjectNextAction
           status={project.status}
-          hasQuote={quotes.length > 0}
+          draftQuote={latestDraftOf(quotes)}
+          isOwner={user?.role === "OWNER"}
+          blocker={quoteBlocker}
           rejectionReason={rejectionReason}
           savingTransition={transitioning}
           onGoQuotes={() => scrollToSection("quotes-section")}
+          onGoSection={scrollToSection}
           onGoContracts={() => scrollToSection("contracts-section")}
           onMarkDelivered={() => handleTransition("COMPLETED")}
           onCloseLost={() => handleTransition("CANCELLED")}
         />
+        <ContractMoneySummary contracts={vm.contracts} views={vm.contractMoney} onOpen={vm.openContractPanel} />
         {/* ไทม์ไลน์อยู่การ์ดเดียวกับสถานะ คั่นด้วยเส้นบาง ๆ แทนการตีกรอบอีกใบ (ลดกล่องซ้อนกล่อง) */}
         <div className="border-t border-slate-100 pt-4">
           <ProjectActivity projectId={projectId} />
         </div>
       </div>
+
 
       {/* รายละเอียดโครงการ: สถานที่ก่อสร้าง / พื้นที่ / ช่วงเวลา / หมายเหตุ (+ แก้ไขชื่อโครงการ) */}
       <div id="project-details" className="mb-6 bg-white border border-slate-200 rounded-lg p-4 scroll-mt-4">
@@ -4453,54 +5962,45 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
         <ProjectInfoCard vm={vm} />
       </div>
 
-      {isCustom && (
-        <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center justify-between flex-wrap gap-1 mb-3">
-            <p className="text-sm font-medium text-slate-700">ราคาโครงการกำหนดเอง</p>
-            <span className="text-xs text-slate-500">
-              กรอกยอดก่อน VAT (กำไรรวมในนี้แล้ว) — ระบบบวก VAT {currentVersion.vatPct}% ให้
-            </span>
-          </div>
-          {/* ตัวเลขทั้งสามย้ายขึ้นไปอยู่แถบเหนือแท็บแล้ว ตรงนี้เหลือเฉพาะช่องกรอก */}
-          <div className="flex items-center flex-wrap gap-2">
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="ยอดก่อน VAT (บาท)"
-              value={customPriceInput}
-              onChange={(e) => setCustomPriceInput(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm w-56"
-            />
-            <Button
-              size="sm"
-              onClick={handleSetCustomPrice}
-              disabled={savingCustomPrice || customPriceInput === ""}
-            >
-              <Check size={14} /> บันทึกราคา
-            </Button>
-            {!hasCustomPrice && (
-              <span className="text-xs text-amber-600">
-                ยังไม่ได้กำหนดราคา — ต้องกำหนดก่อนออกใบเสนอราคา
-              </span>
-            )}
-          </div>
-        </div>
-      )}
+      {/* มีราคาแล้วค่อยตกลงมาอยู่ท้ายหน้า — ตอนยังไม่มีราคามันเด้งขึ้นไปอยู่บนสุดแทน */}
+      {isCustom && hasCustomPrice && <CustomPriceCard vm={vm} />}
 
         </>
       )}
 
       <QuotesTab vm={vm} />
 
-      <ContractsTab vm={vm} />
+      {activeTab === "contract" && <ContractFinanceTab vm={vm} />}
 
       {/* โครงการกำหนดเองไม่ใช้ตัวสร้าง BOQ — ซ่อนทั้งส่วนนี้ (ใช้ราคากรอกเอง + ไฟล์แนบแทน) */}
       {activeTab === "boq" && !isCustom && (
         <>
-      <div className="flex items-center justify-between mb-2">
+      <div id="boq-section" className="mb-2 flex flex-wrap items-center justify-between gap-2 scroll-mt-16">
         <h2 className="text-lg font-medium text-slate-800">รายการ BOQ</h2>
         <div className="flex gap-2">
+          {/* จอแคบกว่า 1180px (iPad แนวตั้ง/แนวนอนเล็ก) ปุ่มทั้งแถวบีบจนข้อความหัก 4 บรรทัด —
+              เก็บปุ่มที่ใช้ไม่บ่อยเข้าเมนู "เพิ่มเติม" เหลือแต่ปุ่มเพิ่มบรรทัดที่ใช้ทุกวัน */}
+          <span className="min-[1180px]:hidden">
+            <RowMenu
+              label="คำสั่ง BOQ เพิ่มเติม"
+              text="เพิ่มเติม"
+              triggerClassName="inline-flex h-full items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-800"
+              items={[
+                ...(detail.versions.length > 1
+                  ? [{ key: "compare", label: "เทียบเวอร์ชัน", onSelect: () => setShowVersionCompare((v) => !v) }]
+                  : []),
+                { key: "structural", label: "คำนวณโครงสร้าง", onSelect: () => setShowStructural(true) },
+                { key: "import", label: "นำเข้า Excel", onSelect: () => setShowImport(true) },
+                ...(items.length > 0
+                  ? [
+                      { key: "export", label: "ส่งออก Excel (ฉบับภายใน)", onSelect: () => void exportBoqExcel() },
+                      { key: "template", label: "บันทึกเป็นแม่แบบ", onSelect: () => setShowSaveTemplateForm((v) => !v) },
+                    ]
+                  : []),
+              ]}
+            />
+          </span>
+          <span className="hidden gap-2 min-[1180px]:flex">
           {detail.versions.length > 1 && (
             <button
               type="button"
@@ -4509,6 +6009,34 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-800"
             >
               เทียบเวอร์ชัน
+            </button>
+          )}
+          {/* ฐานราก/เสา/คาน/พื้น → คอนกรีต + ไม้แบบ + เหล็ก ลงใบถอดแบบของแต่ละบรรทัดทีเดียว */}
+          <button
+            type="button"
+            onClick={() => setShowStructural(true)}
+            title="ใส่ขนาดและเหล็กของฐานราก/เสา/คาน/พื้น ได้คอนกรีต ไม้แบบ และเหล็กพร้อมกัน"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-800"
+          >
+            <Boxes size={14} /> คำนวณโครงสร้าง
+          </button>
+          {/* นำเข้าโชว์เสมอ — โครงการว่างคือกรณีที่ใช้บ่อยที่สุด (ยก BOQ ที่ทำใน Excel มาทั้งชุด) */}
+          <button
+            type="button"
+            onClick={() => setShowImport(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-800"
+          >
+            <Upload size={14} /> นำเข้า Excel
+          </button>
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={exportBoqExcel}
+              disabled={exportingExcel === "boq"}
+              title="ฉบับภายใน มีราคาทุนและรายการสั่งซื้อ — ห้ามส่งให้ลูกค้า (ฉบับลูกค้าอยู่ที่ใบเสนอราคาแต่ละใบ)"
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
+            >
+              <FileSpreadsheet size={14} /> {exportingExcel === "boq" ? "กำลังสร้าง..." : "ส่งออก Excel"}
             </button>
           )}
           {items.length > 0 && (
@@ -4520,6 +6048,37 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
               บันทึกเป็นแม่แบบ
             </button>
           )}
+          </span>
+          {/* หน้าต่างอยู่นอกกล่องปุ่มที่ซ่อนบนจอแคบ — เปิดจากเมนู "เพิ่มเติม" แล้วต้องเห็น */}
+          {showStructural && (
+            <StructuralCalcDialog
+              projectId={detail.project.id}
+              items={items}
+              materials={materials}
+              categoryOptions={categoryOptions}
+              onApplied={silentRefresh}
+              onClose={() => setShowStructural(false)}
+            />
+          )}
+          {showImport && (
+            <BoqImportDialog
+              projectId={detail.project.id}
+              existingLines={items.length}
+              versionQuoted={!detail.editable}
+              categoryOptions={categoryOptions}
+              subgroupOptions={subgroupOptions}
+              onClose={() => setShowImport(false)}
+              onImported={() => void silentRefresh()}
+            />
+          )}
+          <button
+            type="button"
+            onClick={() => setShowBulkAdd(true)}
+            title="ติ๊กวัสดุจากคลังทีละหลายตัว แล้วกรอกจำนวนครั้งเดียว"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-800"
+          >
+            <ListPlus size={14} /> เพิ่มหลายรายการ
+          </button>
           <button
             type="button"
             onClick={() => setShowAddForm((v) => !v)}
@@ -4527,6 +6086,19 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
           >
             + เพิ่มรายการ
           </button>
+          {showBulkAdd && (
+            <BoqBulkAddDialog
+              projectId={detail.project.id}
+              materials={materials}
+              categoryOptions={categoryOptions}
+              topCategoryOf={topCategoryOf}
+              onAdded={async (categoryId) => {
+                await silentRefresh();
+                revealCategory(categoryId);
+              }}
+              onClose={() => setShowBulkAdd(false)}
+            />
+          )}
         </div>
       </div>
 
@@ -4626,9 +6198,14 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
               : "เพิ่มรายการแรกเพื่อเริ่มถอดปริมาณและคิดราคา"}
           </p>
           <div className="mt-3">
-            <Button size="sm" onClick={() => setShowAddForm(true)}>
-              + เพิ่มรายการแรก
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button size="sm" onClick={() => setShowAddForm(true)}>
+                + เพิ่มรายการแรก
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowBulkAdd(true)}>
+                <ListPlus size={14} /> เพิ่มหลายรายการจากคลัง
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -4637,7 +6214,8 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
         </>
       )}
 
-      <MaterialsTab vm={vm} />
+      {activeTab === "costs" && <ProjectCostsPanel projectId={projectId} onGoToContract={() => goTab("contract")} />}
+
     </Layout>
   );
 }

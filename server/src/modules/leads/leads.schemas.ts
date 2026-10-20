@@ -1,4 +1,5 @@
 import {
+  AREA_RANGE_VALUES,
   EMAIL_ERROR_MESSAGE,
   THAI_MOBILE_ERROR_MESSAGE,
   normalizeFullName,
@@ -67,6 +68,9 @@ export const createLeadSchema = z.object({
     .transform((v) => (v === "" ? undefined : v))
     .optional(),
   areaSqm: z.number().min(0).max(1_000_000).optional(),
+  // ช่วงพื้นที่ (ฟอร์มบังคับให้เลือกช่วง/ยังไม่ทราบ/พิมพ์ตัวเลข อย่างใดอย่างหนึ่ง) — เซิร์ฟเวอร์รับเป็น optional
+  // เพราะคำขอจากช่องทางอื่น/ไคลเอนต์เก่าไม่มีช่องนี้ · มีตัวเลขแล้วช่วงถูกทิ้ง (ตัวเลขชนะ)
+  areaRange: z.enum(AREA_RANGE_VALUES).optional(),
   desiredStartDate: z.coerce.date().optional(),
   // รับเฉพาะลิงก์ http/https จริง และจำกัดจำนวน — กัน javascript:/data: (ที่ new URL() มองว่าถูก)
   // หลุดลงมาเป็น stored XSS หากในอนาคตมีการเรนเดอร์ไฟล์แนบเป็นลิงก์บนหน้าพนักงาน

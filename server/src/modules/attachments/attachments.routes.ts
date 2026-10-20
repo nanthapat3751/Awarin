@@ -17,7 +17,9 @@ import {
   getStaffAttachmentFile,
   isAllowedAttachment,
   parseKind,
+  parseKindPatch,
   parseVisibility,
+  parseVisibilityPatch,
   updateAttachment,
 } from "./attachments.service";
 
@@ -103,13 +105,15 @@ attachmentsRouter.post("/", (req: Request<QuoteParams>, res) => {
   });
 });
 
+// แก้ทีละช่องได้ — ช่องที่ไม่ส่งมาต้องไม่ถูกแตะ เดิมเติมค่าปริยายให้เสมอ หน้าเว็บที่ส่งมาแต่
+// visibility จึงรีเซ็ตป้ายชนิดไฟล์เป็น "อื่นๆ" ทุกครั้งที่สลับสิทธิ์ (และทางกลับกันก็ดันเป็น INTERNAL)
 attachmentsRouter.patch("/:attachmentId", async (req: Request<AttachmentParams>, res) => {
   try {
     const attachment = await updateAttachment(
       req.params.projectId,
       req.params.quoteId,
       req.params.attachmentId,
-      { kind: parseKind(req.body?.kind), visibility: parseVisibility(req.body?.visibility) },
+      { kind: parseKindPatch(req.body?.kind), visibility: parseVisibilityPatch(req.body?.visibility) },
       req.user!.id,
     );
     res.json({ attachment });

@@ -1,9 +1,15 @@
-import type { LeadDto, LeadStatus, ProjectDto } from "@systemboq/shared-types";
+import type { LeadDto, LeadListPageDto, LeadStatus, ProjectDto } from "@systemboq/shared-types";
 
 import { apiFetch } from "./api";
+import { listQueryString, type ListQuery } from "./projects-api";
 
 export function listLeads(): Promise<{ leads: LeadDto[] }> {
   return apiFetch("/api/leads");
+}
+
+/** หน้ารายการคำขอ หน้าละ 15 — ค้นหา/กรองที่เซิร์ฟเวอร์ */
+export function listLeadsPage(query: ListQuery): Promise<LeadListPageDto> {
+  return apiFetch(`/api/leads?${listQueryString(query)}`);
 }
 
 export function updateLeadStatus(id: string, status: LeadStatus): Promise<{ lead: LeadDto }> {

@@ -8,7 +8,16 @@ export function listMaterials(categoryId?: string): Promise<{ materials: Materia
   return apiFetch(`/api/materials${query}`);
 }
 
-export function createMaterial(input: {
+/** ขนาดกระเบื้องของวัสดุ — ทุกช่อง null = ไม่ตั้ง */
+interface PurchaseInput {
+  // ขนาดกระเบื้อง (เฉพาะวัสดุที่เป็นกระเบื้อง) — กว้างกับยาวต้องมาคู่กัน
+  tileWidthMm?: number | null;
+  tileLengthMm?: number | null;
+  tileThicknessMm?: number | null;
+  tilePiecesPerBox?: number | null;
+}
+
+export function createMaterial(input: PurchaseInput & {
   categoryId?: string | null;
   name: string;
   spec?: string | null;
@@ -24,7 +33,7 @@ export function createMaterial(input: {
 
 export function updateMaterial(
   id: string,
-  input: {
+  input: PurchaseInput & {
     categoryId?: string | null;
     name?: string;
     spec?: string | null;

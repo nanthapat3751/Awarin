@@ -6,6 +6,8 @@ import { EmptyState } from "../components/EmptyState";
 import { PortalPage, StatusCard } from "../components/PortalPage";
 import { ApiError } from "../lib/api";
 import { listMyQuotes } from "../lib/my-api";
+import { StatusListSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
 
 // สไตล์ตามสถานะใบเสนอราคา: ป้ายสถานะ + แถบสีซ้าย
 const STATUS_STYLE: Record<QuoteStatus, { label: string; badge: string; accent: string }> = {
@@ -30,6 +32,7 @@ function formatDay(iso: string): string {
 }
 
 export function MyQuotesPage() {
+  usePageMeta("ใบเสนอราคาของฉัน");
   const [quotes, setQuotes] = useState<CustomerQuoteSummaryDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +48,7 @@ export function MyQuotesPage() {
 
   return (
     <PortalPage title="ใบเสนอราคาของฉัน" subtitle="เปิดดูรายละเอียดราคาและตอบรับใบเสนอราคาจากทีมงาน">
-      {loading && <p className="text-slate-400">กำลังโหลด...</p>}
+      {loading && <StatusListSkeleton label="กำลังโหลดใบเสนอราคา..." />}
       {!loading && error && (
         <p className="text-sm text-red-600">{error} — กรุณาลองเข้าสู่ระบบใหม่อีกครั้ง</p>
       )}

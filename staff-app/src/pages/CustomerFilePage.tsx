@@ -28,6 +28,7 @@ import { getCustomerActivity, getCustomerDetail } from "../lib/customer-file-api
 import { VIEW_TRACKING_SINCE } from "../lib/quote-view";
 import { rowNavClass, stopRowNav, useRowNav } from "../lib/row-nav";
 import { badgeClass, type BadgeColor } from "../lib/status-badge";
+import { DetailSkeleton, ListSkeleton } from "../components/Skeleton";
 
 const PROJECT_STATUS_LABEL: Record<string, string> = {
   DRAFT: "ร่าง",
@@ -182,7 +183,7 @@ export function CustomerFilePage() {
   // ยอดจริงทั้งหมดจากเซิร์ฟเวอร์ — ไม่ใช่ `activity.length` ซึ่งตอนนี้เป็นแค่จำนวนแถวในหน้านี้
   const [activityTotal, setActivityTotal] = useState(0);
   const [activityPage, setActivityPage] = useState(1);
-  const [activityPageSize, setActivityPageSize] = useState(20);
+  const [activityPageSize, setActivityPageSize] = useState(15);
   const [filter, setFilter] = useState<ActivityFilterValue>(EMPTY_FILTER);
   const [error, setError] = useState<string | null>(null);
   // เลื่อนค่านี้เพื่อสั่งโหลดไทม์ไลน์ใหม่ หลังพนักงานแก้ข้อมูล/ระงับบัญชี — งานพวกนั้นเขียนแถวใหม่
@@ -252,7 +253,7 @@ export function CustomerFilePage() {
     return (
       <Layout>
         <PageHeader title="แฟ้มลูกค้า" />
-        <p className="text-slate-500">กำลังโหลด...</p>
+        <DetailSkeleton title={false} label="กำลังโหลดแฟ้มลูกค้า..." />
       </Layout>
     );
   }
@@ -357,7 +358,8 @@ export function CustomerFilePage() {
       {customer.projects.length === 0 ? (
         <p className="mb-8 text-slate-500">ยังไม่มีโครงการ</p>
       ) : (
-        <table className="mb-8 w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm [&_tbody_tr:hover]:bg-slate-50/70">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-8">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:border-b [&_th]:border-slate-300 [&_th]:bg-slate-200">
             <tr>
               <th className="whitespace-nowrap px-3 py-2">โครงการ</th>
@@ -398,6 +400,7 @@ export function CustomerFilePage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       <h2 className="mb-2 text-lg font-medium text-slate-800">
@@ -406,7 +409,8 @@ export function CustomerFilePage() {
       {customer.quotes.length === 0 ? (
         <p className="mb-8 text-slate-500">ยังไม่มีใบเสนอราคา</p>
       ) : (
-        <table className="mb-8 w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm [&_tbody_tr:hover]:bg-slate-50/70">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-8">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:border-b [&_th]:border-slate-300 [&_th]:bg-slate-200">
             <tr>
               <th className="whitespace-nowrap px-3 py-2">เลขที่</th>
@@ -443,6 +447,7 @@ export function CustomerFilePage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
 
@@ -453,7 +458,8 @@ export function CustomerFilePage() {
       {customer.contracts.length === 0 ? (
         <p className="mb-8 text-slate-500">ยังไม่มีสัญญา</p>
       ) : (
-        <table className="mb-8 w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm [&_tbody_tr:hover]:bg-slate-50/70">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-8">
+        <table className="w-full text-sm [&_tbody_tr:hover]:bg-slate-50/70">
           <thead className="text-left text-xs font-medium text-slate-600 [&_th]:border-b [&_th]:border-slate-300 [&_th]:bg-slate-200">
             <tr>
               <th className="whitespace-nowrap px-3 py-2">เลขที่</th>
@@ -500,6 +506,7 @@ export function CustomerFilePage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {/* คำขอที่ลูกค้าส่งเข้ามา — ไทม์ไลน์บอกแค่ว่า "ส่งคำขอ" แต่เนื้อคำขออยู่ที่นี่ */}
@@ -549,7 +556,7 @@ export function CustomerFilePage() {
         </h2>
         <Link
           to={`/customers?tab=activity&customerId=${customer.id}`}
-          className="text-sm text-brand transition-colors hover:text-brand-dark"
+          className="link-pill -mr-2.5 text-sm text-brand"
         >
           ดูในฟีดรวมทั้งบริษัท
         </Link>
@@ -557,7 +564,7 @@ export function CustomerFilePage() {
 
       <ActivityFilterBar value={filter} onChange={setFilter} />
 
-      {activity === null && <p className="text-slate-500">กำลังโหลดกิจกรรม...</p>}
+      {activity === null && <ListSkeleton rows={5} label="กำลังโหลดกิจกรรม..." />}
       {activity !== null && activity.length === 0 && (
         <p className="mb-8 text-slate-500">
           {isFilterActive(filter)

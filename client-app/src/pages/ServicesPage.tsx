@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { resolveSiteImage, type PortfolioDto } from "@systemboq/shared-types";
+import { resolveSiteImage, resolveSiteImageSlot, type PortfolioDto, type SiteImageKey } from "@systemboq/shared-types";
 
 import { CtaBanner } from "../components/CtaBanner";
 import { Reveal } from "../components/Reveal";
+import { FadeImage } from "../components/FadeImage";
 import { PortfolioCarousel } from "../components/PortfolioCarousel";
-import { getPublicSettings, listFeaturedPortfolio } from "../lib/public-api";
-import { useParallax } from "../lib/use-parallax";
+import { Skeleton, SkeletonGroup } from "../components/Skeleton";
+import { cachedPublicSettings, getPublicSettings, listFeaturedPortfolio } from "../lib/public-api";
+import { usePageMeta } from "../lib/page-meta";
 
 /* ------------------------------------------------------------------ *
  * ไอคอน (inline SVG สไตล์เดียวกับหน้าแรก — ไม่มี lucide ใน client-app)
@@ -149,20 +151,22 @@ function SectionHeading({
 
 /**
  * ช่องรูปในหน้าบริการ — แสดงรูปที่พนักงานตั้งไว้จากหน้า "คลังรูปเว็บไซต์"
- * ถ้ายังไม่ได้ตั้ง (หรือรูปโหลดไม่ขึ้น) จะกลับไปเป็นกรอบเปล่าพร้อมป้ายชื่อเหมือนเดิม
- * เพื่อให้หน้าเว็บไม่พังตอนยังไม่มีรูป
+ * `pending` (ยังไม่รู้ค่าตั้ง) = แสงวิ่ง · รูปกำลังโหลด = แสงวิ่งแล้วจางเข้า (FadeImage)
+ * รู้แล้วว่ายังไม่ได้ตั้ง = กรอบเปล่าพร้อมป้ายชื่อเหมือนเดิม — เดิมป้ายนี้ขึ้นระหว่างรอค่าตั้งด้วย
+ * คนเห็น "ภาพงานออกแบบ" แว้บหนึ่งเหมือนเว็บยังไม่มีรูป แล้วค่อยสลับเป็นรูปจริง
  */
 function SiteImage({
   src,
   label,
+  pending,
   className = "",
 }: Readonly<{
   src: string;
   label: string;
+  pending: boolean;
   className?: string;
 }>) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
+  if (!pending && !src) {
     return (
       <div
         className={`rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-300 text-sm select-none ${className}`}
@@ -171,95 +175,188 @@ function SiteImage({
       </div>
     );
   }
+  return <FadeImage src={src} alt={label} pending={pending} className={`rounded-2xl ${className}`} />;
+}
+
+/* การ์ดสามบริการที่ลอยซ้อนขอบล่างของหัวหน้า (แบบ C — ผู้ใช้เลือก 13 ต.ค. 2026)
+   รูปใช้ช่องเดียวกับการ์ดบริการหน้าแรก (ว่าง = ยืมรูปของหน้านี้ ดู SITE_IMAGE_SLOTS) จึงตรงกันทั้งเว็บ
+   ไม่มีเลขลำดับ — สามบริการเป็นทางเลือกคู่ขนาน ไม่ใช่ขั้นตอน */
+const HERO_SERVICES: { href: string; title: string; desc: string; imageKey: SiteImageKey }[] = [
+  { href: "#design", title: "งานออกแบบ", desc: "แปลงความต้องการเป็นแบบที่ก่อสร้างได้จริง", imageKey: "siteHomeServiceDesign" },
+  { href: "#construction", title: "งานก่อสร้าง", desc: "ควบคุมงาน 3 ช่วง ตรวจสอบได้ทุกขั้น", imageKey: "siteHomeServiceBuild" },
+  {
+    href: "#engineering",
+    title: "งานระบบวิศวกรรม",
+    desc: "ไฟฟ้า ประปา ปรับอากาศ และห้องปลอดเชื้อ",
+    imageKey: "siteHomeServiceEngineering",
+  },
+];
+
+/**
+ * หกเหลี่ยมรังผึ้งทางขวาของหัวหน้า (แบบ D — ผู้ใช้เลือก 13 ต.ค. 2026 แทนรูปเต็มพื้น)
+ * ตำแหน่งเป็น % ของกล่องคลัสเตอร์ (กว้าง 38% ของหัว แต่ไม่เกิน 34rem) — ช่องสีโปร่งสองช่องเป็นของตกแต่ง
+ * ทุกช่องมีช่องรูปของตัวเองในหน้า "คลังรูปเว็บไซต์" (ผู้ใช้สั่ง — เดิมสองช่องกลาง/ล่างยืมรูปการ์ดหน้าแรก
+ * และสองช่องมุมขวาเป็นของตกแต่งอัปไม่ได้) · ว่าง = ช่องบน/กลาง/ล่างยืมรูปตาม fallbackKey · ช่องมุมขวาเป็นสีโปร่ง
+ */
+const HERO_HEXES: { key: SiteImageKey; left: string; top: string; tint?: string }[] = [
+  { key: "siteHeroServices", left: "8%", top: "6%" },
+  { key: "siteServicesHexMid", left: "47%", top: "30%" },
+  { key: "siteServicesHexLow", left: "8%", top: "54%" },
+  { key: "siteServicesHexTopRight", left: "47%", top: "-18%", tint: "bg-sky-300/12" },
+  { key: "siteServicesHexBottomRight", left: "47%", top: "78%", tint: "bg-white/6" },
+];
+
+/** หกเหลี่ยมหนึ่งช่อง — ไม่มีรูป/โหลดไม่ขึ้น = ช่องสีโปร่ง รูปทรงยังครบ คลัสเตอร์ไม่แหว่ง */
+function HeroHex({
+  src,
+  left,
+  top,
+  tint,
+  delay,
+  pending,
+}: Readonly<{ src: string; left: string; top: string; tint?: string; delay: number; pending: boolean }>) {
+  const [state, setState] = useState<"loading" | "loaded" | "failed">("loading");
+  const imgRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    // รูปในแคชอาจโหลดเสร็จก่อนผูก onLoad
+    setState(imgRef.current?.complete ? "loaded" : "loading");
+  }, [src]);
+  const showPhoto = src !== "" && state !== "failed";
+  // ยังไม่รู้ค่าตั้ง หรือรูปกำลังมา = แสงวิ่งบนพื้นนาวี (เดิมเป็นช่องสีโปร่งเปล่าแล้วรูปโผล่พรวด)
+  // ช่องมุมขวาเป็นสีโปร่งตกแต่ง (มี tint) ไม่มีรูปมาแน่ ๆ ระหว่างรอค่าตั้งก็ไม่ต้องวิ่ง
+  const shimmer = (pending && !tint) || (showPhoto && state === "loading");
   return (
-    <img
-      src={src}
-      alt={label}
-      onError={() => setFailed(true)}
-      className={`rounded-2xl object-cover ${className}`}
-    />
+    <div
+      aria-hidden
+      className={`hex hex-in absolute w-[52%] overflow-hidden ${showPhoto ? "" : (tint ?? "bg-white/10")}`}
+      style={{ left, top, animationDelay: `${delay}s` }}
+    >
+      {shimmer && <div className="skeleton on-dark absolute inset-0 rounded-none" />}
+      {showPhoto && (
+        <img
+          ref={imgRef}
+          src={src}
+          alt=""
+          onLoad={() => setState("loaded")}
+          onError={() => setState("failed")}
+          className={`hex-photo transition-opacity duration-700 motion-reduce:transition-none ${
+            state === "loaded" ? "opacity-100" : "opacity-0"
+          }`}
+        />
+      )}
+    </div>
   );
 }
 
+/** รูปย่อในการ์ดบริการ — ยังไม่มีรูป/โหลดไม่ขึ้น = กล่องน้ำเงินอ่อนแทน (ไม่ทิ้งช่องว่างให้การ์ดเบี้ยว) */
+function HeroServiceThumb({ src, pending }: Readonly<{ src: string; pending: boolean }>) {
+  if (!pending && !src) return <span aria-hidden className="h-20 w-24 shrink-0 rounded-lg bg-brand/10" />;
+  // ยังไม่รู้ค่าตั้ง/รูปกำลังมา = แสงวิ่งแล้วจางเข้า (เดิมเป็นกล่องฟ้าเปล่าแล้วรูปโผล่พรวด)
+  return <FadeImage src={src} alt="" pending={pending} lazy className="h-20 w-24 shrink-0 rounded-lg" />;
+}
+
 export function ServicesPage() {
+  usePageMeta(
+    "บริการ",
+    "ออกแบบบ้าน ก่อสร้าง และงานระบบวิศวกรรม (โครงสร้าง ไฟฟ้า ประปา) โดยทีมวิศวกร ดูแลตั้งแต่ปรึกษา ออกแบบ ประเมินราคา จนส่งมอบบ้าน",
+  );
   const [portfolio, setPortfolio] = useState<PortfolioDto[]>([]);
-  const [heroImgError, setHeroImgError] = useState(false);
+  // เดิมระหว่างรอขึ้นกล่อง "ผลงานเร็ว ๆ นี้" เหมือนไม่มีผลงาน แล้วค่อยกลายเป็นแถบเลื่อน
+  const [portfolioLoading, setPortfolioLoading] = useState(true);
   // รูปที่พนักงานตั้งไว้จากหน้า "คลังรูปเว็บไซต์" — ว่าง = กลับไปเป็นกรอบเปล่าเหมือนเดิม
-  const [siteImages, setSiteImages] = useState<Record<string, string>>({});
-  // parallax เบา ๆ ที่รูปแบนเนอร์ hero (รูปถูก scale เผื่อขอบไว้ในฮุกแล้ว กล่องนอกมี overflow-hidden)
-  const heroImgRef = useParallax<HTMLImageElement>();
+  // เริ่มจากค่าที่จำไว้จากการเปิดเว็บครั้งก่อน — ไม่งั้นรอบแรกยังไม่รู้รูป หัวหน้าขึ้นข้อความ "ยังไม่ได้ตั้งภาพ" แว้บหนึ่ง
+  // null = ยังไม่รู้ค่าตั้งเลย (เปิดเว็บครั้งแรก) → พื้นเข้มเปล่าไว้ก่อน
+  const [siteImages, setSiteImages] = useState<Record<string, string> | null>(cachedPublicSettings);
 
   useEffect(() => {
     // ดึงเฉพาะผลงานเด่นที่ staff เลือก (เติมล่าสุดให้ถ้าไม่ครบ) — สูงสุด 8
     listFeaturedPortfolio()
       .then((res) => setPortfolio(res.portfolio))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setPortfolioLoading(false));
     getPublicSettings()
       .then((res) => setSiteImages(res.settings))
-      .catch(() => undefined);
+      .catch(() => setSiteImages((prev) => prev ?? {}));
   }, []);
 
-  // ยังคงไฟล์ public/services-hero.jpg ไว้เป็นค่าสำรอง เผื่อยังไม่ได้ตั้งรูปจากหน้าคลังรูป
-  const heroImage = resolveSiteImage(siteImages.siteHeroServices, "/services-hero.jpg");
-
-  // ต้องล้างสถานะ "โหลดรูปไม่สำเร็จ" ทุกครั้งที่ URL เปลี่ยน — ตอนเรนเดอร์รอบแรกยังไม่มีค่า
-  // จากเซิร์ฟเวอร์ รูปจึงชี้ไปที่ /services-hero.jpg ซึ่งไม่มีไฟล์จริง onError ยิงทันที
-  // แล้ว <img> ถูกถอดออกจากดอม พอค่าจริงมาถึงทีหลังรูปที่พนักงานอัปจึงไม่เคยขึ้นเลย
-  useEffect(() => {
-    setHeroImgError(false);
-  }, [heroImage]);
+  const images = siteImages ?? {};
+  /** รูปของช่องในคลังรูป · ยังไม่รู้ค่าตั้ง (เปิดเว็บครั้งแรก) = "" ไว้ก่อน */
+  const slotImage = (key: SiteImageKey) => (siteImages === null ? "" : resolveSiteImageSlot(images, key));
+  const imagesPending = siteImages === null;
 
   return (
     <div>
-      {/* ============================ HERO (เต็มจอ) ============================ */}
-      {/* โทน navy เข้มนุ่ม (ประกาย navy บนพื้นเข้ม ไม่ใช่ดำล้วน) — navbar เป็นแถบขาวปกติ ไม่แก้เมนู */}
-      <section className="relative min-h-[calc(100vh-4.6rem)] text-white flex flex-col">
-        {/* แถบหัวเรื่อง */}
-        <div className="relative overflow-hidden bg-neutral-900 px-6 pt-16 sm:pt-20 pb-10">
-          {/* ประกาย navy มุมบนซ้าย ให้พื้นเป็นโทน navy เข้ม ไม่ใช่ดำล้วน */}
-          <div className="absolute inset-0 bg-linear-to-br from-brand/40 via-neutral-900 to-neutral-900" />
-          <div className="relative max-w-6xl mx-auto w-full">
-            {/* eyebrow + เส้นขีด */}
-            <div className="hero-item flex items-center gap-4 mb-5" style={{ animationDelay: "0.05s" }}>
-              <span className="text-sm tracking-wide uppercase text-slate-300">บริการของเรา</span>
-              <span className="h-px w-14 bg-slate-500" />
+      {/* ============================ HERO ============================ */}
+      {/* แบบ D (ผู้ใช้เลือก 13 ต.ค. 2026): พื้นนาวี + ตารางพิมพ์เขียว · ข้อความซ้าย · หกเหลี่ยมรังผึ้งรูปสามช่องขวา (~35%)
+          + การ์ดสามบริการลอยซ้อนขอบล่าง · แถบเมนูยังเป็นแถบขาวปกติ (ห้ามทำโปร่งทับหัว)
+          จอเล็กกว่า lg ไม่มีที่ให้คลัสเตอร์ (จะทับข้อความ) จึงเหลือพื้นนาวี + ตาราง */}
+      <section className="relative">
+        <div className="relative h-[clamp(26rem,60vh,34rem)] overflow-hidden bg-linear-to-br from-brand via-brand-dark to-[#0b1040] text-white lg:h-[34rem]">
+          <div aria-hidden className="blueprint-grid absolute inset-0" />
+          <div aria-hidden className="absolute inset-y-0 right-0 hidden w-[38%] max-w-[34rem] lg:block">
+            {HERO_HEXES.map((h, i) => (
+              <HeroHex
+                key={`${h.left}-${h.top}`}
+                src={slotImage(h.key)}
+                left={h.left}
+                top={h.top}
+                tint={h.tint}
+                delay={0.2 + i * 0.15}
+                pending={imagesPending}
+              />
+            ))}
+          </div>
+          {/* pb เผื่อที่ให้การ์ดที่ลอยขึ้นมาทับ — จอแคบการ์ดเรียงลง จึงซ้อนแค่ใบแรก */}
+          <div className="relative mx-auto flex h-full max-w-6xl flex-col justify-end px-6 pb-28 md:pb-36">
+            <div className="hero-item flex items-center gap-4" style={{ animationDelay: "0.05s" }}>
+              <span className="text-sm tracking-wide text-slate-300">บริการของเรา</span>
+              <span className="h-px w-14 bg-slate-400/70" />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-10 md:items-end">
-              <h1
-                className="hero-item text-5xl sm:text-7xl font-semibold leading-none"
-                style={{ animationDelay: "0.18s" }}
-              >
-                บริการ
-              </h1>
-              <p className="hero-item text-slate-300 leading-relaxed md:pb-1.5" style={{ animationDelay: "0.34s" }}>
-                บริการออกแบบและก่อสร้างแบบครบวงจร ดูแลคุณภาพ ความปลอดภัย และงานระบบวิศวกรรมในทุกโครงการ
-                พร้อมประเมินราคาอย่างโปร่งใสให้เห็นต้นทุนทุกขั้นตอน
-              </p>
-            </div>
+            <h1
+              className="hero-item mt-3 text-5xl font-semibold leading-tight sm:text-6xl"
+              style={{ animationDelay: "0.18s" }}
+            >
+              บริการ
+            </h1>
+            {/* max-w-xl ที่จอกว้าง — ปลายบรรทัดต้องไม่วิ่งเข้าไปใต้หกเหลี่ยม */}
+            <p
+              className="hero-item mt-4 max-w-2xl leading-relaxed text-slate-200 sm:text-lg lg:max-w-xl"
+              style={{ animationDelay: "0.34s" }}
+            >
+              บริการออกแบบและก่อสร้างแบบครบวงจร ดูแลคุณภาพ ความปลอดภัย และงานระบบวิศวกรรมในทุกโครงการ
+              พร้อมประเมินราคาอย่างโปร่งใสให้เห็นต้นทุนทุกขั้นตอน
+            </p>
           </div>
         </div>
 
-        {/* รูปแบนเนอร์เต็มความกว้าง — ตั้งได้จากหน้า "คลังรูปเว็บไซต์" ฝั่งพนักงาน
-            (ถ้ายังไม่ตั้ง จะลองไฟล์ public/services-hero.jpg แล้วค่อยตกมาเป็นข้อความบอกทาง) */}
-        <div
-          className="hero-item flex-1 relative min-h-[42vh] overflow-hidden bg-neutral-900"
-          style={{ animationDelay: "0.48s" }}
-        >
-          {heroImgError ? (
-            <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm select-none">
-              ยังไม่ได้ตั้งภาพหน้าบริการ — ตั้งได้ที่หน้า "คลังรูปเว็บไซต์" ฝั่งพนักงาน
-            </div>
-          ) : (
-            <img
-              ref={heroImgRef}
-              src={heroImage}
-              alt=""
-              aria-hidden
-              className="absolute inset-0 w-full h-full object-cover"
-              onError={() => setHeroImgError(true)}
-            />
-          )}
-        </div>
+        <ul className="relative mx-auto -mt-20 grid max-w-6xl grid-cols-1 gap-4 px-6 md:-mt-24 md:grid-cols-3 md:gap-5">
+          {HERO_SERVICES.map((svc, i) => (
+            <li key={svc.href} className="hero-item" style={{ animationDelay: `${0.48 + i * 0.09}s` }}>
+              {/* ลิงก์เลื่อนในหน้าเดียวกัน — ScrollOnNavigate ใน App.tsx เลื่อนให้ตาม hash · ส่วนปลายทางมี scroll-mt-24 */}
+              <Link
+                to={`/services${svc.href}`}
+                className="group flex h-full items-center gap-4 rounded-xl bg-white p-4 shadow-lg ring-1 ring-slate-200 transition-shadow hover:shadow-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand motion-reduce:transition-none"
+              >
+                <HeroServiceThumb src={slotImage(svc.imageKey)} pending={imagesPending} />
+                <span className="min-w-0">
+                  <span className="block font-semibold text-slate-900 transition-colors group-hover:text-brand">
+                    {svc.title}
+                  </span>
+                  <span className="mt-1 block text-sm leading-snug text-slate-500">{svc.desc}</span>
+                  <span className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-brand">
+                    ดูรายละเอียด
+                    <span
+                      aria-hidden
+                      className="transition-transform group-hover:translate-y-0.5 motion-reduce:transition-none"
+                    >
+                      ↓
+                    </span>
+                  </span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
       {/* ========================== ออกแบบ ========================== */}
@@ -277,8 +374,9 @@ export function ServicesPage() {
             {/* รูป sticky ด้านซ้าย (เดสก์ท็อป) */}
             <div className="lg:sticky lg:top-24">
               <SiteImage
-                src={resolveSiteImage(siteImages.siteServiceDesign, "")}
+                src={resolveSiteImage(images.siteServiceDesign, "")}
                 label="ภาพงานออกแบบ"
+                pending={imagesPending}
                 className="aspect-4/5 w-full"
               />
             </div>
@@ -329,8 +427,9 @@ export function ServicesPage() {
               >
                 {/* รูป (สลับซ้าย-ขวา) */}
                 <SiteImage
-                  src={resolveSiteImage(siteImages[`siteServicePhase${idx + 1}`], "")}
+                  src={resolveSiteImage(images[`siteServicePhase${idx + 1}`], "")}
                   label={`ภาพ${phase.title}`}
+                  pending={imagesPending}
                   className="aspect-16/10 w-full"
                 />
 
@@ -420,7 +519,18 @@ export function ServicesPage() {
             รวมผลงานออกแบบและก่อสร้างที่เราภูมิใจนำเสนอ
           </p>
 
-          {portfolio.length > 0 ? (
+          {portfolioLoading ? (
+            // แถวการ์ดแนวตั้งขนาดเดียวกับแถบจริง (w-80/sm:w-96 · 4:5) ล้นขวาแบบแถบเลื่อน
+            <SkeletonGroup label="กำลังโหลดผลงาน" className="flex gap-6 overflow-hidden">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="w-80 shrink-0 sm:w-96">
+                  <Skeleton className="aspect-4/5 w-full rounded-2xl" />
+                  <Skeleton className="mt-3.5 h-5 w-2/3" />
+                  <Skeleton className="mt-2 h-3.5 w-1/2" />
+                </div>
+              ))}
+            </SkeletonGroup>
+          ) : portfolio.length > 0 ? (
             <PortfolioCarousel items={portfolio} />
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 py-24 text-center">

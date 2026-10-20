@@ -14,24 +14,25 @@ async function main() {
   await grantRuntimeRolePrivileges(prisma, "systemboq");
   console.log("Granted restricted runtime privileges to boq_app on systemboq (AuditLog append-only enforced).");
 
-  const adminEmail = "admin@systemboq.local";
+  const adminUsername = "owner";
   const adminPassword = crypto.randomBytes(9).toString("base64url");
 
-  // ตรวจด้วย role แทนอีเมลเริ่มต้น: อีเมลของ OWNER คาดว่าจะเปลี่ยนหลังตั้งค่าเสร็จ (เช่น เปลี่ยน
-  // เป็นอีเมลจริง) ซึ่งต้องไม่ทำให้ seed เข้าใจว่ายังไม่มี OWNER แล้วสร้างขึ้นมาอีกคน
+  // ตรวจด้วย role แทนชื่อผู้ใช้เริ่มต้น: ชื่อผู้ใช้ของ OWNER คาดว่าจะเปลี่ยนหลังตั้งค่าเสร็จ
+  // ซึ่งต้องไม่ทำให้ seed เข้าใจว่ายังไม่มี OWNER แล้วสร้างขึ้นมาอีกคน
   const existingAdmin = await prisma.user.findFirst({ where: { role: "OWNER" } });
   if (!existingAdmin) {
     const passwordHash = await argon2.hash(adminPassword, { type: argon2.argon2id });
+    // ไม่ตั้งอีเมลให้บัญชีพนักงาน — ฝั่งบริษัทล็อกอินด้วยชื่อผู้ใช้ และระบบไม่เคยส่งอีเมลถึงพนักงาน
     await prisma.user.create({
       data: {
-        email: adminEmail,
+        username: adminUsername,
         passwordHash,
         fullName: "System Owner",
         role: "OWNER",
       },
     });
     console.log("Seeded OWNER account:");
-    console.log(`  email:    ${adminEmail}`);
+    console.log(`  username: ${adminUsername}`);
     console.log(`  password: ${adminPassword}  (change on first login)`);
   } else {
     console.log("OWNER account already exists, skipping.");

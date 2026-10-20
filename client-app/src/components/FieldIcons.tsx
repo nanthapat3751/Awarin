@@ -81,6 +81,38 @@ export const CalendarIcon = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const FileTextIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v5h6M16 13H8M16 17H8M10 9H8" />
+  </Svg>
+);
+
+export const CameraIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z" />
+    <circle cx="12" cy="13" r="3" />
+  </Svg>
+);
+
+export const TrashIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </Svg>
+);
+
+export const ChevronRightIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="m9 18 6-6-6-6" />
+  </Svg>
+);
+
+export const ChevronLeftIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="m15 18-6-6 6-6" />
+  </Svg>
+);
+
 /* เส้นหนากว่าไอคอนช่องกรอก เพราะใช้เป็นสัญญาณ "สำเร็จ" บนพื้นสีทึบ ไม่ใช่ไอคอนประกอบข้อความ */
 export const CheckIcon = ({ className }: IconProps) => (
   <svg
@@ -97,6 +129,23 @@ export const CheckIcon = ({ className }: IconProps) => (
   </svg>
 );
 
+/** สถานะช่องกรอก: ถูกแล้ว (แทนไอคอนประจำช่อง — แบบ C ที่ผู้ใช้เลือก 16 ต.ค.) */
+export const CircleCheckIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="m8 12.5 2.5 2.5L16 9.5" />
+  </Svg>
+);
+
+/** สถานะช่องกรอก: ยังไม่ถูก — มีข้อความบอกเหตุใต้ช่องเสมอ ไอคอนอย่างเดียวไม่พอ */
+export const CircleAlertIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 8v4.5" />
+    <path d="M12 16h.01" />
+  </Svg>
+);
+
 export const EyeIcon = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
@@ -111,4 +160,17 @@ export const EyeOffIcon = ({ className }: IconProps) => (
     <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
     <path d="m2 2 20 20" />
   </Svg>
+);
+
+// กรอบวางไอคอนประดับท้ายช่องกรอก (ไม่ใช่ปุ่ม กดไม่ได้) — ใช้ขนาดเดียวกับปุ่มตาดูรหัสผ่าน
+// ที่อยู่ในตำแหน่งเดียวกัน ไอคอนของทุกช่องจะได้อยู่แนวเดียวกันพอดี
+// tone: สีของไอคอนสถานะ — เขียว emerald-700 (600 คอนทราสต์ไม่ผ่านบนพื้นขาว) / แดงเดียวกับข้อความเตือน
+const ADORNMENT_TONE = { idle: "text-slate-400", ok: "text-emerald-700", error: "text-red-600" } as const;
+export const FieldAdornment = ({
+  children,
+  tone = "idle",
+}: Readonly<{ children: ReactNode; tone?: keyof typeof ADORNMENT_TONE }>) => (
+  <span aria-hidden className={`inline-flex h-11 w-11 items-center justify-center ${ADORNMENT_TONE[tone]}`}>
+    {children}
+  </span>
 );

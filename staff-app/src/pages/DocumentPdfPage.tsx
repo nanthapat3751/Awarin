@@ -1,11 +1,13 @@
+import { billingDocLabel } from "@systemboq/shared-types";
 import { FileWarning } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { Button, buttonClasses } from "../components/Button";
 import { ApiError, fetchPdfObjectUrl } from "../lib/api";
-import { listContracts } from "../lib/contracts-api";
-import { pdfApiPath, pdfDocTitle, type PdfDocKind } from "../lib/document-pdf";
+import { getContractPayments, listContracts } from "../lib/contracts-api";
+import { listChangeOrders } from "../lib/change-orders-api";
+import { billingDocApiPath, changeOrderApiPath, pdfApiPath, pdfDocTitle, type PdfDocKind } from "../lib/document-pdf";
 import { getProject } from "../lib/projects-api";
 import { listQuotes } from "../lib/quotes-api";
 
@@ -13,8 +15,34 @@ import { listQuotes } from "../lib/quotes-api";
 const BASE_TITLE = "ระบบประเมินราคาต้นทุนงานก่อสร้าง — Staff";
 
 interface DocMeta {
-  docNo: string;
+  /** ชื่อบนแท็บ เช่น "สัญญา CT-2026-0001" / "ใบเสร็จรับเงิน RC-2026-0003" */
+  title: string;
   projectName: string;
+}
+
+/** "billing" = ใบแจ้งหนี้/ใบเสร็จของงวดเงิน · "changeOrder" = ใบงานเพิ่ม-ลด (ทั้งคู่อยู่ใต้สัญญา) */
+type ViewerKind = PdfDocKind | "billing" | "changeOrder";
+
+/** เลขที่เอกสาร → ชื่อบนแท็บ ยิงพร้อมกับการสร้างไฟล์ */
+async function loadDocTitle(kind: ViewerKind, projectId: string, contractId: string, docId: string) {
+  if (kind === "billing") {
+    const view = await getContractPayments(projectId, contractId);
+    // ใบคืนเงินประกันผลงานไม่ผูกงวด — อยู่ในส่วน retention ของสัญญา
+    const doc = [...view.installments.flatMap((i) => i.documents), ...view.retention.documents].find(
+      (d) => d.id === docId,
+    );
+    return doc ? `${billingDocLabel(doc)} ${doc.docNo}` : "เอกสาร";
+  }
+  if (kind === "changeOrder") {
+    const { changeOrders } = await listChangeOrders(projectId, contractId);
+    return `ใบงานเพิ่ม-ลด ${changeOrders.find((c) => c.id === docId)?.docNo ?? "—"}`;
+  }
+  if (kind === "quote") {
+    const { quotes } = await listQuotes(projectId);
+    return pdfDocTitle(kind, quotes.find((q) => q.id === docId)?.quoteNo ?? "—");
+  }
+  const { contracts } = await listContracts(projectId);
+  return pdfDocTitle(kind, contracts.find((c) => c.id === docId)?.contractNo ?? "—");
 }
 
 /**
@@ -38,8 +66,8 @@ interface DocMeta {
  * (ฝัง iframe ไปที่ URL ของ API ตรง ๆ ไม่ได้ — เซิร์ฟเวอร์ส่ง X-Frame-Options: SAMEORIGIN และ
  *  CSP frame-ancestors 'self' เบราว์เซอร์จึงบล็อก จำเป็นต้องโหลดเป็น blob แบบนี้)
  */
-export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
-  const { id = "", docId = "" } = useParams();
+export function DocumentPdfPage({ kind }: Readonly<{ kind: ViewerKind }>) {
+  const { id = "", docId = "", contractId = "" } = useParams();
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<DocMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,10 +79,16 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
     (async () => {
       try {
         // ยิงพร้อมกัน: การสร้าง PDF ใช้ Puppeteer กินเวลาหลายวินาที ไม่ควรต่อคิวหลังข้อมูลหัวเรื่อง
-        const [detail, docs, objectUrl] = await Promise.all([
+        const [detail, docTitle, objectUrl] = await Promise.all([
           getProject(id),
-          kind === "quote" ? listQuotes(id) : listContracts(id),
-          fetchPdfObjectUrl(pdfApiPath(kind, id, docId)),
+          loadDocTitle(kind, id, contractId, docId),
+          fetchPdfObjectUrl(
+            kind === "billing"
+              ? billingDocApiPath(id, contractId, docId)
+              : kind === "changeOrder"
+                ? changeOrderApiPath(id, contractId, docId)
+                : pdfApiPath(kind, id, docId),
+          ),
         ]);
 
         // StrictMode ของ dev เรียก effect สองรอบ — ถ้ารอบนี้ถูกยกเลิกไปแล้วต้องคืน blob ทิ้ง
@@ -65,15 +99,7 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
         }
         created = objectUrl;
 
-        const docNo =
-          kind === "quote"
-            ? (docs as { quotes: { id: string; quoteNo: string }[] }).quotes.find((q) => q.id === docId)?.quoteNo
-            : (docs as { contracts: { id: string; contractNo: string }[] }).contracts.find((c) => c.id === docId)?.contractNo;
-
-        setMeta({
-          docNo: docNo ?? "—",
-          projectName: detail.project.name,
-        });
+        setMeta({ title: docTitle, projectName: detail.project.name });
         setPdfUrl(objectUrl);
       } catch (err) {
         if (!cancelled) {
@@ -86,9 +112,9 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [id, docId, kind]);
+  }, [id, docId, contractId, kind]);
 
-  const title = meta ? pdfDocTitle(kind, meta.docNo) : null;
+  const title = meta?.title ?? null;
 
   useEffect(() => {
     document.title = title ? `${title} · ${meta?.projectName ?? ""}`.trim() : BASE_TITLE;
@@ -108,7 +134,7 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
               ลองใหม่อีกครั้ง หรือกลับไปที่หน้าโครงการเพื่อตรวจสอบเอกสาร
             </p>
             <div className="mt-5 flex justify-center gap-2">
-              <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
+              <Button size="sm" variant="neutral" onClick={() => window.location.reload()}>
                 ลองใหม่
               </Button>
               <Link to={`/projects/${id}`} className={buttonClasses("ghost", "sm")}>

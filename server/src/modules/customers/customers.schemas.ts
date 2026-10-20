@@ -57,6 +57,7 @@ export const customerDirectoryQuerySchema = pageQuerySchema.extend({
   q: z.string().trim().max(200).optional(),
   sort: z.enum(["name", "createdAt", "lastLogin"]).optional().catch(undefined),
   dir: z.enum(["asc", "desc"]).optional().catch(undefined),
+  view: z.enum(["verified", "unverified"]).optional().catch(undefined),
 });
 
 export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;

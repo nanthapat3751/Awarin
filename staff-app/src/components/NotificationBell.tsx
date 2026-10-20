@@ -10,6 +10,7 @@ import {
   markNotificationRead,
 } from "../lib/notifications-api";
 import { notificationVisual, timeAgo } from "../lib/notifications-format";
+import { Tooltip } from "./Tooltip";
 
 const PREVIEW_COUNT = 6;
 
@@ -79,31 +80,35 @@ export function NotificationBell() {
 
   return (
     <div className="relative" ref={containerRef}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        className="relative text-slate-700 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-full p-2 transition-colors"
-        aria-label="การแจ้งเตือน"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="20"
-          height="20"
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          aria-hidden="true"
+      <Tooltip label="การแจ้งเตือน">
+        <button
+          type="button"
+          onClick={handleToggle}
+          aria-expanded={open}
+          className="relative text-slate-700 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-full p-2 transition-colors"
+          aria-label="การแจ้งเตือน"
         >
-          <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zm.995-14.901a1 1 0 1 0-1.99 0A5.002 5.002 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901z" />
-        </svg>
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-medium leading-none rounded-full min-w-4 h-4 px-1 flex items-center justify-center ring-2 ring-white">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
-      </button>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zm.995-14.901a1 1 0 1 0-1.99 0A5.002 5.002 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901z" />
+          </svg>
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-medium leading-none rounded-full min-w-4 h-4 px-1 flex items-center justify-center ring-2 ring-white">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </button>
+      </Tooltip>
 
+      {/* z-40: เหนือปุ่มในการ์ด (relative z-10) และแถบหัวติดจอ (z-30) ที่อยู่ทีหลังใน DOM แต่ยังใต้ modal (z-50) */}
       {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-lg shadow-lg z-10">
+        <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-lg shadow-lg z-40">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
             <span className="text-sm font-medium text-slate-700">
               การแจ้งเตือน
@@ -121,7 +126,7 @@ export function NotificationBell() {
                 type="button"
                 onClick={handleMarkAllRead}
                 title="ทำเครื่องหมายว่าอ่านแล้วทุกการแจ้งเตือน"
-                className="shrink-0 text-xs font-medium text-brand transition-colors hover:text-brand-dark"
+                className="link-pill -mr-2.5 shrink-0 text-xs font-medium text-brand"
               >
                 อ่านทั้งหมด
               </button>

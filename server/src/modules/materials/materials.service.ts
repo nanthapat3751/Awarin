@@ -5,6 +5,7 @@ import { nextMaterialCode } from "../../lib/work-code";
 import type { MaterialComponentInputDto } from "../boq/boq.schemas";
 import { isCategoryChainActive } from "../categories/categories.service";
 import type { CreateMaterialInput, UpdateMaterialInput } from "./materials.schemas";
+import { roundTo } from "@systemboq/shared-types";
 
 export class MaterialError extends Error {
   status: number;
@@ -18,6 +19,26 @@ export class MaterialError extends Error {
 
 // เรียงวัสดุย่อยตาม sortOrder เสมอ — ให้ทั้งแคตตาล็อกและ snapshot ในบรรทัดใช้ลำดับเดียวกัน
 const componentsInclude = { components: { orderBy: { sortOrder: "asc" as const } } };
+
+type TileFields = Pick<CreateMaterialInput, "tileWidthMm" | "tileLengthMm" | "tileThicknessMm" | "tilePiecesPerBox">;
+
+/**
+ * ขนาดกระเบื้องที่จะเขียน — undefined = ไม่แตะ (ตอนแก้)
+ * กว้างกับยาวต้องมาคู่กัน: มีด้านเดียวตัวคิดเอาไปใช้ไม่ได้ และจะดูเหมือนตั้งไว้แล้วทั้งที่ยังไม่ครบ
+ */
+function tileData(input: TileFields, existing?: { tileWidthMm: number | null; tileLengthMm: number | null }) {
+  const width = input.tileWidthMm === undefined ? (existing?.tileWidthMm ?? null) : input.tileWidthMm;
+  const length = input.tileLengthMm === undefined ? (existing?.tileLengthMm ?? null) : input.tileLengthMm;
+  if ((width == null) !== (length == null)) {
+    throw new MaterialError("ขนาดกระเบื้องต้องกรอกทั้งกว้างและยาว (หรือเว้นว่างทั้งคู่)");
+  }
+  return {
+    tileWidthMm: input.tileWidthMm,
+    tileLengthMm: input.tileLengthMm,
+    tileThicknessMm: input.tileThicknessMm,
+    tilePiecesPerBox: input.tilePiecesPerBox,
+  };
+}
 
 // ราคาวัสดุต่อหน่วยของแคตตาล็อกจากสูตร (ให้ตรงกับตอน snapshot ลงบรรทัด BOQ)
 function derivedPrice(components: MaterialComponentInputDto[]): number {
@@ -97,6 +118,7 @@ export async function createMaterial(input: CreateMaterialInput, actorId: string
       materialUnitPrice: components.length ? derivedPrice(components) : input.materialUnitPrice,
       laborUnitPrice: input.laborUnitPrice,
       wasteFactorPct: input.wasteFactorPct ?? null,
+      ...tileData(input),
       components: components.length ? { create: componentCreateData(components) } : undefined,
     },
     include: componentsInclude,
@@ -156,8 +178,8 @@ export async function updateMaterial(
   const nextMaterialPrice = materialUnitPrice ?? Number(existing.materialUnitPrice);
   const nextLaborPrice = input.laborUnitPrice ?? Number(existing.laborUnitPrice);
   const priceChanged =
-    Math.round(nextMaterialPrice * 100) !== Math.round(Number(existing.materialUnitPrice) * 100) ||
-    Math.round(nextLaborPrice * 100) !== Math.round(Number(existing.laborUnitPrice) * 100);
+    roundTo(nextMaterialPrice, 2) !== roundTo(Number(existing.materialUnitPrice), 2) ||
+    roundTo(nextLaborPrice, 2) !== roundTo(Number(existing.laborUnitPrice), 2);
 
   const material = await prisma.material.update({
     where: { id },
@@ -172,6 +194,7 @@ export async function updateMaterial(
       materialUnitPrice,
       laborUnitPrice: input.laborUnitPrice,
       wasteFactorPct: input.wasteFactorPct,
+      ...tileData(input, existing),
       active: input.active,
       components: willTouchComponents
         ? {

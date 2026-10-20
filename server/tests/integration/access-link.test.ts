@@ -76,11 +76,11 @@ describe("account access links", () => {
     const { token } = await issueLinkForNewCustomer("reuse");
     const first = await request(app)
       .post(`/api/auth/access/${token}`)
-      .send({ password: "first-pw-1234" });
+      .send({ password: "First-pw-1234" });
     expect(first.status).toBe(200);
     const second = await request(app)
       .post(`/api/auth/access/${token}`)
-      .send({ password: "second-pw-1234" });
+      .send({ password: "Second-pw-1234" });
     expect(second.status).toBe(400);
   });
 
@@ -92,7 +92,7 @@ describe("account access links", () => {
     });
     expect((await request(app).get(`/api/auth/access/${token}`)).status).toBe(400);
     expect(
-      (await request(app).post(`/api/auth/access/${token}`).send({ password: "expired-pw-1234" }))
+      (await request(app).post(`/api/auth/access/${token}`).send({ password: "Expired-pw-1234" }))
         .status,
     ).toBe(400);
   });
@@ -107,12 +107,12 @@ describe("account access links", () => {
 
     // ลิงก์เก่าถูกเผาทิ้งแล้ว
     expect(
-      (await request(app).post(`/api/auth/access/${firstToken}`).send({ password: "old-pw-1234" }))
+      (await request(app).post(`/api/auth/access/${firstToken}`).send({ password: "Old-pw-1234" }))
         .status,
     ).toBe(400);
     // ลิงก์ใหม่ยังใช้ได้
     expect(
-      (await request(app).post(`/api/auth/access/${secondToken}`).send({ password: "new-pw-1234" }))
+      (await request(app).post(`/api/auth/access/${secondToken}`).send({ password: "New-pw-1234" }))
         .status,
     ).toBe(200);
   });
@@ -130,7 +130,7 @@ describe("account access links", () => {
     const customer = request.agent(app);
     const redeem = await customer
       .post(`/api/auth/access/${token}`)
-      .send({ password: "activate-pw-1234", address: "99/9 ถ.มิตรภาพ ต.ในเมือง อ.เมือง จ.ขอนแก่น 40000" });
+      .send({ password: "Activate-pw-1234", address: "99/9 ถ.มิตรภาพ ต.ในเมือง อ.เมือง จ.ขอนแก่น 40000" });
     expect(redeem.status).toBe(200);
 
     // ที่อยู่ถูกเก็บ และเบอร์โทรจากคำขอยังอยู่ (ทีมงาน seed ไว้ตอนสร้างบัญชี)
@@ -153,5 +153,36 @@ describe("account access links", () => {
     expect(patchRes.status).toBe(200);
     expect(patchRes.body.profile.address).toBe("123 ที่อยู่ใหม่");
     expect(patchRes.body.profile.phone).toBe("0890000000");
+  });
+
+  // ลูกค้าที่โทรมา/เดินเข้ามาเอง: โครงการไม่มีคำขอ — พนักงานกรอกชื่อ+อีเมลเองแล้วสร้างบัญชีได้
+  it("creates a customer for a project that has no request (walk-in)", async () => {
+    const stamp = Date.now();
+    const projectRes = await owner.agent.post("/api/projects").send({ name: `walk-in ${stamp}` });
+    expect(projectRes.status).toBe(201);
+    const projectId = projectRes.body.project.id as string;
+    createdProjectIds.push(projectId);
+
+    const noName = await owner.agent
+      .post(`/api/projects/${projectId}/customer-access-link`)
+      .send({ email: `walkin-${stamp}@example.com` });
+    expect(noName.status).toBe(400);
+
+    const res = await owner.agent
+      .post(`/api/projects/${projectId}/customer-access-link`)
+      .send({ email: `walkin-${stamp}@example.com`, fullName: "วอล์กอิน ทดสอบ", phone: "0811111111" });
+    expect(res.status).toBe(201);
+    expect(res.body.created).toBe(true);
+    createdUserIds.push(res.body.customer.id);
+
+    const detail = await owner.agent.get(`/api/projects/${projectId}`);
+    expect(detail.body.project.customer).toMatchObject({
+      id: res.body.customer.id,
+      fullName: "วอล์กอิน ทดสอบ",
+      phone: "0811111111",
+      avatarUrl: null,
+    });
+    const audit = await prisma.auditLog.findFirst({ where: { entityId: res.body.customer.id, action: "CREATE_CUSTOMER_FOR_PROJECT" } });
+    expect(audit).not.toBeNull();
   });
 });

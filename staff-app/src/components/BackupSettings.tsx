@@ -1,11 +1,12 @@
 import type { BackupMirrorDto, BackupStatusDto, BackupTrigger } from "@systemboq/shared-types";
-import { AlertTriangle, DatabaseBackup } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { DatabaseBackup } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { ApiError } from "../lib/api";
 import { getBackupStatus, runBackupNow } from "../lib/backups-api";
 import { useToast } from "../lib/toast-context";
 import { Button } from "./Button";
+import { Notice } from "./Notice";
 
 const CARD = "bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-3";
 
@@ -101,7 +102,7 @@ export function BackupSettings() {
                   <p className="text-sm font-medium text-red-600">ยังไม่เคยสำรอง</p>
                 )}
               </div>
-              <Button variant="secondary" onClick={backupNow} disabled={running || status.running}>
+              <Button variant="neutral" onClick={backupNow} disabled={running || status.running}>
                 {running || status.running ? "กำลังสำรอง..." : "สำรองตอนนี้"}
               </Button>
             </div>
@@ -198,18 +199,5 @@ function MirrorRow({ mirror, latestLocal }: Readonly<{ mirror: BackupMirrorDto; 
       <span className="font-medium text-slate-800 wrap-anywhere">{mirror.label}</span>
       <span className={tone}>{detail}</span>
     </li>
-  );
-}
-
-function Notice({ tone, children }: Readonly<{ tone: "red" | "amber"; children: ReactNode }>) {
-  const cls =
-    tone === "red"
-      ? "border-red-200 bg-red-50 text-red-700"
-      : "border-amber-200 bg-amber-50 text-amber-800";
-  return (
-    <p className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${cls}`}>
-      <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-      <span>{children}</span>
-    </p>
   );
 }

@@ -18,6 +18,8 @@ server/private-uploads/
 .claude/
 .env.*
 !.env.example
+# ไฟล์ต้นแบบค่าตั้งเซิร์ฟเวอร์จริง — มีแต่ช่องว่างให้เติม ไม่มีรหัสผ่านจริง
+!.env.production.example
 
 # SonarQube — มี token + ผลสแกน
 hook.text
@@ -27,3 +29,9 @@ issues*.json
 # ไฟล์ build / ชั่วคราว
 *.tsbuildinfo
 scratch-*.mjs
+
+# ฐานข้อมูลประเทศ/ผู้ให้บริการของ IP (DB-IP Lite) — ดาวน์โหลดด้วย npm run geoip:update -w server
+server/data/geoip/
+
+# ผลรัน Robot Framework (สร้างใหม่ทุกรอบด้วย node robot-tests/test-env.mjs --run)
+robot-tests/results/

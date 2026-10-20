@@ -34,7 +34,25 @@ export function pdfViewerPath(kind: PdfDocKind, docId: string): string {
   return `/my/${segment}/${docId}/pdf`;
 }
 
+/** ใบแจ้งหนี้/ใบเสร็จของงวดเงิน — อยู่ใต้สัญญา */
+export function billingDocApiPath(contractId: string, docId: string): string {
+  return `/api/my/contracts/${contractId}/documents/${docId}/pdf`;
+}
+
+export function billingDocViewerPath(contractId: string, docId: string): string {
+  return `/my/contracts/${contractId}/documents/${docId}/pdf`;
+}
+
 /** ชื่อที่ใช้บนแท็บ เช่น "ใบเสนอราคา QT-2026-0342" */
 export function pdfDocTitle(kind: PdfDocKind, docNo: string): string {
   return `${KIND_LABEL[kind]} ${docNo}`;
+}
+
+/** ใบงานเพิ่ม-ลด — อยู่ใต้สัญญาเหมือนใบแจ้งหนี้ */
+export function changeOrderApiPath(contractId: string, id: string): string {
+  return `/api/my/contracts/${contractId}/change-orders/${id}/pdf`;
+}
+
+export function changeOrderViewerPath(contractId: string, id: string): string {
+  return `/my/contracts/${contractId}/change-orders/${id}/pdf`;
 }

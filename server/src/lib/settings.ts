@@ -11,6 +11,18 @@ export async function getSettingsMap(): Promise<Record<string, string>> {
 }
 
 /**
+ * เงินประกันผลงานตั้งต้นของสัญญาใหม่ (%) — ค่าว่าง = ไม่มีเงินประกันผลงาน
+ *
+ * ไม่มีค่า fallback: สัญญาบ้านพักอาศัยเอกชนจำนวนมากไม่มีข้อนี้ การเดา 5% ให้แล้วพิมพ์ลงสัญญา
+ * คือการเขียนเงื่อนไขที่ไม่มีใครตกลงไว้
+ */
+export async function getDefaultRetentionPct(): Promise<number | null> {
+  const row = await prisma.setting.findUnique({ where: { key: "retentionPercent" } });
+  const pct = row && row.value !== "" ? Number(row.value) : null;
+  return pct != null && Number.isFinite(pct) && pct > 0 ? pct : null;
+}
+
+/**
  * อัตราระดับบริษัท พร้อมค่า fallback เดียวกับที่ใช้ตอนคิดราคา
  *
  * `overheadProfitPct` คืออัตรารวมที่คุมราคา ส่วน `overheadPct` บอกว่าในก้อนรวมนั้นส่วนไหน

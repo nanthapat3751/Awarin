@@ -130,6 +130,29 @@ describe("settings module", () => {
     expect(badPromptPay.status).toBe(400);
   });
 
+  it("พร้อมเพย์เบอร์มือถือต้องขึ้นต้น 0 และสร้าง QR ทดสอบ 1 บาทได้ก่อนบันทึก", async () => {
+    const account = {
+      paymentBankName: "ธนาคารกสิกรไทย",
+      paymentAccountName: "บริษัท ทดสอบ จำกัด",
+      paymentAccountNo: "123-4-56789-0",
+    };
+    // 10 หลักแต่ไม่ขึ้นต้น 0 แปลงเป็นบัญชีพร้อมเพย์ไม่ได้ — ถ้ารับไว้ QR จะหายไปเงียบ ๆ
+    const notMobile = await owner.agent.patch("/api/settings").send({ ...account, paymentPromptPay: "1812345678" });
+    expect(notMobile.status).toBe(400);
+
+    const preview = await owner.agent.post("/api/settings/promptpay-preview").send({ promptPay: "081-234-5678" });
+    expect(preview.status).toBe(200);
+    expect(preview.body.amount).toBe(1);
+    expect(preview.body.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    expect((await owner.agent.post("/api/settings/promptpay-preview").send({ promptPay: "12345" })).status).toBe(400);
+
+    const customer = await createAndLoginCustomer("test-settings-pp-customer");
+    const customerRow = await prisma.user.findUniqueOrThrow({ where: { email: customer.email } });
+    createdUserIds.push(customerRow.id);
+    const denied = await customer.agent.post("/api/settings/promptpay-preview").send({ promptPay: "0812345678" });
+    expect([401, 403]).toContain(denied.status);
+  });
+
   it("บัญชีรับเงินต้องครบหรือว่างทั้งหมด — ตรวจจากสถานะหลังบันทึก ไม่ใช่เฉพาะช่องที่ส่งมา", async () => {
     // เริ่มจากว่างทั้งหมด
     await owner.agent.patch("/api/settings").send({

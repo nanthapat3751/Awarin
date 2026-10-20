@@ -1,15 +1,16 @@
 import type { ContractDto, ContractStructureDto } from "@systemboq/shared-types";
-import { Check, Lock, Plus, TableProperties, Trash2 } from "lucide-react";
+import { Check, FileText, Lock, Plus, TableProperties, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../lib/api";
 import { updateContractBody } from "../lib/contracts-api";
+import { pdfViewerPath } from "../lib/document-pdf";
 import { INSTALLMENT_TABLE_TOKEN } from "../lib/contract-tokens";
 import { useToast } from "../lib/toast-context";
 import { Button } from "./Button";
 import { ContractInstallmentsEditor } from "./ContractInstallmentsEditor";
-import { ContractPaymentsPanel } from "./ContractPaymentsPanel";
 import { rowKey, sameRowKey } from "../lib/row-keys";
+import { Tooltip } from "./Tooltip";
 
 const INPUT = "w-full border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-800";
 const LABEL = "flex flex-col gap-1 text-xs text-slate-700";
@@ -44,6 +45,31 @@ export function ContractBodyEditor({
    * ไม่ใช่ต่อท้ายข้อเสมอ เพราะย่อหน้าปิดท้ายของข้อ 7 ต้องอยู่ใต้ตาราง
    */
   const [caret, setCaret] = useState<{ index: number; start: number; end: number } | null>(null);
+
+  /*
+   * ลงนามแล้ว = ถ้อยคำแก้ไม่ได้ และเหมือน PDF ทุกตัวอักษร จึงไม่แสดงซ้ำเป็นช่องกรอกที่ถูกปิดไว้
+   * (ดูเหมือนแก้ได้ทั้งที่แก้ไม่ได้) · การรับเงินย้ายไปแท็บ "รับเงิน" ของโครงการแล้ว
+   * ปกติหน้าโครงการไม่กางตัวแก้นี้ให้สัญญาที่ลงนามแล้ว — ส่วนนี้กันไว้เผื่อถูกเรียกจากที่อื่น
+   */
+  if (locked) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-amber-700">
+            <Lock size={12} /> ลงนามแล้ว — แก้ข้อความไม่ได้ ต้องทำบันทึกแนบท้ายสัญญาแทน
+          </span>
+          <a
+            href={pdfViewerPath("contract", projectId, contract.id)}
+            target="_blank"
+            rel="noopener"
+            className="link-pill -ml-2.5 inline-flex items-center gap-1 font-medium text-brand"
+          >
+            <FileText size={13} /> อ่านข้อความสัญญา (PDF)
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   if (!body) {
     return (
@@ -104,11 +130,6 @@ export function ContractBodyEditor({
           ออกจากแม่แบบ:{" "}
           <span className="text-slate-700">{contract.templateName ?? "-"}</span>
         </span>
-        {locked && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-amber-700">
-            <Lock size={12} /> ลงนามแล้ว — แก้ข้อความไม่ได้ ต้องทำบันทึกแนบท้ายสัญญาแทน
-          </span>
-        )}
       </div>
 
       {/*
@@ -117,19 +138,15 @@ export function ContractBodyEditor({
         ไม่ได้อยู่แล้ว ตารางเดิมจึงเหลือแค่ตารางอ่านอย่างเดียวที่ซ้ำกับตารางการรับเงิน)
       */}
       <div className="rounded-md border border-slate-200 bg-white p-3">
-        {locked ? (
-          <ContractPaymentsPanel projectId={projectId} contractId={contract.id} />
-        ) : (
-          <ContractInstallmentsEditor
-            projectId={projectId}
-            contract={contract}
-            bodyHasTable={hasInstallmentTable}
-          />
-        )}
+        <ContractInstallmentsEditor
+          projectId={projectId}
+          contract={contract}
+          bodyHasTable={hasInstallmentTable}
+        />
       </div>
 
       {/* ปุ่มโผล่เฉพาะตอนที่เนื้อสัญญายังไม่มีตาราง — ถ้ามีแล้วการแทรกซ้ำได้มีแต่ทำให้พิมพ์สองตาราง */}
-      {!locked && !hasInstallmentTable && (
+      {!hasInstallmentTable && (
         <button
           type="button"
           onClick={insertInstallmentBlock}
@@ -145,7 +162,6 @@ export function ContractBodyEditor({
         <textarea
           className={`${INPUT} min-h-24 leading-relaxed`}
           value={body.preamble}
-          disabled={locked}
           onChange={(e) => setBody((b) => (b ? { ...b, preamble: e.target.value } : b))}
         />
       </label>
@@ -156,26 +172,26 @@ export function ContractBodyEditor({
             <input
               className={`${INPUT} font-medium`}
               value={c.heading}
-              disabled={locked}
               onChange={(e) => patchClause(i, { heading: e.target.value })}
             />
-            {!locked && body.clauses.length > 1 && (
-              <button
-                type="button"
-                aria-label="ลบข้อนี้"
-                onClick={() =>
-                  setBody((b) => (b ? { ...b, clauses: b.clauses.filter((_, n) => n !== i) } : b))
-                }
-                className="rounded-md p-1.5 text-red-600 hover:bg-red-50"
-              >
-                <Trash2 size={15} />
-              </button>
+            {body.clauses.length > 1 && (
+              <Tooltip label="ลบข้อนี้" side="top" align="end">
+                <button
+                  type="button"
+                  aria-label="ลบข้อนี้"
+                  onClick={() =>
+                    setBody((b) => (b ? { ...b, clauses: b.clauses.filter((_, n) => n !== i) } : b))
+                  }
+                  className="rounded-md p-1.5 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </Tooltip>
             )}
           </div>
           <textarea
             className={`${INPUT} min-h-32 leading-relaxed`}
             value={c.body}
-            disabled={locked}
             onChange={(e) => patchClause(i, { body: e.target.value })}
             onSelect={(e) =>
               setCaret({
@@ -193,31 +209,28 @@ export function ContractBodyEditor({
         <textarea
           className={`${INPUT} min-h-20 leading-relaxed`}
           value={body.closing}
-          disabled={locked}
           onChange={(e) => setBody((b) => (b ? { ...b, closing: e.target.value } : b))}
         />
       </label>
 
-      {!locked && (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" onClick={save} disabled={saving}>
-            <Check size={14} /> {saving ? "กำลังบันทึก..." : "บันทึกข้อความ"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() =>
-              setBody((b) => {
-                if (!b) return b;
-                const n = b.clauses.length + 1;
-                return { ...b, clauses: [...b.clauses, { heading: `ข้อ ${n}.`, body: "" }] };
-              })
-            }
-          >
-            <Plus size={14} /> เพิ่มข้อสัญญา
-          </Button>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm" onClick={save} disabled={saving}>
+          <Check size={14} /> {saving ? "กำลังบันทึก..." : "บันทึกข้อความ"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            setBody((b) => {
+              if (!b) return b;
+              const n = b.clauses.length + 1;
+              return { ...b, clauses: [...b.clauses, { heading: `ข้อ ${n}.`, body: "" }] };
+            })
+          }
+        >
+          <Plus size={14} /> เพิ่มข้อสัญญา
+        </Button>
+      </div>
     </div>
   );
 }

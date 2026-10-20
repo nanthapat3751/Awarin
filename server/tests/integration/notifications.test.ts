@@ -3,6 +3,7 @@ import request from "supertest";
 import { app } from "../../src/app";
 import { prisma } from "../../src/lib/prisma";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { sendQuote } from "../helpers/quote-send";
 
 describe("notifications module", () => {
   let owner: Awaited<ReturnType<typeof createAndLoginOwner>>;
@@ -107,9 +108,7 @@ describe("notifications module", () => {
 
     const custCountBefore = await customer.agent.get("/api/notifications/unread-count");
 
-    const sendRes = await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    const sendRes = await sendQuote(owner.agent, projectId, quoteId);
     expect(sendRes.status).toBe(200);
 
     const custCountAfter = await customer.agent.get("/api/notifications/unread-count");
@@ -160,16 +159,12 @@ describe("notifications module", () => {
 
     // ฉบับแรก: ข้อความต้องเป็นแบบ "ใบเสนอราคาใหม่"
     const first = await owner.agent.post(`/api/projects/${projectId}/quotes`).send();
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${first.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, first.body.quote.id);
 
     // ฉบับที่สองของโครงการเดียวกัน = ฉบับแก้ไข ต้องบอกให้ชัดว่าเป็นฉบับที่เท่าไร
     const second = await owner.agent.post(`/api/projects/${projectId}/quotes`).send();
     expect(second.body.quote.revisionNo).toBe(2);
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${second.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, second.body.quote.id);
 
     const afterQuotes = await customer.agent.get("/api/notifications");
     const revisionNotif = afterQuotes.body.notifications.find((n: { link: string }) =>
@@ -201,10 +196,14 @@ describe("notifications module", () => {
     expect(contractNotif.read).toBe(false);
 
     // ส่งมอบงาน -> แจ้งลูกค้า (ไม่มีลิงก์ เพราะพอร์ทัลลูกค้าไม่มีหน้าโครงการ)
+    const beforeDone = Date.now();
     const done = await owner.agent
       .post(`/api/projects/${projectId}/transition`)
       .send({ toStatus: "COMPLETED" });
     expect(done.status).toBe(200);
+    // วันที่ส่งมอบถูกบันทึก — แถบขั้นตอนแสดงใต้ขั้น "ส่งมอบ"
+    const detail = await owner.agent.get(`/api/projects/${projectId}`);
+    expect(new Date(detail.body.project.completedAt).getTime()).toBeGreaterThanOrEqual(beforeDone - 1000);
 
     const afterDone = await customer.agent.get("/api/notifications");
     const doneNotif = afterDone.body.notifications.find((n: { message: string }) =>

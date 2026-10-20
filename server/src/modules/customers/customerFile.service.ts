@@ -1,10 +1,14 @@
 import type { Prisma } from "@prisma/client";
+import { classifyIp, type CustomerDirectoryView } from "@systemboq/shared-types";
 
 import { issueAccessTokenFor } from "../../lib/access-token";
 import { isAnonymized } from "../../lib/anonymized";
 import { billingPartyOf } from "../../lib/billing-party";
 import { writeAuditLog } from "../../lib/audit-log";
 import { prisma } from "../../lib/prisma";
+import { purgeDateOf, REPLACEABLE_SIGNUP, UNVERIFIED_SIGNUP } from "../../lib/unverified-signups";
+import { deviceLabel } from "../../lib/user-agent";
+import { geoLookup } from "../../lib/geoip";
 import type { SetCustomerActiveInput, UpdateCustomerInput } from "./customers.schemas";
 
 /**
@@ -33,7 +37,7 @@ export class CustomerFileError extends Error {
  * แต่เพดานนั้น **เงียบ**: พอชนเมื่อไร หน้าจะขึ้นว่า "200 รายการ" ทั้งที่จริงมีมากกว่านั้น และ
  * ไม่มีทางเลื่อนไปดูของเก่ากว่านั้นได้เลย — การขยายเลขไม่ได้แก้ปัญหา แค่เลื่อนวันที่จะโกหกออกไป
  */
-export const ACTIVITY_PAGE_SIZE = 20;
+export const ACTIVITY_PAGE_SIZE = 15;
 const ACTIVITY_PAGE_SIZE_MAX = 200;
 
 /**
@@ -143,6 +147,8 @@ function describeStaffAction(action: string, details: Details, actor: string): D
       return { kind: "staff", title: "พนักงานออกลิงก์ตั้งรหัสผ่าน/เข้าใช้งานให้", detail: by };
     case "CREATE_CUSTOMER_FROM_LEAD":
       return { kind: "staff", title: "พนักงานสร้างบัญชีให้จากคำขอ", detail: by };
+    case "CREATE_CUSTOMER_FOR_PROJECT":
+      return { kind: "staff", title: "พนักงานสร้างบัญชีให้จากหน้าโครงการ", detail: by };
     default:
       return { kind: "staff", title: action, detail: by };
   }
@@ -187,6 +193,9 @@ function describe(action: string, details: Details, quoteNo: string | null): Des
       };
     case "CHANGE_PASSWORD":
       return { kind: "security", title: "เปลี่ยนรหัสผ่าน", detail: null };
+    // เขียนโดย known-device.ts ตอนเข้าจากเครื่องที่บัญชีไม่เคยใช้ (เครื่องแรกของบัญชีไม่นับ)
+    case "NEW_DEVICE_LOGIN":
+      return { kind: "security", title: "เข้าสู่ระบบจากเครื่องใหม่", detail: str(details, "device") };
 
     case "CREATE_LEAD":
       return {
@@ -245,6 +254,27 @@ function describe(action: string, details: Details, quoteNo: string | null): Des
 }
 
 /**
+ * ช่องทางเทคนิคของหนึ่งแถว: ไอพี (เฉพาะ OWNER) + ประเภทไอพี + อุปกรณ์ + เครื่องใหม่
+ *
+ * ไอพีถูกจัดประเภทก่อนส่ง — ไอพีของ Docker/proxy/เครื่องตัวเองต้องไม่ถูกอ่านเป็นไอพีของลูกค้า
+ * อุปกรณ์เป็นแบบหยาบ ("Chrome · Windows") ไม่ระบุตัวคน จึงส่งให้พนักงานทุกคน
+ */
+function technicalFields(
+  row: { action: string; ip: string | null; userAgent: string | null },
+  includeIp: boolean,
+) {
+  const ip = includeIp ? classifyIp(row.ip) : null;
+  return {
+    ip: ip?.address ?? null,
+    ipKind: ip?.kind ?? null,
+    // ประเทศ/ผู้ให้บริการได้มาจากไอพี จึงเห็นได้เท่ากับไอพี (OWNER เท่านั้น)
+    ipGeo: ip ? geoLookup(ip.address) : null,
+    device: deviceLabel(row.userAgent),
+    newDevice: row.action === "NEW_DEVICE_LOGIN",
+  };
+}
+
+/**
  * รายชื่อลูกค้าทั้งหมด — สารบัญของแฟ้มลูกค้า
  *
  * ต้องมีเพราะหน้าจัดการผู้ใช้แสดงเฉพาะพนักงาน (OWNER/ADMIN) ลูกค้าจึงไม่เคยถูกลิสต์ที่ไหนเลย
@@ -255,11 +285,13 @@ export type CustomerSort = "name" | "createdAt" | "lastLogin";
 
 export interface CustomerDirectoryQuery extends PageRequest {
   q?: string;
+  /** ค่าเริ่มต้น "verified" — บัญชีที่สมัครแล้วไม่ยืนยันอีเมลแยกไปอีกมุมมอง ไม่นับเป็นลูกค้า */
+  view?: CustomerDirectoryView;
   sort?: CustomerSort;
   dir?: "asc" | "desc";
 }
 
-export const CUSTOMER_PAGE_SIZE = 25;
+export const CUSTOMER_PAGE_SIZE = 15;
 /** เพดานต่อหนึ่งคำขอ — การส่งออกไฟล์วนขอทีละหน้าจนครบ ไม่ใช่ขอก้อนเดียวขนาดไม่จำกัด */
 const CUSTOMER_PAGE_SIZE_MAX = 500;
 
@@ -269,10 +301,13 @@ const CUSTOMER_PAGE_SIZE_MAX = 500;
  * ของเดิมโหลดลูกค้าทุกคนมาแล้วกรองในหน้าจอ ซึ่งทำงานได้ดีตอนมีลูกค้า 7 คน แต่เป็นการโหลด
  * ข้อมูลส่วนบุคคลของทุกคนลงเครื่องพนักงานทุกครั้งที่เปิดหน้า และจะหน่วงเมื่อถึงหลักพัน
  */
-function customerWhere(q?: string): Prisma.UserWhereInput {
+function customerWhere(q?: string, view: CustomerDirectoryView = "verified"): Prisma.UserWhereInput {
   const term = q?.trim();
   return {
     role: "CUSTOMER",
+    // บัญชีที่สมัครแล้วยังไม่ยืนยันอีเมลอาจพิมพ์อีเมลผิด/อีเมลปลอม เข้าระบบก็ไม่ได้ — แยกออกจาก
+    // รายชื่อหลัก (และ CSV ที่ใช้เงื่อนไขเดียวกัน) ไม่ให้พนักงานตามคนที่ไม่มีตัวตนหรือนับเป็นลูกค้า
+    ...(view === "unverified" ? UNVERIFIED_SIGNUP : { NOT: UNVERIFIED_SIGNUP }),
     ...(term
       ? {
           OR: [
@@ -321,10 +356,11 @@ function customerOrderBy(
  */
 export async function listCustomers(query: CustomerDirectoryQuery = {}) {
   const { page, pageSize, skip, take } = resolvePage(query, CUSTOMER_PAGE_SIZE, CUSTOMER_PAGE_SIZE_MAX);
-  const where = customerWhere(query.q);
+  const where = customerWhere(query.q, query.view);
 
-  const [total, users] = await Promise.all([
+  const [total, unverifiedCount, users] = await Promise.all([
     prisma.user.count({ where }),
+    prisma.user.count({ where: UNVERIFIED_SIGNUP }),
     prisma.user.findMany({
       where,
       orderBy: customerOrderBy(query.sort, query.dir),
@@ -337,10 +373,10 @@ export async function listCustomers(query: CustomerDirectoryQuery = {}) {
   ]);
 
   const ids = users.map((u) => u.id);
-  if (ids.length === 0) return { items: [], total, page, pageSize };
+  if (ids.length === 0) return { items: [], total, unverifiedCount, page, pageSize };
 
   // นับของ "เฉพาะคนในหน้านี้" ไม่ใช่ของลูกค้าทุกคนในระบบเหมือนเดิม
-  const [projects, quoteCounts] = await Promise.all([
+  const [projects, quoteCounts, purgeable] = await Promise.all([
     prisma.project.findMany({
       where: { customerId: { in: ids }, deletedAt: null },
       select: { id: true, customerId: true },
@@ -350,7 +386,10 @@ export async function listCustomers(query: CustomerDirectoryQuery = {}) {
       where: { project: { customerId: { in: ids }, deletedAt: null } },
       _count: { _all: true },
     }),
+    // คนในหน้านี้ที่งานล้างรายวันจะลบเมื่อครบกำหนด (ยังไม่ยืนยัน + ไม่มีของที่พนักงานผูกไว้)
+    prisma.user.findMany({ where: { id: { in: ids }, ...REPLACEABLE_SIGNUP }, select: { id: true } }),
   ]);
+  const purgeableIds = new Set(purgeable.map((u) => u.id));
 
   const ownerByProject = new Map(projects.map((p) => [p.id, p.customerId]));
   const projectCountByUser = new Map<string, number>();
@@ -372,6 +411,8 @@ export async function listCustomers(query: CustomerDirectoryQuery = {}) {
     phone: u.customerProfile?.phone ?? null,
     active: u.active,
     anonymized: isAnonymized(u.email),
+    emailVerified: u.emailVerifiedAt !== null,
+    purgeAt: purgeableIds.has(u.id) ? purgeDateOf(u.createdAt) : null,
     customerType: u.customerProfile?.customerType ?? "INDIVIDUAL",
     companyName: u.customerProfile?.companyName ?? null,
     projectCount: projectCountByUser.get(u.id) ?? 0,
@@ -382,7 +423,7 @@ export async function listCustomers(query: CustomerDirectoryQuery = {}) {
     createdAt: u.createdAt,
   }));
 
-  return { items, total, page, pageSize };
+  return { items, total, unverifiedCount, page, pageSize };
 }
 
 async function getCustomerOrThrow(customerId: string) {
@@ -535,7 +576,7 @@ export async function getCustomerDetail(customerId: string) {
 const KIND_ACTIONS: Record<string, string[]> = {
   account: ["REGISTER", "ACCESS_LINK_REDEEMED", "UPDATE_PROFILE", "DELETE_ACCOUNT"],
   login: ["LOGIN_SUCCESS", "LOGIN_PENDING_2FA"],
-  security: ["LOGIN_FAILED", "LOGIN_BLOCKED_LOCKED", "CHANGE_PASSWORD"],
+  security: ["LOGIN_FAILED", "LOGIN_BLOCKED_LOCKED", "CHANGE_PASSWORD", "NEW_DEVICE_LOGIN"],
   lead: ["CREATE_LEAD"],
   view: ["CUSTOMER_OPEN_QUOTE", "CUSTOMER_OPEN_QUOTE_PDF"],
   file: ["CUSTOMER_DOWNLOAD_ATTACHMENT"],
@@ -548,6 +589,7 @@ const KIND_ACTIONS: Record<string, string[]> = {
     "RESTORE_CUSTOMER",
     "ISSUE_ACCESS_LINK",
     "CREATE_CUSTOMER_FROM_LEAD",
+    "CREATE_CUSTOMER_FOR_PROJECT",
   ],
 };
 
@@ -720,7 +762,8 @@ export async function listAllCustomerActivity(opts: {
       detail: described.detail,
       projectId: quote?.projectId ?? project?.id ?? null,
       projectName: quote?.project.name ?? project?.name ?? null,
-      ip: opts.includeIp ? row.ip : null,
+      ...technicalFields(row, opts.includeIp),
+      actor: { kind: "customer" as const, name: row.user?.fullName ?? null },
       customerId: row.user?.id ?? null,
       customerName: row.user?.fullName ?? null,
     };
@@ -815,7 +858,8 @@ export async function getProjectCustomerActivity(projectId: string, opts: { incl
         detail: described.detail,
         projectId: project.id,
         projectName: project.name,
-        ip: opts.includeIp ? row.ip : null,
+        ...technicalFields(row, opts.includeIp),
+        actor: { kind: "customer" as const, name: row.user?.fullName ?? null },
       };
     }),
   };
@@ -883,7 +927,11 @@ export async function getCustomerActivity(
       detail: described.detail,
       projectId: quote?.projectId ?? project?.id ?? null,
       projectName: quote?.project.name ?? project?.name ?? null,
-      ip: opts.includeIp ? row.ip : null,
+      ...technicalFields(row, opts.includeIp),
+      actor: {
+        kind: row.userId === customerId ? ("customer" as const) : ("staff" as const),
+        name: row.user?.fullName ?? null,
+      },
     };
   });
 

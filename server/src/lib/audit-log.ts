@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { AUDIT_LOG_PURGE_FUNCTION, AUDIT_LOG_RETENTION_DAYS } from "./audit-retention";
 import { prisma } from "./prisma";
+import { currentRequestContext } from "./request-context";
 
 export interface AuditLogInput {
   userId?: string | null;
@@ -13,8 +14,12 @@ export interface AuditLogInput {
   userAgent?: string | null;
 }
 
-/** แถวใน AuditLog เป็นแบบเพิ่มอย่างเดียว (append-only) — ที่นี่คือที่เดียวที่เขียนลงตารางนี้ */
+/**
+ * แถวใน AuditLog เป็นแบบเพิ่มอย่างเดียว (append-only) — ที่นี่คือที่เดียวที่เขียนลงตารางนี้
+ * ไม่ส่ง ip/userAgent มา = ใช้ของคำขอที่กำลังทำงาน (ดู lib/request-context.ts)
+ */
 export async function writeAuditLog(input: AuditLogInput): Promise<void> {
+  const ctx = currentRequestContext();
   await prisma.auditLog.create({
     data: {
       userId: input.userId ?? null,
@@ -22,8 +27,8 @@ export async function writeAuditLog(input: AuditLogInput): Promise<void> {
       entityType: input.entityType,
       entityId: input.entityId ?? null,
       details: (input.details as Prisma.InputJsonValue | undefined) ?? undefined,
-      ip: input.ip ?? null,
-      userAgent: input.userAgent ?? null,
+      ip: input.ip ?? ctx?.ip ?? null,
+      userAgent: input.userAgent ?? ctx?.userAgent ?? null,
     },
   });
 }

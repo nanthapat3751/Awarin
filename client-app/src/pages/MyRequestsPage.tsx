@@ -1,30 +1,26 @@
 import { useEffect, useState } from "react";
 
-import type { LeadDto, LeadStatus } from "@systemboq/shared-types";
+import type { CustomerLeadDto } from "@systemboq/shared-types";
 
 import { EmptyState } from "../components/EmptyState";
 import { PortalPage, StatusCard } from "../components/PortalPage";
+import { LEAD_STATUS_STYLE } from "../lib/lead-status";
 import { listMyLeads } from "../lib/my-api";
-
-// สไตล์ตามสถานะคำขอ: ป้ายสถานะ + แถบสีซ้าย — แยกสถานะได้จากสีทันที
-const STATUS_STYLE: Record<LeadStatus, { label: string; badge: string; accent: string }> = {
-  NEW: { label: "รอการติดต่อ", badge: "bg-amber-100 text-amber-700", accent: "bg-amber-400" },
-  CONTACTED: { label: "ทีมงานติดต่อแล้ว", badge: "bg-sky-100 text-sky-700", accent: "bg-sky-400" },
-  QUOTED: { label: "อยู่ระหว่างเสนอราคา", badge: "bg-brand/10 text-brand", accent: "bg-brand" },
-  CLOSED: {
-    label: "ดำเนินการเสร็จสิ้น",
-    badge: "bg-emerald-100 text-emerald-700",
-    accent: "bg-emerald-400",
-  },
-  REJECTED: { label: "ไม่ดำเนินการต่อ", badge: "bg-rose-100 text-rose-700", accent: "bg-rose-400" },
-};
+import { StatusListSkeleton } from "../components/Skeleton";
+import { usePageMeta } from "../lib/page-meta";
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("th-TH");
 }
 
+// ชิปเล็กใต้ข้อความ — บอกว่าในหน้ารายละเอียดมีอะไรใหม่ โดยไม่ต้องยัดคำตอบทั้งก้อนลงการ์ด
+function Chip({ children, className }: Readonly<{ children: string; className: string }>) {
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{children}</span>;
+}
+
 export function MyRequestsPage() {
-  const [leads, setLeads] = useState<LeadDto[]>([]);
+  usePageMeta("คำขอของฉัน");
+  const [leads, setLeads] = useState<CustomerLeadDto[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -35,7 +31,7 @@ export function MyRequestsPage() {
 
   return (
     <PortalPage title="คำขอของฉัน" subtitle="ติดตามสถานะคำขอทั้งหมดของคุณกับทีมงาน">
-      {loading && <p className="text-slate-400">กำลังโหลด...</p>}
+      {loading && <StatusListSkeleton label="กำลังโหลดคำขอ..." />}
 
       {!loading && leads.length === 0 && (
         <EmptyState
@@ -48,21 +44,25 @@ export function MyRequestsPage() {
 
       <div className="flex flex-col gap-3">
         {leads.map((lead, i) => {
-          const s = STATUS_STYLE[lead.status];
+          const s = LEAD_STATUS_STYLE[lead.status];
+          const hasChips = Boolean(lead.reply || lead.latestQuote);
           return (
             <StatusCard
               key={lead.id}
               index={i}
+              href={`/my/requests/${lead.id}`}
               accent={s.accent}
               title={lead.serviceType}
-              meta={formatDate(lead.createdAt)}
+              meta={`ส่งเมื่อ ${formatDate(lead.createdAt)}`}
               badge={{ label: s.label, className: s.badge }}
             >
-              {lead.message && <p className="mt-2 text-sm text-slate-500">{lead.message}</p>}
-              {lead.reply && (
-                <div className="mt-3 rounded-r border-l-2 border-brand bg-brand/5 px-3 py-2">
-                  <p className="text-xs font-medium text-brand">คำตอบจากทีมงาน</p>
-                  <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{lead.reply}</p>
+              {lead.message && <p className="mt-2 line-clamp-2 text-sm text-slate-500">{lead.message}</p>}
+              {hasChips && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {lead.reply && <Chip className="bg-brand/10 text-brand">มีคำตอบจากทีมงาน</Chip>}
+                  {lead.latestQuote && (
+                    <Chip className="bg-indigo-50 text-indigo-700">มีใบเสนอราคาแล้ว</Chip>
+                  )}
                 </div>
               )}
             </StatusCard>

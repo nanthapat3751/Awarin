@@ -18,7 +18,7 @@ describe("change-password", () => {
 
     const res = await owner.agent
       .post("/api/auth/change-password")
-      .send({ currentPassword: "not-the-real-password", newPassword: "brand-new-password-123" });
+      .send({ currentPassword: "not-the-real-password", newPassword: "Brand-new-password-123" });
     expect(res.status).toBe(401);
   });
 
@@ -30,13 +30,13 @@ describe("change-password", () => {
     const otherDevice = request.agent(app);
     await otherDevice
       .post("/api/auth/staff/login")
-      .send({ email: owner.email, password: "test-owner-battery-staple" });
+      .send({ username: owner.username, password: "Quiet-lantern-42-riverbank" });
     const otherDeviceMeBefore = await otherDevice.get("/api/auth/me");
     expect(otherDeviceMeBefore.status).toBe(200);
 
     const changeRes = await owner.agent.post("/api/auth/change-password").send({
-      currentPassword: "test-owner-battery-staple",
-      newPassword: "a-brand-new-password-456",
+      currentPassword: "Quiet-lantern-42-riverbank",
+      newPassword: "Birch-quarry-58-moonstone",
     });
     expect(changeRes.status).toBe(204);
 
@@ -51,12 +51,12 @@ describe("change-password", () => {
     // รหัสผ่านเดิมใช้ไม่ได้แล้ว รหัสใหม่ใช้ได้
     const loginWithOldPassword = await request(app)
       .post("/api/auth/staff/login")
-      .send({ email: owner.email, password: "test-owner-battery-staple" });
+      .send({ username: owner.username, password: "Quiet-lantern-42-riverbank" });
     expect(loginWithOldPassword.status).toBe(401);
 
     const loginWithNewPassword = await request(app)
       .post("/api/auth/staff/login")
-      .send({ email: owner.email, password: "a-brand-new-password-456" });
+      .send({ username: owner.username, password: "Birch-quarry-58-moonstone" });
     expect(loginWithNewPassword.status).toBe(200);
   });
 
@@ -64,15 +64,37 @@ describe("change-password", () => {
     const customer = await createAndLoginCustomer("test-changepw-customer");
 
     const res = await customer.agent.post("/api/auth/change-password").send({
-      currentPassword: "test-customer-battery-staple",
-      newPassword: "customer-new-password-789",
+      currentPassword: "Amber-thicket-71-woodgrain",
+      newPassword: "Maple-sundial-63-cobblestone",
     });
     expect(res.status).toBe(204);
 
     const loginWithNewPassword = await request(app)
       .post("/api/auth/customer/login")
-      .send({ email: customer.email, password: "customer-new-password-789" });
+      .send({ email: customer.email, password: "Maple-sundial-63-cobblestone" });
     expect(loginWithNewPassword.status).toBe(200);
+
+    await prisma.user.deleteMany({ where: { email: customer.email } });
+  });
+
+  it("records when the password was changed and shows it on the customer's profile", async () => {
+    const customer = await createAndLoginCustomer("test-changepw-changedat");
+    // บัญชีที่มีอยู่ก่อนคอลัมน์นี้ = null → หน้าบัญชีต้องได้ null (ไม่เดาวันที่)
+    await prisma.user.update({ where: { email: customer.email }, data: { passwordChangedAt: null } });
+    const before = await customer.agent.get("/api/auth/me/profile");
+    expect(before.status).toBe(200);
+    expect(before.body.passwordChangedAt).toBeNull();
+
+    const startedAt = Date.now();
+    const res = await customer.agent.post("/api/auth/change-password").send({
+      currentPassword: "Amber-thicket-71-woodgrain",
+      newPassword: "Harbor-lattice-29-thimble",
+    });
+    expect(res.status).toBe(204);
+
+    const after = await customer.agent.get("/api/auth/me/profile");
+    expect(after.status).toBe(200);
+    expect(new Date(after.body.passwordChangedAt).getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
 
     await prisma.user.deleteMany({ where: { email: customer.email } });
   });

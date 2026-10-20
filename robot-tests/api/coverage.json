@@ -1,0 +1,5398 @@
+[
+ {
+  "method": "POST",
+  "path": "/api/auth/2fa/verify",
+  "router": "twoFactorRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_001"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/access/:token",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_002"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/access/:token",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_003"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/forgot-password",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_004"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/login",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_005"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/register",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_006"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/reset-password",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_007"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/customer/reset-password/:token",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_008"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/reset-password/verify-code",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_009"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/verify-email",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_010"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/verify-email/change-email",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_011"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/customer/verify-email/resend",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_012"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/logout",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_013"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/staff/forgot-password",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_014"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/staff/login",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_015"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/staff/reset-password",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_016"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/staff/reset-password/:token",
+  "router": "authRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "ทางเข้าระบบ — คนที่ยังไม่เข้าสู่ระบบต้องเรียกได้",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_017"
+ },
+ {
+  "method": "GET",
+  "path": "/api/health",
+  "router": "app",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_018"
+ },
+ {
+  "method": "GET",
+  "path": "/api/health/ready",
+  "router": "app",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_019"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/house-designs",
+  "router": "publicHouseDesignsRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_020"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/house-designs/:id",
+  "router": "publicHouseDesignsRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_021"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/house-designs/featured",
+  "router": "publicHouseDesignsRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_022"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/leads",
+  "router": "publicLeadsRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_023"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/portfolio",
+  "router": "publicPortfolioRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_024"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/portfolio/:id",
+  "router": "publicPortfolioRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_025"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/portfolio/featured",
+  "router": "publicPortfolioRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_026"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/settings",
+  "router": "publicSettingsRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_027"
+ },
+ {
+  "method": "GET",
+  "path": "/api/public/sitemap.xml",
+  "router": "sitemapRouter",
+  "auth": false,
+  "roles": null,
+  "middlewares": [],
+  "group": "PUBLIC",
+  "why": "เนื้อหาสาธารณะ / ตรวจสุขภาพระบบ",
+  "deny": [],
+  "looser": [],
+  "stricter": [],
+  "public": true,
+  "tc": "TC_API_ACL_028"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/change-password",
+  "router": "authRouter",
+  "auth": true,
+  "roles": null,
+  "middlewares": [],
+  "group": "ANY",
+  "why": "ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่ ใช้ได้ทั้งสองฝั่ง",
+  "deny": [
+   "ANON"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_029"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/me",
+  "router": "authRouter",
+  "auth": true,
+  "roles": null,
+  "middlewares": [],
+  "group": "ANY",
+  "why": "ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่ ใช้ได้ทั้งสองฝั่ง",
+  "deny": [
+   "ANON"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_030"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications",
+  "router": "notificationsRouter",
+  "auth": true,
+  "roles": null,
+  "middlewares": [],
+  "group": "ANY",
+  "why": "ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่ ใช้ได้ทั้งสองฝั่ง",
+  "deny": [
+   "ANON"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_031"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/:id/read",
+  "router": "notificationsRouter",
+  "auth": true,
+  "roles": null,
+  "middlewares": [],
+  "group": "ANY",
+  "why": "ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่ ใช้ได้ทั้งสองฝั่ง",
+  "deny": [
+   "ANON"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_032"
+ },
+ {
+  "method": "POST",
+  "path": "/api/notifications/mark-all-read",
+  "router": "notificationsRouter",
+  "auth": true,
+  "roles": null,
+  "middlewares": [],
+  "group": "ANY",
+  "why": "ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่ ใช้ได้ทั้งสองฝั่ง",
+  "deny": [
+   "ANON"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_033"
+ },
+ {
+  "method": "GET",
+  "path": "/api/notifications/unread-count",
+  "router": "notificationsRouter",
+  "auth": true,
+  "roles": null,
+  "middlewares": [],
+  "group": "ANY",
+  "why": "ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่ ใช้ได้ทั้งสองฝั่ง",
+  "deny": [
+   "ANON"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_034"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/delete-account",
+  "router": "authRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "หน้าบัญชีของลูกค้าเอง (ชื่อ/รูป/ลบบัญชี) — ฝั่งพนักงานใช้ /api/account",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_035"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/auth/me/avatar",
+  "router": "authRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "หน้าบัญชีของลูกค้าเอง (ชื่อ/รูป/ลบบัญชี) — ฝั่งพนักงานใช้ /api/account",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_036"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/me/avatar",
+  "router": "authRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "CUSTOMER",
+  "why": "หน้าบัญชีของลูกค้าเอง (ชื่อ/รูป/ลบบัญชี) — ฝั่งพนักงานใช้ /api/account",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_037"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/me/profile",
+  "router": "authRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "หน้าบัญชีของลูกค้าเอง (ชื่อ/รูป/ลบบัญชี) — ฝั่งพนักงานใช้ /api/account",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_038"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/auth/me/profile",
+  "router": "authRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "หน้าบัญชีของลูกค้าเอง (ชื่อ/รูป/ลบบัญชี) — ฝั่งพนักงานใช้ /api/account",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_039"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/contracts",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_040"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/contracts/:id/change-orders/:changeOrderId/pdf",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_041"
+ },
+ {
+  "method": "POST",
+  "path": "/api/my/contracts/:id/change-orders/:changeOrderId/respond",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_042"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/contracts/:id/documents/:docId/pdf",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_043"
+ },
+ {
+  "method": "POST",
+  "path": "/api/my/contracts/:id/payment-notices",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_044"
+ },
+ {
+  "method": "POST",
+  "path": "/api/my/contracts/:id/payment-notices/:noticeId/cancel",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_045"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/contracts/:id/payment-notices/:noticeId/evidence/:evidenceId",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_046"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/contracts/:id/pdf",
+  "router": "myContractsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_047"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/leads",
+  "router": "myLeadsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_048"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/leads/:id",
+  "router": "myLeadsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_049"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/payments",
+  "router": "myPaymentsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_050"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/payments/:installmentId",
+  "router": "myPaymentsRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_051"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/quotes",
+  "router": "myQuotesRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_052"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/quotes/:id",
+  "router": "myQuotesRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_053"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/quotes/:id/attachments/:attachmentId/download",
+  "router": "myQuotesRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_054"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/quotes/:id/attachments/:attachmentId/preview",
+  "router": "myQuotesRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_055"
+ },
+ {
+  "method": "GET",
+  "path": "/api/my/quotes/:id/pdf",
+  "router": "myQuotesRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_056"
+ },
+ {
+  "method": "POST",
+  "path": "/api/my/quotes/:id/respond",
+  "router": "myQuotesRouter",
+  "auth": true,
+  "roles": [
+   "CUSTOMER"
+  ],
+  "middlewares": [],
+  "group": "CUSTOMER",
+  "why": "พื้นที่ส่วนตัวของลูกค้า",
+  "deny": [
+   "ANON",
+   "OWNER",
+   "ADMIN"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_057"
+ },
+ {
+  "method": "GET",
+  "path": "/api/backups",
+  "router": "backupsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_058"
+ },
+ {
+  "method": "POST",
+  "path": "/api/backups",
+  "router": "backupsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_059"
+ },
+ {
+  "method": "GET",
+  "path": "/api/mail",
+  "router": "mailRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_060"
+ },
+ {
+  "method": "POST",
+  "path": "/api/mail/test",
+  "router": "mailRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [
+   "anonymous"
+  ],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_061"
+ },
+ {
+  "method": "POST",
+  "path": "/api/mail/verify",
+  "router": "mailRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_062"
+ },
+ {
+  "method": "GET",
+  "path": "/api/system/ip-check",
+  "router": "ipCheckRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_063"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/trash/:type/:id",
+  "router": "trashRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "ลบถาวรจากถังขยะ เฉพาะเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_064"
+ },
+ {
+  "method": "GET",
+  "path": "/api/users",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_065"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_066"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/:id/active",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_067"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/:id/reset-password",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_068"
+ },
+ {
+  "method": "GET",
+  "path": "/api/users/:id/sessions",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_069"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/users/:id/sessions/:handle",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_070"
+ },
+ {
+  "method": "POST",
+  "path": "/api/users/:id/sessions/revoke-all",
+  "router": "usersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "OWNER",
+  "why": "จัดการผู้ใช้/สำรองข้อมูล/ตั้งค่าเมล/ตรวจไอพี เป็นงานของเจ้าของกิจการ",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_071"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/account/avatar",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_072"
+ },
+ {
+  "method": "POST",
+  "path": "/api/account/avatar",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_073"
+ },
+ {
+  "method": "POST",
+  "path": "/api/account/email",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_074"
+ },
+ {
+  "method": "POST",
+  "path": "/api/account/email/send-code",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_075"
+ },
+ {
+  "method": "POST",
+  "path": "/api/account/email/verify",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_076"
+ },
+ {
+  "method": "GET",
+  "path": "/api/account/login-history",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_077"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/account/profile",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_078"
+ },
+ {
+  "method": "GET",
+  "path": "/api/account/security",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_079"
+ },
+ {
+  "method": "GET",
+  "path": "/api/account/sessions",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_080"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/account/sessions/:handle",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_081"
+ },
+ {
+  "method": "POST",
+  "path": "/api/account/sessions/revoke-others",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_082"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/account/signature",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_083"
+ },
+ {
+  "method": "GET",
+  "path": "/api/account/signature",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_084"
+ },
+ {
+  "method": "POST",
+  "path": "/api/account/signature",
+  "router": "accountRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_085"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/2fa/activate",
+  "router": "twoFactorRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "2FA เป็นของบัญชีพนักงานเท่านั้น",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_086"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/2fa/add-device",
+  "router": "twoFactorRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "2FA เป็นของบัญชีพนักงานเท่านั้น",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_087"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/2fa/backup-codes",
+  "router": "twoFactorRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "2FA เป็นของบัญชีพนักงานเท่านั้น",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_088"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/2fa/disable",
+  "router": "twoFactorRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "2FA เป็นของบัญชีพนักงานเท่านั้น",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_089"
+ },
+ {
+  "method": "POST",
+  "path": "/api/auth/2fa/setup",
+  "router": "twoFactorRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "2FA เป็นของบัญชีพนักงานเท่านั้น",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_090"
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth/2fa/status",
+  "router": "twoFactorRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "2FA เป็นของบัญชีพนักงานเท่านั้น",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_091"
+ },
+ {
+  "method": "GET",
+  "path": "/api/categories",
+  "router": "categoriesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_092"
+ },
+ {
+  "method": "POST",
+  "path": "/api/categories",
+  "router": "categoriesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_093"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/categories/:id",
+  "router": "categoriesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_094"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/categories/:id",
+  "router": "categoriesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_095"
+ },
+ {
+  "method": "GET",
+  "path": "/api/contract-templates",
+  "router": "contractTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_096"
+ },
+ {
+  "method": "POST",
+  "path": "/api/contract-templates",
+  "router": "contractTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_097"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/contract-templates/:id",
+  "router": "contractTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_098"
+ },
+ {
+  "method": "GET",
+  "path": "/api/contract-templates/:id",
+  "router": "contractTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_099"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/contract-templates/:id",
+  "router": "contractTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_100"
+ },
+ {
+  "method": "POST",
+  "path": "/api/contract-templates/:id/default",
+  "router": "contractTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_101"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_102"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/:id",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_103"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/customers/:id",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_104"
+ },
+ {
+  "method": "POST",
+  "path": "/api/customers/:id/access-link",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_105"
+ },
+ {
+  "method": "POST",
+  "path": "/api/customers/:id/active",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [
+   "ADMIN"
+  ],
+  "public": false,
+  "tc": "TC_API_ACL_106"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/:id/activity",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_107"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/:id/export",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [
+   "ADMIN"
+  ],
+  "public": false,
+  "tc": "TC_API_ACL_108"
+ },
+ {
+  "method": "POST",
+  "path": "/api/customers/:id/notes",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_109"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/customers/:id/notes/:noteId",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_110"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/customers/:id/notes/:noteId",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_111"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/activity",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_112"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/activity.csv",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_113"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/directory",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_114"
+ },
+ {
+  "method": "GET",
+  "path": "/api/customers/directory.csv",
+  "router": "customersRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_115"
+ },
+ {
+  "method": "GET",
+  "path": "/api/dashboard/contract-cash",
+  "router": "dashboardRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_116"
+ },
+ {
+  "method": "GET",
+  "path": "/api/dashboard/pending-work",
+  "router": "dashboardRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_117"
+ },
+ {
+  "method": "GET",
+  "path": "/api/dashboard/pipeline",
+  "router": "dashboardRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_118"
+ },
+ {
+  "method": "GET",
+  "path": "/api/dashboard/summary",
+  "router": "dashboardRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_119"
+ },
+ {
+  "method": "GET",
+  "path": "/api/house-designs",
+  "router": "houseDesignsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_120"
+ },
+ {
+  "method": "POST",
+  "path": "/api/house-designs",
+  "router": "houseDesignsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_121"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/house-designs/:id",
+  "router": "houseDesignsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_122"
+ },
+ {
+  "method": "GET",
+  "path": "/api/house-designs/:id",
+  "router": "houseDesignsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_123"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/house-designs/:id",
+  "router": "houseDesignsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_124"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/house-designs/featured/reorder",
+  "router": "houseDesignsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_125"
+ },
+ {
+  "method": "GET",
+  "path": "/api/leads",
+  "router": "leadsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_126"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/leads/:id",
+  "router": "leadsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_127"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/leads/:id",
+  "router": "leadsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_128"
+ },
+ {
+  "method": "POST",
+  "path": "/api/leads/:id/create-project",
+  "router": "leadsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_129"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/leads/:id/reply",
+  "router": "leadsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_130"
+ },
+ {
+  "method": "GET",
+  "path": "/api/materials",
+  "router": "materialsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_131"
+ },
+ {
+  "method": "POST",
+  "path": "/api/materials",
+  "router": "materialsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_132"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/materials/:id",
+  "router": "materialsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_133"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/materials/:id",
+  "router": "materialsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_134"
+ },
+ {
+  "method": "GET",
+  "path": "/api/portfolio",
+  "router": "portfolioRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_135"
+ },
+ {
+  "method": "POST",
+  "path": "/api/portfolio",
+  "router": "portfolioRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_136"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/portfolio/:id",
+  "router": "portfolioRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_137"
+ },
+ {
+  "method": "GET",
+  "path": "/api/portfolio/:id",
+  "router": "portfolioRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_138"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/portfolio/:id",
+  "router": "portfolioRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_139"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/portfolio/featured/reorder",
+  "router": "portfolioRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_140"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_141"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_142"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:id",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_143"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:id",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_144"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:id",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_145"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:id/activity",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_146"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:id/custom-price",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_147"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:id/customer-access-link",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_148"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:id/customer-activity",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_149"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:id/link-lead",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_150"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:id/rates",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_151"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:id/transition",
+  "router": "projectsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_152"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_153"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/export.xlsx",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_154"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/import",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_155"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/import/preview",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_156"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/import/template.xlsx",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_157"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/items",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_158"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/boq/items/:itemId",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_159"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/boq/items/:itemId",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_160"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/items/batch",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_161"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/projects/:projectId/boq/items/order",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_162"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/price-drift",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_163"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/price-drift/apply",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_164"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/price-drift/keep",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_165"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/rebar-bbs.xlsx",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_166"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/rebar-cutting",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_167"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/structural-compare",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_168"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/structural-members",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_169"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/boq/structural-members/:key",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_170"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/projects/:projectId/boq/structural-members/:key",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_171"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/structural-members/recompute",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_172"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/boq/takeoff/apply",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_173"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/boq/versions/compare",
+  "router": "boqRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_174"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_175"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_176"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_177"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/contracts/:contractId/body",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_178"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_179"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_180"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/:changeOrderId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_181"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/:changeOrderId/cancel",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_182"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/:changeOrderId/decision",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_183"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/:changeOrderId/pdf",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_184"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/:changeOrderId/refresh",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_185"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/:changeOrderId/send",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_186"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/change-orders/preview",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_187"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/documents/:docId/pdf",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_188"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/documents/:docId/void",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_189"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/installments",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_190"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/projects/:projectId/contracts/:contractId/installments",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_191"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/contracts/:contractId/installments/:installmentId/due",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_192"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/installments/:installmentId/invoice",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_193"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/installments/:installmentId/payments",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_194"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/payment-notices/:noticeId/confirm-slip",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_195"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/payment-notices/:noticeId/evidence/:evidenceId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_196"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/payment-notices/:noticeId/recheck-slip",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_197"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/payment-notices/:noticeId/reject",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_198"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_199"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_200"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_201"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId/evidence",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_202"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId/evidence/:evidenceId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_203"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId/evidence/:evidenceId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_204"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId/receipt",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_205"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/payments/:paymentId/verify",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_206"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/contracts/:contractId/pdf",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_207"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/contracts/:contractId/retention",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_208"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/retention/invoice",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_209"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/retention/releases",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_210"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/contracts/:contractId/retention/releases/:releaseId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_211"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/contracts/:contractId/retention/releases/:releaseId",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_212"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/retention/releases/:releaseId/receipt",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_213"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/contracts/:contractId/sign",
+  "router": "contractsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_214"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/costs",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_215"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/costs",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_216"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/costs/:costId",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_217"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/costs/:costId",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_218"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/costs/:costId/vo",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_219"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/costs/commitments",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_220"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/costs/commitments/:commitmentId",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_221"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/costs/commitments/:commitmentId",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_222"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/costs/commitments/:commitmentId/status",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_223"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/costs/commitments/:commitmentId/vo",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_224"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/costs/price-drift/:itemId/ack",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_225"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/costs/price-drift/:itemId/ack",
+  "router": "projectCostsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_226"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/quotes",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_227"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_228"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/quotes/:quoteId",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_229"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/quotes/:quoteId",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_230"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes/:quoteId/approval/approve",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_231"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes/:quoteId/approval/return",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_232"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes/:quoteId/approval/submit",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_233"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes/:quoteId/approval/withdraw",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_234"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes/:quoteId/attachments",
+  "router": "attachmentsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_235"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/projects/:projectId/quotes/:quoteId/attachments/:attachmentId",
+  "router": "attachmentsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_236"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/quotes/:quoteId/attachments/:attachmentId",
+  "router": "attachmentsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_237"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/quotes/:quoteId/attachments/:attachmentId/download",
+  "router": "attachmentsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_238"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/quotes/:quoteId/attachments/:attachmentId/preview",
+  "router": "attachmentsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_239"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/quotes/:quoteId/export.xlsx",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_240"
+ },
+ {
+  "method": "GET",
+  "path": "/api/projects/:projectId/quotes/:quoteId/pdf",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_241"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/quotes/:quoteId/transition",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_242"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/projects/:projectId/quotes/:quoteId/validity",
+  "router": "quotesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_243"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/templates/apply",
+  "router": "projectTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_244"
+ },
+ {
+  "method": "POST",
+  "path": "/api/projects/:projectId/templates/save-as",
+  "router": "projectTemplatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_245"
+ },
+ {
+  "method": "GET",
+  "path": "/api/reports/sales-tax",
+  "router": "reportsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_246"
+ },
+ {
+  "method": "GET",
+  "path": "/api/reports/sales-tax.csv",
+  "router": "reportsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_247"
+ },
+ {
+  "method": "GET",
+  "path": "/api/reports/sales-tax.xlsx",
+  "router": "reportsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_248"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_249"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/settings",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_250"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/settings/logo",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_251"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/logo",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_252"
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/logo",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_253"
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/promptpay-preview",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_254"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/takeoff-rules",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_255"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/settings/takeoff-rules",
+  "router": "settingsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "ADMIN",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [
+   "ADMIN"
+  ],
+  "public": false,
+  "tc": "TC_API_ACL_256"
+ },
+ {
+  "method": "GET",
+  "path": "/api/templates",
+  "router": "templatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_257"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/templates/:id",
+  "router": "templatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_258"
+ },
+ {
+  "method": "GET",
+  "path": "/api/templates/:id",
+  "router": "templatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_259"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/templates/:id",
+  "router": "templatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_260"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/templates/:id/items/:index",
+  "router": "templatesRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_261"
+ },
+ {
+  "method": "GET",
+  "path": "/api/trash",
+  "router": "trashRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_262"
+ },
+ {
+  "method": "POST",
+  "path": "/api/trash/:type/:id/restore",
+  "router": "trashRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_263"
+ },
+ {
+  "method": "POST",
+  "path": "/api/uploads",
+  "router": "uploadsRouter",
+  "auth": true,
+  "roles": [
+   "OWNER",
+   "ADMIN"
+  ],
+  "middlewares": [],
+  "group": "STAFF",
+  "why": "ระบบหลังบ้านของพนักงาน",
+  "deny": [
+   "ANON",
+   "CUSTOMER"
+  ],
+  "looser": [],
+  "stricter": [],
+  "public": false,
+  "tc": "TC_API_ACL_264"
+ }
+]

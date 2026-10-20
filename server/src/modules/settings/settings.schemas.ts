@@ -2,6 +2,8 @@ import { looksLikeEmail } from "@systemboq/shared-types";
 import { SITE_IMAGE_KEYS, isSafeImageUrl } from "@systemboq/shared-types";
 import { z } from "zod";
 
+import { isValidPromptPayId } from "../../lib/promptpay";
+
 import { MAX_QUOTE_VALIDITY_DAYS } from "../../lib/quote-terms";
 
 export const PAYMENT_ACCOUNT_KEYS = [
@@ -24,10 +26,17 @@ const DIGITS_AND_SEPARATORS = /^[\d\s-]*$/;
 export const EDITABLE_SETTING_KEYS = [
   "companyName",
   "companyAddress",
+  // ชื่อ/ที่อยู่ภาษาอังกฤษ — หัวใบแจ้งหนี้/ใบเสร็จตามแบบฟอร์มของบริษัท (ว่าง = ไม่พิมพ์)
+  "companyNameEn",
+  "companyAddressEn",
   "companyPhone",
   // ใช้พิมพ์บนหัวเอกสาร (ใบเสนอราคา/BOQ/สัญญา) — ไม่อยู่ใน PUBLIC_SETTING_KEYS
   // เพราะเว็บสาธารณะไม่ต้องใช้
   "companyTaxId",
+  // จดทะเบียนภาษีมูลค่าเพิ่มหรือยัง ("true"/"") + สถานประกอบการ — ใบเสร็จจะเป็น "ใบเสร็จรับเงิน/
+  // ใบกำกับภาษี" ก็ต่อเมื่อช่องนี้เป็นจริง (มีเลขผู้เสียภาษีไม่ได้แปลว่าจด VAT — นิติบุคคลทุกรายมีเลข)
+  "companyVatRegistered",
+  "companyBranch",
   "companyEmail",
   "companyFacebook",
   "companyYoutube",
@@ -45,6 +54,8 @@ export const EDITABLE_SETTING_KEYS = [
   // ค่าว่าง = ยังไม่ได้แยก (โครงการใหม่จะไม่มีการแบ่งติดมาด้วย)
   "overheadPercent",
   "vatPercent",
+  // เงินประกันผลงานตั้งต้นของสัญญาใหม่ (%) — ค่าว่าง = ไม่มี (ไม่เดา 5% ให้)
+  "retentionPercent",
   // รูปภาพของเว็บไซต์สาธารณะ (ทะเบียนช่องอยู่ใน @systemboq/shared-types → SITE_IMAGE_SLOTS)
   ...SITE_IMAGE_KEYS,
 ] as const;
@@ -71,8 +82,12 @@ export const PUBLIC_SETTING_KEYS = [
 export const updateSettingsSchema = z.object({
   companyName: z.string().min(1).optional(),
   companyAddress: z.string().optional(),
+  companyNameEn: z.string().trim().max(200, "ชื่อภาษาอังกฤษยาวเกิน 200 ตัวอักษร").optional(),
+  companyAddressEn: z.string().trim().max(500, "ที่อยู่ภาษาอังกฤษยาวเกิน 500 ตัวอักษร").optional(),
   companyPhone: z.string().optional(),
   companyTaxId: z.string().optional(),
+  companyVatRegistered: z.boolean().optional(),
+  companyBranch: z.string().trim().max(60, "สาขายาวเกิน 60 ตัวอักษร").optional(),
   // อีเมลขึ้นทั้งบนหัวเอกสารและเว็บสาธารณะ (ลิงก์ mailto:) — ผิดรูปแบบแล้วลูกค้ากดส่งไม่ถึง
   companyEmail: z
     .string()
@@ -106,8 +121,9 @@ export const updateSettingsSchema = z.object({
     .refine(
       (v) =>
         v.trim() === "" ||
-        (DIGITS_AND_SEPARATORS.test(v) && [10, 13].includes(digitCount(v))),
-      { message: "พร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขประจำตัวผู้เสียภาษี 13 หลัก" },
+        // เบอร์มือถือต้องขึ้นต้น 0 — ไม่งั้นแปลงเป็นบัญชีพร้อมเพย์ไม่ได้ QR จะหายไปเงียบ ๆ
+        (DIGITS_AND_SEPARATORS.test(v) && isValidPromptPayId(v) && [10, 13].includes(digitCount(v))),
+      { message: "พร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก (ขึ้นต้น 0) หรือเลขประจำตัวผู้เสียภาษี 13 หลัก" },
     )
     .optional(),
   // null = ไม่กำหนดยืนราคา (ใบที่ส่งจากนี้ไม่มีวันหมดอายุ)
@@ -123,6 +139,8 @@ export const updateSettingsSchema = z.object({
   // null = ล้างการแบ่ง (กลับไปเป็นก้อนรวมเหมือนเดิม)
   overheadPercent: z.number().min(0).max(100).nullable().optional(),
   vatPercent: z.number().min(0).max(100).optional(),
+  // null = สัญญาใหม่ไม่มีเงินประกันผลงาน
+  retentionPercent: z.number().min(0).max(20, "เงินประกันผลงานไม่ควรเกิน 20%").nullable().optional(),
   // ค่าเหล่านี้ถูกเสิร์ฟให้คนทั่วไปแล้วเอาไปใส่ `<img src>` — ต้องกัน javascript:/data:
   // ไม่ให้ถูกบันทึกเป็นค่าไว้ตั้งแต่แรก (stored XSS) ค่าว่าง = กลับไปใช้รูปเริ่มต้น
   ...Object.fromEntries(
@@ -140,3 +158,24 @@ export const updateSettingsSchema = z.object({
 });
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
+
+/** ชุดกฎหนึ่งชุด — ค่ามาตรฐานมีเพดานกันพิมพ์ผิดจนตัวคิดได้เลขเพี้ยน (ทาบ 400d / เหล็กยาว 0) */
+const takeoffRuleSetSchema = z.object({
+  deductCover: z.boolean(),
+  bends: z.boolean(),
+  laps: z.boolean(),
+  hooks: z.boolean(),
+  fullDepthLayers: z.boolean(),
+  lapFactor: z.number().min(10).max(100),
+  bendFactor: z.number().min(0).max(50),
+  stockLength: z.number().min(3).max(20),
+  hookFactor: z.number().min(0).max(30),
+});
+
+export const takeoffRulesSchema = z.object({
+  tender: takeoffRuleSetSchema.extend({
+    // ขนาดเหล็ก (มม.) → เผื่อเสีย % · null = ไม่ใส่ให้
+    wastePct: z.record(z.string().regex(/^\d{1,2}$/), z.number().min(0).max(50).nullable()),
+  }),
+  site: takeoffRuleSetSchema,
+});

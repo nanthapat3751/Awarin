@@ -78,8 +78,21 @@ function readPage(req: import("express").Request): PageRequest {
   return pageQuerySchema.parse(req.query);
 }
 
-function readDirectoryQuery(req: import("express").Request): CustomerDirectoryQuery {
-  return customerDirectoryQuerySchema.parse(req.query);
+/**
+ * คำค้น/ตัวเรียงของสารบัญลูกค้า — ค่าที่ผิดกฎ (เช่น คำค้นยาวเกิน 200 ตัว) ตอบ 400 พร้อมเหตุผล
+ * เดิมใช้ .parse() ซึ่งโยน ZodError ออกไปเป็น 500 "ระบบล่ม" (BUG-API-004) · คืน null = ตอบ 400 ไปแล้ว
+ */
+function readDirectoryQuery(
+  req: import("express").Request,
+  res: import("express").Response,
+): CustomerDirectoryQuery | null {
+  const parsed = customerDirectoryQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    const tooLong = parsed.error.issues.some((i) => i.code === "too_big" && i.path[0] === "q");
+    res.status(400).json({ error: tooLong ? "คำค้นยาวเกิน 200 ตัวอักษร" : "เงื่อนไขค้นหาไม่ถูกต้อง" });
+    return null;
+  }
+  return parsed.data;
 }
 
 /** ส่งไฟล์ให้เบราว์เซอร์บันทึก พร้อมชื่อไฟล์ภาษาไทยที่อ่านออก */
@@ -135,9 +148,12 @@ customersRouter.get("/activity.csv", async (req, res) => {
 
 // รายชื่อลูกค้าทั้งหมด (สารบัญของแฟ้ม) — แบ่งหน้า/เรียง/ค้นหาที่เซิร์ฟเวอร์
 customersRouter.get("/directory", async (req, res) => {
-  const result = await listCustomers(readDirectoryQuery(req));
+  const query = readDirectoryQuery(req, res);
+  if (!query) return;
+  const result = await listCustomers(query);
   res.json({
     customers: result.items,
+    unverifiedCount: result.unverifiedCount,
     total: result.total,
     page: result.page,
     pageSize: result.pageSize,
@@ -146,7 +162,9 @@ customersRouter.get("/directory", async (req, res) => {
 
 customersRouter.get("/directory.csv", async (req, res) => {
   try {
-    const csv = await buildCustomerDirectoryCsv(readDirectoryQuery(req), actorMeta(req));
+    const query = readDirectoryQuery(req, res);
+    if (!query) return;
+    const csv = await buildCustomerDirectoryCsv(query, actorMeta(req));
     sendFile(res, csv, "text/csv", `รายชื่อลูกค้า-${stamp()}.csv`);
   } catch (err) {
     handle(err, res);

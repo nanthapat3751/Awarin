@@ -1,3 +1,5 @@
+import { IP_KIND_LABEL } from "@systemboq/shared-types";
+
 import { isAnonymized } from "../../lib/anonymized";
 import { billingPartyOf } from "../../lib/billing-party";
 import { writeAuditLog } from "../../lib/audit-log";
@@ -149,8 +151,9 @@ export async function buildCustomerActivityCsv(
 
   // คอลัมน์ไอพีมีเฉพาะไฟล์ที่ OWNER เป็นคนโหลด — ADMIN ได้ไฟล์ที่ไม่มีคอลัมน์นั้นเลย
   // (ถ้าใส่คอลัมน์ว่างไว้ จะอ่านว่า "ไม่มีข้อมูลไอพี" ซึ่งไม่จริง)
-  const headers = ["เวลา", "ลูกค้า", "กิจกรรม", "รายละเอียด", "โครงการ"];
-  if (opts.includeIp) headers.push("IP");
+  const headers = ["เวลา", "ลูกค้า", "กิจกรรม", "รายละเอียด", "โครงการ", "อุปกรณ์"];
+  // ประเภทไอพีไปคู่กับไอพีเสมอ — ไม่งั้นไอพีของ Docker/เครื่องตัวเองในไฟล์จะถูกอ่านเป็นของลูกค้า
+  if (opts.includeIp) headers.push("IP", "ประเภท IP", "ประเทศ", "ผู้ให้บริการ");
 
   return toCsv(
     headers,
@@ -161,8 +164,11 @@ export async function buildCustomerActivityCsv(
         r.title,
         r.detail,
         r.projectName,
+        r.newDevice ? `${r.device ?? "ไม่ทราบอุปกรณ์"} (เครื่องใหม่)` : r.device,
       ];
-      if (opts.includeIp) row.push(r.ip);
+      if (opts.includeIp) {
+        row.push(r.ip, r.ipKind ? (IP_KIND_LABEL[r.ipKind] ?? "สาธารณะ") : null, r.ipGeo?.country, r.ipGeo?.network);
+      }
       return row;
     }),
   );

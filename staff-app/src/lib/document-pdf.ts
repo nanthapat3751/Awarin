@@ -34,3 +34,21 @@ export function pdfViewerPath(kind: PdfDocKind, projectId: string, docId: string
 export function pdfDocTitle(kind: PdfDocKind, docNo: string): string {
   return `${KIND_LABEL[kind]} ${docNo}`;
 }
+
+/** ใบแจ้งหนี้/ใบเสร็จของงวดเงิน — อยู่ใต้สัญญา จึงต้องมีทั้งเลขสัญญาและเลขเอกสาร */
+export function billingDocApiPath(projectId: string, contractId: string, docId: string): string {
+  return `/api/projects/${projectId}/contracts/${contractId}/documents/${docId}/pdf`;
+}
+
+export function billingDocViewerPath(projectId: string, contractId: string, docId: string): string {
+  return `/projects/${projectId}/contracts/${contractId}/documents/${docId}/pdf`;
+}
+
+/** ใบงานเพิ่ม-ลด — อยู่ใต้สัญญาเหมือนใบแจ้งหนี้ */
+export function changeOrderApiPath(projectId: string, contractId: string, id: string): string {
+  return `/api/projects/${projectId}/contracts/${contractId}/change-orders/${id}/pdf`;
+}
+
+export function changeOrderViewerPath(projectId: string, contractId: string, id: string): string {
+  return `/projects/${projectId}/contracts/${contractId}/change-orders/${id}/pdf`;
+}

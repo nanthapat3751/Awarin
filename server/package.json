@@ -17,7 +17,10 @@
     "db:test:grant": "tsx prisma/setup-test-db.ts",
     "db:grant:backup": "tsx prisma/grant-backup-role.ts",
     "backup": "tsx scripts/backup.ts",
-    "backup:restore": "tsx scripts/restore.ts"
+    "staff:recover": "tsx scripts/staff-recover.ts",
+    "backup:restore": "tsx scripts/restore.ts",
+    "structural:benchmark": "tsx scripts/structural-benchmark.ts",
+    "geoip:update": "tsx scripts/geoip-update.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -30,13 +33,17 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
+    "mmdb-lib": "^3.0.3",
     "multer": "^2.2.0",
+    "nodemailer": "^10.0.10",
     "otplib": "^12.0.1",
     "pdf-lib": "^1.17.1",
     "puppeteer": "^25.3.0",
     "qrcode": "^1.5.4",
+    "sharp": "^0.35.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -45,6 +52,7 @@
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.5",
+    "@types/nodemailer": "^8.0.2",
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^6.0.2",
     "jest": "^29.7.0",

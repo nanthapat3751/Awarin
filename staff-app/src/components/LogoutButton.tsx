@@ -1,5 +1,6 @@
 import { Power } from "lucide-react";
 
+import { Tooltip } from "./Tooltip";
 import { useAuth } from "../lib/auth-context";
 import { useConfirm } from "../lib/confirm-context";
 
@@ -28,15 +29,17 @@ export function LogoutButton() {
     if (ok) void logout();
   }
 
+  // ชิดขอบขวาของแถบบน — ป้ายชิดขวาไม่ให้ยื่นพ้นจอ
   return (
-    <button
-      type="button"
-      onClick={() => void handleLogout()}
-      aria-label="ออกจากระบบ"
-      title="ออกจากระบบ"
-      className="rounded-full border border-slate-200 bg-slate-100 p-2 text-slate-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-    >
-      <Power size={20} aria-hidden />
-    </button>
+    <Tooltip label="ออกจากระบบ" align="end">
+      <button
+        type="button"
+        onClick={() => void handleLogout()}
+        aria-label="ออกจากระบบ"
+        className="rounded-full border border-slate-200 bg-slate-100 p-2 text-slate-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+      >
+        <Power size={20} aria-hidden />
+      </button>
+    </Tooltip>
   );
 }

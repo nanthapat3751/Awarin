@@ -12,6 +12,9 @@ interface FloatingFieldProps {
   trailing?: ReactNode;
   required?: boolean;
   autoComplete?: string;
+  // ช่องที่เป็น "ค่า" ไม่ใช่ประโยค (ชื่อผู้ใช้/รหัส) — กันมือถือขึ้นต้นตัวพิมพ์ใหญ่และขีดเส้นสะกดผิดให้
+  autoCapitalize?: "none" | "sentences";
+  spellCheck?: boolean;
   autoFocus?: boolean;
   // คลาสเสริมของ input (เช่น font-mono/uppercase/tracking สำหรับช่องรหัส)
   inputClassName?: string;
@@ -29,6 +32,8 @@ export function FloatingField({
   trailing,
   required,
   autoComplete,
+  autoCapitalize,
+  spellCheck,
   autoFocus,
   inputClassName = "",
 }: Readonly<FloatingFieldProps>) {
@@ -39,6 +44,8 @@ export function FloatingField({
         type={type}
         required={required}
         autoComplete={autoComplete}
+        autoCapitalize={autoCapitalize}
+        spellCheck={spellCheck}
         autoFocus={autoFocus}
         placeholder=" "
         value={value}

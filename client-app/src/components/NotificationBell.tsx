@@ -13,28 +13,13 @@ import {
 } from "../lib/notifications-api";
 import { notificationVisual, timeAgo } from "../lib/notifications-format";
 import { PortalIcon } from "./PortalPage";
+import { NotificationListSkeleton } from "./Skeleton";
+import { Tooltip } from "./Tooltip";
 
 /** จำนวนที่โชว์ในแผง — เกินกว่านี้ให้ไปดูที่หน้ารวม */
 const PANEL_LIMIT = 8;
 
 type Tab = "all" | "unread";
-
-/** โครงร่างระหว่างรอข้อมูล — แผงยิง API ตอนกดเปิด ไม่ได้โหลดมาพร้อมหน้า จึงเห็นช่วงรอจริง */
-function PanelSkeleton() {
-  return (
-    <div className="flex flex-col gap-3 px-3 py-3">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="flex animate-pulse items-start gap-3">
-          <div className="h-9 w-9 shrink-0 rounded-lg bg-slate-100" />
-          <div className="flex-1 space-y-2 pt-1">
-            <div className="h-2.5 w-4/5 rounded bg-slate-100" />
-            <div className="h-2 w-1/3 rounded bg-slate-100" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function NotificationBell() {
   const navigate = useNavigate();
@@ -108,23 +93,34 @@ export function NotificationBell() {
     await load(nextTab);
   }
 
-  async function handleClickNotification(n: NotificationDto) {
-    if (!n.read) {
-      await markNotificationRead(n.id);
-      setUnreadCount((c) => Math.max(0, c - 1));
-      setNotifications((list) => list.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
-      notifyNotificationsChanged();
-    }
+  // พาไปหน้าปลายทางทันที แล้วบันทึก "อ่านแล้ว" ตามหลัง — เดิมรอเซิร์ฟเวอร์ตอบก่อนค่อยไป
+  // เน็ตช้ากดแล้วเหมือนไม่มีอะไรเกิดขึ้น · บันทึกไม่สำเร็จ = แค่ยังขึ้นว่ายังไม่อ่านในรอบหน้า (ไม่เสียหาย)
+  function handleClickNotification(n: NotificationDto) {
     setOpen(false);
     if (n.link) navigate(n.link);
+    if (n.read) return;
+    setUnreadCount((c) => Math.max(0, c - 1));
+    setNotifications((list) => list.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    markNotificationRead(n.id)
+      .then(() => notifyNotificationsChanged())
+      .catch(() => undefined);
   }
 
+  // กันกดซ้ำระหว่างส่ง + บอกว่ากำลังทำ (เดิมไม่มีอะไรเปลี่ยนจนเซิร์ฟเวอร์ตอบ และพังก็เงียบ)
+  const [markingAll, setMarkingAll] = useState(false);
   async function handleMarkAllRead() {
-    await markAllNotificationsRead();
-    setUnreadCount(0);
-    if (tab === "unread") setNotifications([]);
-    else setNotifications((list) => list.map((n) => ({ ...n, read: true })));
-    notifyNotificationsChanged();
+    setMarkingAll(true);
+    try {
+      await markAllNotificationsRead();
+      setUnreadCount(0);
+      if (tab === "unread") setNotifications([]);
+      else setNotifications((list) => list.map((n) => ({ ...n, read: true })));
+      notifyNotificationsChanged();
+    } catch {
+      // ไม่สำเร็จ = ปล่อยสถานะเดิมไว้ ปุ่มยังอยู่ให้กดใหม่ได้
+    } finally {
+      setMarkingAll(false);
+    }
   }
 
   const tabClass = (t: Tab) =>
@@ -134,29 +130,31 @@ export function NotificationBell() {
 
   return (
     <div className="relative" ref={containerRef}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        aria-expanded={open}
-        className="relative inline-flex h-11 w-11 items-center justify-center rounded-full transition-colors hover:bg-black/5 lg:h-9 lg:w-9"
-        aria-label={unreadCount > 0 ? `การแจ้งเตือน (${unreadCount} รายการใหม่)` : "การแจ้งเตือน"}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="20"
-          height="20"
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          aria-hidden="true"
+      <Tooltip label="การแจ้งเตือน">
+        <button
+          type="button"
+          onClick={handleToggle}
+          aria-expanded={open}
+          className="relative inline-flex h-11 w-11 items-center justify-center rounded-full transition-colors hover:bg-black/5 lg:h-9 lg:w-9"
+          aria-label={unreadCount > 0 ? `การแจ้งเตือน (${unreadCount} รายการใหม่)` : "การแจ้งเตือน"}
         >
-          <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zm.995-14.901a1 1 0 1 0-1.99 0A5.002 5.002 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901z" />
-        </svg>
-        {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex min-w-[1.15rem] h-[1.15rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white ring-2 ring-white">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
-      </button>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zm.995-14.901a1 1 0 1 0-1.99 0A5.002 5.002 0 0 0 3 6c0 1.098-.5 6-2 7h14c-1.5-1-2-5.902-2-7 0-2.42-1.72-4.44-4.005-4.901z" />
+          </svg>
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex min-w-[1.15rem] h-[1.15rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white ring-2 ring-white">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </button>
+      </Tooltip>
 
       {open && (
         // จอเล็ก: ยึดกับขอบจอ (fixed) เพราะแผงกว้าง 320px เท่ากับความกว้างจอพอดี ถ้ายึดกับปุ่ม
@@ -175,15 +173,17 @@ export function NotificationBell() {
               <button
                 type="button"
                 onClick={handleMarkAllRead}
-                className="shrink-0 text-xs text-slate-500 hover:text-brand"
+                disabled={markingAll}
+                className="link-pill -mr-2.5 shrink-0 text-xs font-medium text-brand disabled:opacity-60"
               >
-                อ่านทั้งหมด
+                {markingAll ? "กำลังบันทึก..." : "อ่านทั้งหมด"}
               </button>
             )}
           </div>
 
           <div className="max-h-96 overflow-y-auto">
-            {loading && <PanelSkeleton />}
+            {/* แผงยิง API ตอนกดเปิด ไม่ได้โหลดมาพร้อมหน้า จึงเห็นช่วงรอจริง */}
+            {loading && <NotificationListSkeleton count={3} compact />}
             {!loading && notifications.length === 0 && (
               <div className="px-3 py-8 text-center">
                 <p className="text-sm text-slate-500">

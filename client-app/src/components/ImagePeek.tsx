@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * รูปในการ์ดที่ "แอบดู" รูปอื่นของรายการนั้นได้โดยไม่ต้องกดเข้าไป
@@ -7,18 +7,15 @@ import { useEffect, useState } from "react";
  * รูปภายนอก 1 + ภายใน 6 รวม 7 ภาพ แต่การ์ดโชว์แค่รูปแรกรูปเดียว ผลงาน "งาน1" มี 4 ภาพ
  * "งานที่18" มี 3 ภาพ ก็โชว์แค่ปก ทั้งที่ API หน้ารายการส่งรูปมาครบอยู่แล้ว ไม่ต้องแก้หลังบ้านเลย
  *
- * พฤติกรรม: ปกติโชว์รูปแรก + ป้ายบอกจำนวนภาพมุมขวาบน; ชี้ค้างที่การ์ดแล้วไล่สลับรูปทีละใบ
- * แบบค่อย ๆ จาง พร้อมเปลี่ยนป้ายเป็น "3/7 ภาพ" ให้รู้ว่าดูถึงไหน เอาเมาส์ออกกลับไปรูปแรก
+ * พฤติกรรม: ปกติโชว์รูปแรก; ชี้ค้างที่การ์ดแล้วไล่สลับรูปทีละใบแบบค่อย ๆ จาง เอาเมาส์ออกกลับไปรูปแรก
+ * (เคยมีป้าย "7 ภาพ"/"3/7 ภาพ" มุมขวาบน — ผู้ใช้สั่งเอาออกทั้งหน้าแบบบ้านและผลงาน 18 ต.ค. อย่าใส่กลับ)
  *
  * สองเรื่องที่ตั้งใจทำ:
  * 1. โหลดรูปเพิ่ม "เฉพาะตอนชี้ครั้งแรก" (armed) — ถ้าใส่ทุกรูปลง DOM ตั้งแต่แรก การ์ดใบเดียว
  *    จะดึงรูป 7 ไฟล์ทันทีที่เปิดหน้า ทั้งที่ผู้ใช้ส่วนใหญ่ไม่ได้ชี้
- * 2. คนที่ตั้งค่าลดการเคลื่อนไหวจะไม่มีการไล่สลับรูปเลย เหลือแค่ป้ายบอกจำนวน
+ * 2. คนที่ตั้งค่าลดการเคลื่อนไหวจะไม่มีการไล่สลับรูปเลย เหลือแค่รูปปก
  *
- * ป้ายใช้พื้นเข้มโปร่ง 70% เพราะรูปข้างหลังเป็นอะไรก็ได้ — คำนวณกรณีแย่สุด (รูปขาวล้วน)
- * ตัวอักษรขาวยังได้ 6.6:1 ผ่านเกณฑ์
- *
- * บนมือถือไม่มีการชี้ จึงเหลือแค่ป้ายบอกจำนวน — ซึ่งก็ยังบอกได้ว่ากดเข้าไปแล้วมีรูปให้ดูอีก
+ * บนมือถือไม่มีการชี้ จึงเห็นแค่รูปปก
  */
 export function ImagePeek({
   images,
@@ -33,6 +30,14 @@ export function ImagePeek({
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState(false);
   const many = images.length > 1;
+  // รูปแรก (ปก) โหลดเสร็จหรือยัง — ยังไม่เสร็จ = แสงวิ่งรองข้างใต้ แทนพื้นเทาเปล่าแล้วรูปโผล่พรวด
+  // พังก็ถือว่าจบ (ไม่ให้แสงวิ่งค้าง) · รูปในแคชอาจเสร็จก่อนผูก onLoad จึงเช็ค complete ซ้ำ
+  const [coverDone, setCoverDone] = useState(false);
+  const coverRef = useRef<HTMLImageElement>(null);
+  const cover = images[0];
+  useEffect(() => {
+    setCoverDone(Boolean(coverRef.current?.complete));
+  }, [cover]);
 
   useEffect(() => {
     if (!active || !many) {
@@ -50,23 +55,22 @@ export function ImagePeek({
 
   return (
     <>
+      {!coverDone && <div aria-hidden className="skeleton absolute inset-0 rounded-none" />}
       {mounted.map((src, n) => (
         <img
           key={src + n}
+          ref={n === 0 ? coverRef : undefined}
           src={src}
+          onLoad={n === 0 ? () => setCoverDone(true) : undefined}
+          onError={n === 0 ? () => setCoverDone(true) : undefined}
           // ให้รูปแรกถือคำบรรยายไว้ตัวเดียว ที่เหลือเป็นภาพชุดเดียวกันจึงซ่อนจากโปรแกรมอ่านหน้าจอ
           alt={n === 0 ? alt : ""}
           aria-hidden={n !== 0}
           className={`absolute inset-0 h-full w-full object-cover transition-[opacity,transform] duration-500 group-hover:scale-105 motion-reduce:transition-none ${
-            n === index ? "opacity-100" : "opacity-0"
+            n === index && (n !== 0 || coverDone) ? "opacity-100" : "opacity-0"
           }`}
         />
       ))}
-      {many && (
-        <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-slate-900/70 px-2.5 py-1 text-xs font-medium text-white backdrop-blur-sm">
-          {active && armed ? `${index + 1}/${images.length} ภาพ` : `${images.length} ภาพ`}
-        </span>
-      )}
     </>
   );
 }

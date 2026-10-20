@@ -188,10 +188,10 @@ export function CustomerNotes({
                     <span>{when(n.createdAt)}</span>
                     {n.updatedAt !== n.createdAt && <span>· แก้ไขแล้ว</span>}
                     {canEdit(n) && (
-                      <span className="ms-auto flex gap-2">
+                      <span className="-me-1.5 ms-auto flex">
                         <button
                           type="button"
-                          className="underline-offset-2 hover:text-slate-700 hover:underline"
+                          className="link-pill -my-1 px-1.5 hover:bg-slate-100 hover:text-slate-700"
                           onClick={() => {
                             setEditingId(n.id);
                             setEditDraft(n.body);
@@ -202,7 +202,7 @@ export function CustomerNotes({
                         </button>
                         <button
                           type="button"
-                          className="underline-offset-2 hover:text-red-600 hover:underline"
+                          className="link-pill -my-1 px-1.5 hover:bg-red-50 hover:text-red-600"
                           onClick={() => remove(n.id)}
                           disabled={busy}
                         >
@@ -222,7 +222,7 @@ export function CustomerNotes({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-2 text-sm text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+          className="link-pill -ml-2.5 mt-1.5 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-800"
         >
           {expanded ? "ย่อลง" : `ดูทั้งหมด (${notes.length})`}
         </button>

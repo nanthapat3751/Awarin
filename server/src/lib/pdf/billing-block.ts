@@ -16,6 +16,8 @@ export interface CustomerPartyPdfData {
   customerTaxId?: string | null;
   customerBranch?: string | null;
   customerContactPerson?: string | null;
+  /** เบอร์โทรของผู้ว่าจ้าง (ใบแจ้งหนี้/ใบเสร็จ ช่อง Tel No.) */
+  customerPhone?: string | null;
 }
 
 export function money(n: number): string {

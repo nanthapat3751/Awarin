@@ -2,7 +2,18 @@ import request from "supertest";
 
 import { app } from "../../src/app";
 import { prisma } from "../../src/lib/prisma";
-import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
+import { todayIso } from "../../src/lib/business-date";
+import { createAndLoginCustomer, createAndLoginOwner, createCustomerDirect } from "../helpers/test-auth";
+
+import type { DashboardPipelineDto, PipelineStageKey } from "@systemboq/shared-types";
+import { sendQuote } from "../helpers/quote-send";
+
+/** ขั้นของท่อขายตามคีย์ — เทสต์อ่านค่าที่สนใจได้โดยไม่ผูกกับลำดับในอาร์เรย์ */
+const stage = (pipeline: DashboardPipelineDto, key: PipelineStageKey) =>
+  pipeline.stages.find((s) => s.key === key)!;
+
+const isoDaysAgo = (days: number) =>
+  new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 
 // mock ด้วยเหตุผลเดียวกับ quotes.test.ts: entry แบบ ESM ของ Puppeteer รันใต้ runtime CJS
 // ของ ts-jest ไม่ได้
@@ -53,6 +64,8 @@ describe("dashboard module", () => {
   });
 
   afterAll(async () => {
+    // สัญญาต้องไปก่อนโครงการ (FK) — งวดและรายการรับเงินหายตาม CASCADE ของสัญญา
+    await prisma.contract.deleteMany({ where: { projectId: { in: createdProjectIds } } });
     await prisma.quote.deleteMany({ where: { projectId: { in: createdProjectIds } } });
     await prisma.projectVersion.deleteMany({ where: { projectId: { in: createdProjectIds } } });
     await prisma.project.deleteMany({ where: { id: { in: createdProjectIds } } });
@@ -91,9 +104,7 @@ describe("dashboard module", () => {
       .post(`/api/projects/${projectId}/boq/items`)
       .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteRes.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteRes.body.quote.id);
 
     const summaryRes = await owner.agent.get("/api/dashboard/summary");
     expect(summaryRes.body.summary.totalQuotedValue).toBeGreaterThan(0);
@@ -108,9 +119,7 @@ describe("dashboard module", () => {
       .post(`/api/projects/${projectId}/boq/items`)
       .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
     const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteRes.body.quote.id}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteRes.body.quote.id);
 
     const before = await owner.agent.get("/api/dashboard/summary");
     const valueAfterQuote = before.body.summary.totalQuotedValue as number;
@@ -149,9 +158,7 @@ describe("dashboard module", () => {
     const draftStage = await owner.agent.get("/api/dashboard/summary");
     expect(draftStage.body.summary.quotedProjectCount).toBe(quotedBefore);
 
-    await owner.agent
-      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-      .send({ toStatus: "SENT" });
+    await sendQuote(owner.agent, projectId, quoteId);
 
     const sentStage = await owner.agent.get("/api/dashboard/summary");
     expect(sentStage.body.summary.quotedProjectCount).toBe(quotedBefore + 1);
@@ -190,9 +197,7 @@ describe("dashboard module", () => {
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
       const quoteId = quoteRes.body.quote.id as string;
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quoteId);
       await customer.agent
         .post(`/api/my/quotes/${quoteId}/respond`)
         .send({ action: "REQUEST_REVISION", note: "ขอเปลี่ยนวัสดุพื้น" });
@@ -222,9 +227,7 @@ describe("dashboard module", () => {
         .post(`/api/projects/${projectId}/boq/items`)
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const firstQuoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${firstQuoteRes.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, firstQuoteRes.body.quote.id);
       await customer.agent
         .post(`/api/my/quotes/${firstQuoteRes.body.quote.id}/respond`)
         .send({ action: "REQUEST_REVISION", note: "ขอเปลี่ยนวัสดุพื้น" });
@@ -257,9 +260,7 @@ describe("dashboard module", () => {
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
       const quoteId = quoteRes.body.quote.id as string;
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quoteId);
       await customer.agent
         .post(`/api/my/quotes/${quoteId}/respond`)
         .send({ action: "REQUEST_REVISION", note: "ขอเปลี่ยนวัสดุพื้น" });
@@ -292,9 +293,7 @@ describe("dashboard module", () => {
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
       const quoteId = quoteRes.body.quote.id as string;
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quoteId);
 
       const sent = await owner.agent.get("/api/dashboard/pending-work");
       const found = sent.body.pendingWork.awaitingResponse.find(
@@ -330,14 +329,10 @@ describe("dashboard module", () => {
         .post(`/api/projects/${projectId}/boq/items`)
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const first = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${first.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, first.body.quote.id);
       // ออกใบใหม่ทับ แล้วส่งอีกครั้ง -- ใบเก่ายังค้างสถานะ SENT (state machine ไม่ปิดให้)
       const second = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${second.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, second.body.quote.id);
 
       const res = await owner.agent.get("/api/dashboard/pending-work");
       const rows = res.body.pendingWork.awaitingResponse.filter(
@@ -364,9 +359,7 @@ describe("dashboard module", () => {
         .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
       const quoteRes = await owner.agent.post(`/api/projects/${projectId}/quotes`);
       const quoteId = quoteRes.body.quote.id as string;
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, quoteId);
 
       const beforeValue = (await owner.agent.get("/api/dashboard/summary")).body.summary
         .totalQuotedValue as number;
@@ -397,9 +390,7 @@ describe("dashboard module", () => {
 
       // ออกใบใหม่แล้วส่ง → ดีลกลับมาเดินต่อ แถวหลุดออกจากรายการเอง ไม่ต้องมีปุ่ม "ทำเสร็จแล้ว"
       const newQuote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
-      await owner.agent
-        .post(`/api/projects/${projectId}/quotes/${newQuote.body.quote.id}/transition`)
-        .send({ toStatus: "SENT" });
+      await sendQuote(owner.agent, projectId, newQuote.body.quote.id);
 
       const requoted = await owner.agent.get("/api/dashboard/pending-work");
       expect(
@@ -452,4 +443,345 @@ describe("dashboard module", () => {
       await prisma.user.deleteMany({ where: { email: customer.email } });
     });
   });
+
+  /** โครงการที่อนุมัติแล้ว + ออกสัญญา (ยังไม่เซ็น) — มูลค่าสัญญาถูกตรึงจากใบที่ลูกค้ายอมรับ */
+  async function contractForCash(name: string) {
+    const res = await owner.agent.post("/api/projects").send({ name, siteAddress: "ที่ตั้งทดสอบ" });
+    const projectId = res.body.project.id as string;
+    createdProjectIds.push(projectId);
+
+    await owner.agent.post(`/api/projects/${projectId}/boq/items`).send({
+      categoryId: itemCategoryId,
+      name: "รายการทดสอบกระดานเงิน",
+      quantity: 10,
+      unit: "หน่วย",
+      materialUnitPrice: 60_000,
+      laborUnitPrice: 40_000,
+    });
+    const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`).send({});
+    const quoteId = quote.body.quote.id as string;
+    await sendQuote(owner.agent, projectId, quoteId);
+    await owner.agent
+      .post(`/api/projects/${projectId}/quotes/${quoteId}/transition`)
+      .send({ toStatus: "ACCEPTED" });
+    await owner.agent.post(`/api/projects/${projectId}/transition`).send({ toStatus: "APPROVED" });
+
+    const contract = await owner.agent.post(`/api/projects/${projectId}/contracts`).send({});
+    return { projectId, contractId: contract.body.contract.id as string };
+  }
+
+  async function signedContractForCash(name: string) {
+    const made = await contractForCash(name);
+    await owner.agent.post(`/api/projects/${made.projectId}/contracts/${made.contractId}/sign`);
+    return made;
+  }
+
+  // ── ท่อขาย + กระดานเงินตามสัญญา (แดชบอร์ดใหม่) ──
+  describe("pipeline", () => {
+    it("ย้ายโครงการจากขั้น 'เสนอราคาแล้ว' ไป 'ลูกค้ายอมรับ' พร้อมมูลค่า", async () => {
+      const projectRes = await owner.agent.post("/api/projects").send({ name: "ท่อขาย-เสนอราคา" });
+      const projectId = projectRes.body.project.id as string;
+      createdProjectIds.push(projectId);
+      await owner.agent
+        .post(`/api/projects/${projectId}/boq/items`)
+        .send({ categoryId: itemCategoryId, materialId, quantity: 2 });
+      const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+      await sendQuote(owner.agent, projectId, quote.body.quote.id);
+
+      const quoted = await owner.agent.get("/api/dashboard/pipeline");
+      const quotedStage = stage(quoted.body.pipeline, "quoted");
+      const acceptedStage = stage(quoted.body.pipeline, "accepted");
+      expect(quotedStage.count).toBeGreaterThanOrEqual(1);
+      expect(quotedStage.value).toBeGreaterThan(0);
+
+      // ลูกค้ายอมรับใบเสนอราคา = โครงการขยับเป็น APPROVED ให้เอง (ไม่มีปุ่มสั่งตรง ๆ)
+      await owner.agent
+        .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
+        .send({ toStatus: "ACCEPTED" });
+
+      const approved = await owner.agent.get("/api/dashboard/pipeline");
+      // งานย้ายขั้นจริง: ขั้นก่อนลดลงหนึ่ง ขั้นถัดไปเพิ่มหนึ่ง และมูลค่าย้ายตามไปด้วย
+      expect(stage(approved.body.pipeline, "quoted").count).toBe(quotedStage.count - 1);
+      expect(stage(approved.body.pipeline, "quoted").value).toBeLessThan(quotedStage.value as number);
+      expect(stage(approved.body.pipeline, "accepted").count).toBe(acceptedStage.count + 1);
+      expect(stage(approved.body.pipeline, "accepted").value!).toBeGreaterThan(
+        (acceptedStage.value ?? 0),
+      );
+    });
+
+    it("โครงการที่ยกเลิกออกจากท่อและไปโผล่ในกลุ่มที่เสียไป", async () => {
+      const projectRes = await owner.agent.post("/api/projects").send({ name: "ท่อขาย-ยกเลิก" });
+      const projectId = projectRes.body.project.id as string;
+      createdProjectIds.push(projectId);
+      await owner.agent
+        .post(`/api/projects/${projectId}/boq/items`)
+        .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
+      const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+      await sendQuote(owner.agent, projectId, quote.body.quote.id);
+
+      const before = await owner.agent.get("/api/dashboard/pipeline");
+      const beforeQuoted = stage(before.body.pipeline, "quoted");
+
+      await owner.agent.post(`/api/projects/${projectId}/transition`).send({ toStatus: "CANCELLED" });
+
+      const after = await owner.agent.get("/api/dashboard/pipeline");
+      expect(stage(after.body.pipeline, "quoted").count).toBe(beforeQuoted.count - 1);
+      // มูลค่าของงานที่ยกเลิกต้องหายออกจากท่อ ไม่ค้างอยู่ให้ดูเหมือนยังลุ้นได้
+      expect(stage(after.body.pipeline, "quoted").value).toBeLessThan(beforeQuoted.value as number);
+      expect(after.body.pipeline.lost.cancelledCount).toBe(before.body.pipeline.lost.cancelledCount + 1);
+    });
+
+    it("ไม่มีขั้นลงนามสัญญาแยก — เหลือ 4 ขั้น (ลงนามแล้วยังเป็น APPROVED นับในลูกค้ายอมรับ)", async () => {
+      const res = await owner.agent.get("/api/dashboard/pipeline");
+      expect(res.body.pipeline.stages.map((s: { key: string }) => s.key)).toEqual(["lead", "quoted", "accepted", "completed"]);
+    });
+
+    it("นับใบเสนอราคาที่ส่งไปเกิน 14 วันแล้วลูกค้ายังไม่ตอบเป็น 'รอนาน' ในขั้นเสนอราคา", async () => {
+      const projectRes = await owner.agent.post("/api/projects").send({ name: "ท่อขาย-รอนาน" });
+      const projectId = projectRes.body.project.id as string;
+      createdProjectIds.push(projectId);
+      await owner.agent
+        .post(`/api/projects/${projectId}/boq/items`)
+        .send({ categoryId: itemCategoryId, materialId, quantity: 1 });
+      const quote = await owner.agent.post(`/api/projects/${projectId}/quotes`);
+      await sendQuote(owner.agent, projectId, quote.body.quote.id);
+
+      const fresh = await owner.agent.get("/api/dashboard/pipeline");
+      const before = stage(fresh.body.pipeline, "quoted").staleCount;
+
+      // ส่งไปเมื่อ 15 วันก่อน → นับ · ขั้นอื่นไม่มีตัวนับนี้
+      await prisma.quote.update({
+        where: { id: quote.body.quote.id },
+        data: { sentAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000) },
+      });
+      const stale = await owner.agent.get("/api/dashboard/pipeline");
+      expect(stage(stale.body.pipeline, "quoted").staleCount).toBe(before + 1);
+      expect(stage(stale.body.pipeline, "lead").staleCount).toBe(0);
+      expect(stage(stale.body.pipeline, "accepted").staleCount).toBe(0);
+
+      // ลูกค้าตอบแล้ว (ยอมรับ) → ออกจากขั้นเสนอราคา ไม่นับรอนานอีก
+      await owner.agent
+        .post(`/api/projects/${projectId}/quotes/${quote.body.quote.id}/transition`)
+        .send({ toStatus: "ACCEPTED" });
+      const answered = await owner.agent.get("/api/dashboard/pipeline");
+      expect(stage(answered.body.pipeline, "quoted").staleCount).toBe(before);
+    });
+
+    it("ขั้นคำขอไม่มีมูลค่า (null ไม่ใช่ 0)", async () => {
+      const res = await owner.agent.get("/api/dashboard/pipeline");
+      expect(stage(res.body.pipeline, "lead").value).toBeNull();
+    });
+
+    it("ห้ามลูกค้าเปิดดูท่อขาย", async () => {
+      const customer = await createCustomerDirect("test-dashboard-pipeline-role");
+      createdUserIds.push(customer.userId);
+      const res = await customer.agent.get("/api/dashboard/pipeline");
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("pending work — สัญญา/งวด", () => {
+    it("สัญญาที่ยังไม่ลงนามขึ้นในงานค้าง (โครงการละแถว) แล้วย้ายไปหมวดงวดไม่มีวันเมื่อลงนาม", async () => {
+      const { projectId, contractId } = await contractForCash("งานค้าง-สัญญา");
+
+      const before = await owner.agent.get("/api/dashboard/pending-work");
+      const unsigned = before.body.pendingWork.unsignedContracts.find(
+        (g: { project: { id: string } }) => g.project.id === projectId,
+      );
+      expect(unsigned).toBeDefined();
+      expect(unsigned.contracts.map((c: { id: string }) => c.id)).toContain(contractId);
+      // ยังไม่ลงนาม = ยังไม่อยู่หมวดงวด (รับเงินไม่ได้อยู่แล้ว ไม่ต้องเตือนตั้งวัน)
+      expect(
+        before.body.pendingWork.missingDueDates.some((r: { contract: { id: string } }) => r.contract.id === contractId),
+      ).toBe(false);
+
+      await owner.agent.post(`/api/projects/${projectId}/contracts/${contractId}/sign`);
+      const signed = await owner.agent.get("/api/dashboard/pending-work");
+      expect(
+        signed.body.pendingWork.unsignedContracts.some((g: { project: { id: string } }) => g.project.id === projectId),
+      ).toBe(false);
+      const missing = signed.body.pendingWork.missingDueDates.find(
+        (r: { contract: { id: string } }) => r.contract.id === contractId,
+      );
+      expect(missing).toBeDefined();
+      expect(missing.missingCount).toBe(7);
+      expect(missing.installmentCount).toBe(7);
+      expect(missing.remaining).toBeGreaterThan(0);
+
+      // ออกสัญญาฉบับสำรองเพิ่มหลังลงนามไปแล้ว → ไม่ใช่งานค้าง (เซ็นฉบับหนึ่งไปแล้ว ที่เหลือคือของที่ไม่ได้ใช้)
+      await owner.agent.post(`/api/projects/${projectId}/contracts`).send({});
+      const spare = await owner.agent.get("/api/dashboard/pending-work");
+      expect(
+        spare.body.pendingWork.unsignedContracts.some((g: { project: { id: string } }) => g.project.id === projectId),
+      ).toBe(false);
+
+      // ตั้งวันครบทุกงวดแล้ว → หลุดจากหมวด
+      await prisma.contractInstallment.updateMany({ where: { contractId }, data: { dueOn: new Date("2099-01-01") } });
+      const dated = await owner.agent.get("/api/dashboard/pending-work");
+      expect(
+        dated.body.pendingWork.missingDueDates.some((r: { contract: { id: string } }) => r.contract.id === contractId),
+      ).toBe(false);
+    });
+  });
+
+  describe("pending work — คำขอที่ติดต่อแล้ว / VO", () => {
+    it("คำขอที่ติดต่อแล้วแต่ยังไม่เสนอราคาขึ้นในงานค้าง และหายเมื่อไม่ใช่ CONTACTED แล้ว", async () => {
+      const lead = await prisma.lead.create({
+        data: { name: "งานค้าง-คำขอติดต่อแล้ว", phone: "0800000000", serviceType: "ก่อสร้าง", status: "CONTACTED" },
+      });
+      try {
+        const res = await owner.agent.get("/api/dashboard/pending-work");
+        const row = res.body.pendingWork.contactedLeads.find((r: { lead: { id: string } }) => r.lead.id === lead.id);
+        expect(row).toBeDefined();
+        expect(row.project).toBeNull();
+        expect(typeof row.lastActivityAt).toBe("string");
+
+        await prisma.lead.update({ where: { id: lead.id }, data: { status: "QUOTED" } });
+        const after = await owner.agent.get("/api/dashboard/pending-work");
+        expect(after.body.pendingWork.contactedLeads.some((r: { lead: { id: string } }) => r.lead.id === lead.id)).toBe(false);
+      } finally {
+        await prisma.lead.delete({ where: { id: lead.id } });
+      }
+    });
+
+    it("คำขอติดต่อแล้วที่มีโครงการ: ขึ้นเฉพาะตอนโครงการยังเป็นร่าง (โครงการเดินต่อแล้ว = ไม่ใช่งานค้างของคำขอ)", async () => {
+      const projectRes = await owner.agent.post("/api/projects").send({ name: "งานค้าง-คำขอมีโครงการ" });
+      const projectId = projectRes.body.project.id as string;
+      createdProjectIds.push(projectId);
+      const lead = await prisma.lead.create({
+        data: { name: "งานค้าง-คำขอมีโครงการ", phone: "0800000001", serviceType: "ก่อสร้าง", status: "CONTACTED" },
+      });
+      try {
+        await prisma.project.update({ where: { id: projectId }, data: { leadId: lead.id } });
+        const draft = await owner.agent.get("/api/dashboard/pending-work");
+        const row = draft.body.pendingWork.contactedLeads.find((r: { lead: { id: string } }) => r.lead.id === lead.id);
+        expect(row?.project?.id).toBe(projectId);
+
+        // ข้อมูลรุ่นเก่า: คำขอค้าง CONTACTED แต่โครงการไปไกลแล้ว → ไม่นับ
+        await prisma.project.update({ where: { id: projectId }, data: { status: "CANCELLED" } });
+        const moved = await owner.agent.get("/api/dashboard/pending-work");
+        expect(moved.body.pendingWork.contactedLeads.some((r: { lead: { id: string } }) => r.lead.id === lead.id)).toBe(false);
+      } finally {
+        await prisma.project.update({ where: { id: projectId }, data: { leadId: null } });
+        await prisma.lead.delete({ where: { id: lead.id } });
+      }
+    });
+
+    it("ใบงานเพิ่ม-ลดที่ส่งลูกค้าแล้วขึ้นในงานค้าง ร่าง/อนุมัติแล้วไม่ขึ้น", async () => {
+      const { projectId, contractId } = await signedContractForCash("งานค้าง-VO");
+      const version = await prisma.projectVersion.findFirstOrThrow({ where: { projectId } });
+      const vo = await prisma.changeOrder.create({
+        data: {
+          contractId,
+          projectId,
+          seq: 1,
+          docNo: `VO-TEST-${Date.now()}`,
+          status: "SENT",
+          title: "เพิ่มห้องเก็บของ",
+          fromVersionId: version.id,
+          toVersionId: version.id,
+          lines: [],
+          addAmount: 1000,
+          deductAmount: 0,
+          adjustAmount: 0,
+          netBeforeVat: 1000,
+          vatAmount: 70,
+          totalAmount: 1070,
+          sentAt: new Date(),
+        },
+      });
+      const res = await owner.agent.get("/api/dashboard/pending-work");
+      const row = res.body.pendingWork.awaitingChangeOrders.find(
+        (r: { changeOrder: { id: string } }) => r.changeOrder.id === vo.id,
+      );
+      expect(row).toBeDefined();
+      expect(Number(row.changeOrder.totalAmount)).toBe(1070);
+
+      await prisma.changeOrder.update({ where: { id: vo.id }, data: { status: "APPROVED" } });
+      const after = await owner.agent.get("/api/dashboard/pending-work");
+      expect(
+        after.body.pendingWork.awaitingChangeOrders.some((r: { changeOrder: { id: string } }) => r.changeOrder.id === vo.id),
+      ).toBe(false);
+    });
+
+  });
+
+  describe("contract cash", () => {
+    it("สัญญาที่ลงนามแล้วขึ้นกระดานเงินพร้อมจำนวนงวดที่ยังไม่ตั้งกำหนดชำระ", async () => {
+      const { projectId, contractId } = await signedContractForCash("กระดานเงิน-ลงนาม");
+
+      const res = await owner.agent.get("/api/dashboard/contract-cash");
+      const row = res.body.cash.rows.find(
+        (r: { contract: { id: string } }) => r.contract.id === contractId,
+      );
+      expect(row).toBeDefined();
+      expect(row.project.id).toBe(projectId);
+      expect(row.amount).toBeGreaterThan(0);
+      expect(row.installmentCount).toBe(7);
+      // ตั้งกำหนดชำระเป็นงานที่พนักงานต้องกดเอง ระบบไม่เดาให้ — ตอนเพิ่งลงนามจึงยังไม่มีสักงวด
+      expect(row.installmentsWithoutDueDate).toBe(7);
+      expect(row.paidAmount).toBe(0);
+      expect(row.remaining).toBeCloseTo(row.amount, 2);
+      expect(row.overdueCount).toBe(0);
+    });
+
+    it("รับเงินแล้วยอดคงเหลือลด และเงินเข้าบัญชีจริงต่างจากยอดที่ถือว่าชำระเมื่อมีหัก ณ ที่จ่าย", async () => {
+      const { projectId, contractId } = await signedContractForCash("กระดานเงิน-รับเงิน");
+      const view = await owner.agent.get(`/api/projects/${projectId}/contracts/${contractId}/payments`);
+      const first = view.body.installments[0];
+
+      await owner.agent
+        .post(`/api/projects/${projectId}/contracts/${contractId}/installments/${first.id}/payments`)
+        .send({ paidOn: todayIso(), amount: Number(first.amount), withholdingAmount: 100 });
+
+      const res = await owner.agent.get("/api/dashboard/contract-cash");
+      const row = res.body.cash.rows.find(
+        (r: { contract: { id: string } }) => r.contract.id === contractId,
+      );
+      expect(row.paidAmount).toBeCloseTo(Number(first.amount), 2);
+      expect(row.receivedAmount).toBeCloseTo(Number(first.amount) - 100, 2);
+      expect(row.remaining).toBeCloseTo(row.amount - Number(first.amount), 2);
+      // งวดที่รับครบแล้วไม่นับว่า "ยังไม่ตั้งกำหนด" อีก
+      expect(row.installmentsWithoutDueDate).toBe(6);
+    });
+
+    it("งวดที่เลยกำหนดและยังไม่ได้เงิน ขึ้นเป็นยอดค้างของสัญญานั้น", async () => {
+      const { projectId, contractId } = await signedContractForCash("กระดานเงิน-ค้างชำระ");
+      const view = await owner.agent.get(`/api/projects/${projectId}/contracts/${contractId}/payments`);
+      const first = view.body.installments[0];
+      await owner.agent
+        .patch(`/api/projects/${projectId}/contracts/${contractId}/installments/${first.id}/due`)
+        .send({ dueOn: isoDaysAgo(9) });
+
+      const res = await owner.agent.get("/api/dashboard/contract-cash");
+      const row = res.body.cash.rows.find(
+        (r: { contract: { id: string } }) => r.contract.id === contractId,
+      );
+      expect(row.overdueCount).toBe(1);
+      expect(row.overdueAmount).toBeCloseTo(Number(first.amount), 2);
+      expect(row.installmentsWithoutDueDate).toBe(6);
+    });
+
+    it("สัญญาที่ยังไม่ลงนามอยู่คนละก้อน ไม่ปนกับยอดที่เก็บเงินได้", async () => {
+      const { projectId, contractId } = await contractForCash("กระดานเงิน-ยังไม่เซ็น");
+
+      const res = await owner.agent.get("/api/dashboard/contract-cash");
+      expect(
+        res.body.cash.rows.some((r: { contract: { id: string } }) => r.contract.id === contractId),
+      ).toBe(false);
+      const pending = res.body.cash.unsignedContracts.find(
+        (c: { id: string }) => c.id === contractId,
+      );
+      expect(pending).toBeDefined();
+      expect(pending.projectId).toBe(projectId);
+    });
+
+    it("ห้ามลูกค้าเปิดดูกระดานเงิน", async () => {
+      const customer = await createCustomerDirect("test-dashboard-cash-role");
+      createdUserIds.push(customer.userId);
+      const res = await customer.agent.get("/api/dashboard/contract-cash");
+      expect(res.status).toBe(403);
+    });
+  });
+
 });

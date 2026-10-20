@@ -13,6 +13,7 @@ import {
   type TwoFactorStatus,
 } from "../lib/twofactor-api";
 import { Button } from "./Button";
+import { PanelSkeleton } from "./Skeleton";
 
 // การ์ดยืดเต็มคอลัมน์ที่มันอยู่ — เดิม max-w-lg ตรึงไว้ 512px ทำให้ในโครงสองคอลัมน์เหลือที่ว่างซ้อนอีกชั้น
 const CARD = "bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-3";
@@ -326,8 +327,16 @@ function NotEnabledPanel({ busy, onStart }: Readonly<{ busy: boolean; onStart: (
   );
 }
 
-export function TwoFactorSettings() {
+/**
+ * collapsible = แถวในหมวด "ความปลอดภัย" ของหน้าบัญชี: พับเหลือบรรทัดสถานะ กด "จัดการ" แล้วค่อยกาง
+ * (ระหว่างตั้งค่า/เพิ่งได้รหัสสำรอง กางค้างเสมอ ไม่ให้ข้อมูลสำคัญถูกพับหายไปกลางทาง)
+ */
+export function TwoFactorSettings({
+  collapsible = false,
+  defaultOpen = false,
+}: Readonly<{ collapsible?: boolean; defaultOpen?: boolean }> = {}) {
   const { refresh } = useAuth();
+  const [open, setOpen] = useState(defaultOpen);
   const [status, setStatus] = useState<TwoFactorStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -480,13 +489,16 @@ export function TwoFactorSettings() {
       />
     );
   } else if (status === null) {
-    body = <p className="text-sm text-slate-500">กำลังโหลด...</p>;
+    body = <PanelSkeleton lines={3} />;
   } else if (status.enabled) {
     body = (
       <div className="flex flex-col gap-3">
-        <p className="flex items-center gap-1.5 text-sm text-emerald-700">
-          <Check size={15} /> เปิดใช้งานอยู่ · รหัสสำรองเหลือ {status.backupCodesRemaining} ชุด
-        </p>
+        {/* แบบแถวมีสถานะในหัวแถวแล้ว ไม่ต้องพูดซ้ำ */}
+        {!collapsible && (
+          <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+            <Check size={15} /> เปิดใช้งานอยู่ · รหัสสำรองเหลือ {status.backupCodesRemaining} ชุด
+          </p>
+        )}
 
         {showAddDevice ? (
           <AddDevicePanel
@@ -525,7 +537,7 @@ export function TwoFactorSettings() {
           />
         ) : (
           <div>
-            <Button size="sm" variant="danger" onClick={() => setShowDisable(true)}>
+            <Button size="sm" variant="dangerQuiet" onClick={() => setShowDisable(true)}>
               ปิด 2FA
             </Button>
           </div>
@@ -534,6 +546,44 @@ export function TwoFactorSettings() {
     );
   } else {
     body = <NotEnabledPanel busy={busy} onStart={beginSetup} />;
+  }
+
+  if (collapsible) {
+    const expanded = open || backupCodes != null || setup != null;
+    let summary = "กำลังโหลด...";
+    if (loadError) summary = loadError;
+    else if (status?.enabled) summary = `รหัสสำรองเหลือ ${status.backupCodesRemaining} ชุด`;
+    else if (status) summary = "ยังไม่เปิด — แนะนำให้เปิด กันคนที่รู้รหัสผ่านเข้าแทนคุณ";
+    return (
+      <div className="flex flex-col gap-3 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <ShieldCheck size={18} className="mt-0.5 shrink-0 text-brand" />
+            <div className="min-w-0">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-800">
+                ยืนยันตัวตน 2 ชั้น (2FA) {status && <StatusBadge enabled={status.enabled} />}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">{summary}</p>
+            </div>
+          </div>
+          {status && !backupCodes && !setup && (
+            <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={expanded}>
+              {expanded ? "ซ่อน" : status.enabled ? "จัดการ" : "เปิดใช้"}
+            </Button>
+          )}
+        </div>
+        {expanded && (
+          <div className="flex flex-col gap-3 pl-[30px]">
+            <p className="text-xs text-slate-500">
+              เวลาเข้าสู่ระบบ นอกจากรหัสผ่าน ต้องกรอกรหัส 6 หลักจากแอปในมือถือของคุณด้วย — ถึงจะมีคนรู้รหัสผ่าน
+              ก็เข้าระบบแทนคุณไม่ได้
+            </p>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            {body}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (

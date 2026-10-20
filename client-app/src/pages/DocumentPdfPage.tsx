@@ -1,16 +1,48 @@
+import { billingDocLabel } from "@systemboq/shared-types";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { ApiError, fetchPdfObjectUrl } from "../lib/api";
-import { pdfApiPath, pdfDocTitle, type PdfDocKind } from "../lib/document-pdf";
+import { billingDocApiPath, changeOrderApiPath, pdfApiPath, pdfDocTitle, type PdfDocKind } from "../lib/document-pdf";
 import { getMyQuote, listMyContracts } from "../lib/my-api";
+import { PdfPaperSkeleton } from "../components/Skeleton";
 
 /** ชื่อในแท็บตอนยังไม่รู้ว่าเป็นเอกสารอะไร + ค่าที่คืนกลับตอนออกจากหน้า */
 const BASE_TITLE = "Awarin Engineering — รับออกแบบและสร้างบ้าน";
 
 interface DocMeta {
-  docNo: string;
+  /** ชื่อบนแท็บ เช่น "สัญญา CT-2026-0001" / "ใบเสร็จรับเงิน RC-2026-0003" */
+  title: string;
   projectName: string;
+}
+
+/** "billing" = ใบแจ้งหนี้/ใบเสร็จของงวดเงิน · "changeOrder" = ใบงานเพิ่ม-ลด (ทั้งคู่อยู่ใต้สัญญา) */
+type ViewerKind = PdfDocKind | "billing" | "changeOrder";
+
+/** เลขที่เอกสาร + ชื่อโครงการ สำหรับชื่อแท็บ — ยิงพร้อมกับการสร้างไฟล์ */
+async function loadDocMeta(kind: ViewerKind, contractId: string, docId: string): Promise<DocMeta | null> {
+  if (kind === "quote") {
+    const { quote } = await getMyQuote(docId);
+    return { title: pdfDocTitle(kind, quote.quoteNo), projectName: quote.project.name };
+  }
+  const { contracts } = await listMyContracts();
+  if (kind === "contract") {
+    const found = contracts.find((c) => c.id === docId);
+    return found ? { title: pdfDocTitle(kind, found.contractNo), projectName: found.project.name } : null;
+  }
+  const contract = contracts.find((c) => c.id === contractId);
+  if (kind === "changeOrder") {
+    const co = contract?.changeOrders.find((c) => c.id === docId);
+    return contract && co ? { title: `ใบงานเพิ่ม-ลด ${co.docNo}`, projectName: contract.project.name } : null;
+  }
+  // ใบคืนเงินประกันผลงานไม่ผูกงวด — อยู่ในส่วน retention ของสัญญา
+  const doc = [
+    ...(contract?.payment?.installments.flatMap((i) => i.documents) ?? []),
+    ...(contract?.payment?.retention?.documents ?? []),
+  ].find((d) => d.id === docId);
+  return contract && doc
+    ? { title: `${billingDocLabel(doc)} ${doc.docNo}`, projectName: contract.project.name }
+    : null;
 }
 
 /**
@@ -34,8 +66,8 @@ interface DocMeta {
  * (ฝัง iframe ไปที่ URL ของ API ตรง ๆ ไม่ได้ — เซิร์ฟเวอร์ส่ง X-Frame-Options: SAMEORIGIN และ
  *  CSP frame-ancestors 'self' เบราว์เซอร์จึงบล็อก จำเป็นต้องโหลดเป็น blob แบบนี้)
  */
-export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
-  const { docId = "" } = useParams();
+export function DocumentPdfPage({ kind }: Readonly<{ kind: ViewerKind }>) {
+  const { docId = "", contractId = "" } = useParams();
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<DocMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +79,15 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
     (async () => {
       try {
         // ยิงพร้อมกัน: การสร้าง PDF ใช้เวลาหลายวินาที ไม่ควรต่อคิวหลังข้อมูลหัวเรื่อง
-        const [info, objectUrl] = await Promise.all([
-          kind === "quote" ? getMyQuote(docId) : listMyContracts(),
-          fetchPdfObjectUrl(pdfApiPath(kind, docId)),
+        const [found, objectUrl] = await Promise.all([
+          loadDocMeta(kind, contractId, docId),
+          fetchPdfObjectUrl(
+            kind === "billing"
+              ? billingDocApiPath(contractId, docId)
+              : kind === "changeOrder"
+                ? changeOrderApiPath(contractId, docId)
+                : pdfApiPath(kind, docId),
+          ),
         ]);
 
         // StrictMode ของ dev เรียก effect สองรอบ — ถ้ารอบนี้ถูกยกเลิกไปแล้วต้องคืน blob ทิ้ง
@@ -59,19 +97,7 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
         }
         created = objectUrl;
 
-        const found =
-          kind === "quote"
-            ? (info as Awaited<ReturnType<typeof getMyQuote>>).quote
-            : (info as Awaited<ReturnType<typeof listMyContracts>>).contracts.find(
-                (c) => c.id === docId,
-              );
-
-        if (found) {
-          setMeta({
-            docNo: "quoteNo" in found ? found.quoteNo : found.contractNo,
-            projectName: found.project.name,
-          });
-        }
+        if (found) setMeta(found);
         setPdfUrl(objectUrl);
       } catch (err) {
         if (!cancelled) {
@@ -84,9 +110,9 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [docId, kind]);
+  }, [docId, contractId, kind]);
 
-  const title = meta ? pdfDocTitle(kind, meta.docNo) : null;
+  const title = meta?.title ?? null;
   const backTo = kind === "quote" ? `/my/quotes/${docId}` : "/my/contracts";
 
   useEffect(() => {
@@ -125,11 +151,7 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: PdfDocKind }>) {
         </div>
       )}
 
-      {!error && !pdfUrl && (
-        <div className="flex h-full items-center justify-center">
-          <p className="text-sm text-slate-500">กำลังเตรียมไฟล์ PDF...</p>
-        </div>
-      )}
+      {!error && !pdfUrl && <PdfPaperSkeleton />}
 
       {pdfUrl && (
         <iframe src={pdfUrl} title={title ?? "เอกสาร PDF"} className="h-full w-full border-0" />

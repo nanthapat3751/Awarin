@@ -1,22 +1,46 @@
 import { Router, type Request } from "express";
+import multer from "multer";
 import { z } from "zod";
 
 import { requireAuth } from "../../middleware/auth";
 import { requireRole } from "../../middleware/rbac";
+import { sendXlsx } from "../../lib/excel/send-xlsx";
+import { ImportFileError } from "../../lib/excel/boq-import";
+import { rebarSchedule } from "../../lib/rebar-cutting";
+import { structuralCompare } from "../../lib/structural-compare";
+import { getTakeoffRules } from "../../lib/takeoff-rules";
+import { exportInternalBoq, exportRebarBbs } from "./boq-export.service";
+import { buildImportTemplate, commitBoqImport, commitBoqImportSchema, previewBoqImport } from "./boq-import.service";
 import { applyCatalogPrices, compareVersions, getPriceDrift, keepCurrentPrices } from "./boq-review.service";
-import { createBoqItemSchema, updateBoqItemSchema } from "./boq.schemas";
+import {
+  applyTakeoffSchema,
+  createBoqItemSchema,
+  createBoqItemsSchema,
+  memberKeySchema,
+  recomputeMembersSchema,
+  replaceMemberSchema,
+  updateBoqItemSchema,
+} from "./boq.schemas";
 import {
   BoqError,
   addBoqItem,
+  addBoqItems,
+  applyTakeoffRows,
   deleteBoqItem,
+  deleteStructuralMember,
   getBoqState,
-  getMaterialSummary,
+  getLatestVersion,
+  listStructuralMembers,
+  loadProjectOrThrow,
+  recomputeStructuralMembers,
+  replaceStructuralMember,
   reorderBoqItems,
   updateBoqItem,
 } from "./boq.service";
 
 type ProjectParams = { projectId: string };
 type ItemParams = { projectId: string; itemId: string };
+type MemberParams = { projectId: string; key: string };
 
 export const boqRouter = Router({ mergeParams: true });
 
@@ -35,17 +59,107 @@ boqRouter.get("/", async (req: Request<ProjectParams>, res) => {
   }
 });
 
-// รายงานสรุปปริมาณวัสดุรวมทั้งโครงการ (ถอดปริมาณวัสดุ) — ต้นทุนวัสดุ ฝั่ง staff เท่านั้น
-boqRouter.get("/material-summary", async (req: Request<ProjectParams>, res) => {
+// เทียบเหล็กเสริม ชุดเสนอราคา (ใน BOQ) กับชุดสั่งตัด ของเวอร์ชันล่าสุด — ฝั่ง staff เท่านั้น ไม่ออกไปเอกสารลูกค้า
+boqRouter.get("/structural-compare", async (req: Request<ProjectParams>, res) => {
   try {
-    const summary = await getMaterialSummary(req.params.projectId);
-    res.json(summary);
+    await loadProjectOrThrow(req.params.projectId);
+    const version = await getLatestVersion(req.params.projectId);
+    res.json({ compare: await structuralCompare(version.id, await getTakeoffRules()) });
   } catch (err) {
     if (err instanceof BoqError) {
       res.status(err.status).json({ error: err.message });
       return;
     }
     throw err;
+  }
+});
+
+// Excel ฉบับภายใน (มีราคาทุน + รายการสั่งซื้อ) ของเวอร์ชันล่าสุด — สิทธิ์เดียวกับหน้า BOQ (OWNER/ADMIN)
+boqRouter.get("/export.xlsx", async (req: Request<ProjectParams>, res) => {
+  try {
+    const file = await exportInternalBoq(req.params.projectId);
+    sendXlsx(res, file.buffer, file.fileName);
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// ─────────────── นำเข้าจาก Excel (ดู boq-import.service.ts) ───────────────
+
+// ไฟล์อยู่ในหน่วยความจำเท่านั้น ไม่เขียนลงดิสก์ — อ่านเสร็จทิ้ง · 5 MB พอสำหรับ BOQ หลายพันบรรทัด
+// และกันไฟล์ zip ใหญ่ ๆ ที่แตกแล้วกินหน่วยความจำเซิร์ฟเวอร์
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (/\.xlsx$/i.test(file.originalname)) cb(null, true);
+    else cb(new Error("รองรับเฉพาะไฟล์ Excel นามสกุล .xlsx (ถ้าเป็น .xls ให้บันทึกเป็น .xlsx ก่อน)"));
+  },
+});
+
+boqRouter.get("/import/template.xlsx", async (_req, res) => {
+  sendXlsx(res, await buildImportTemplate(), "แม่แบบนำเข้า-BOQ.xlsx");
+});
+
+boqRouter.post("/import/preview", (req: Request<ProjectParams>, res) => {
+  importUpload.single("file")(req, res, async (err: unknown) => {
+    if (err) {
+      const tooBig = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE";
+      res.status(400).json({ error: tooBig ? "ไฟล์ใหญ่เกิน 5 MB" : err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ" });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: "ไม่พบไฟล์ที่อัปโหลด" });
+      return;
+    }
+    const body = (req.body ?? {}) as { defaultCategoryId?: unknown; priceSet?: unknown; sheets?: unknown };
+    const defaultCategoryId =
+      typeof body.defaultCategoryId === "string" && body.defaultCategoryId.length > 0 ? body.defaultCategoryId : null;
+    // ตัวเลือกจากหน้าพรีวิว (ช่องฟอร์ม): ชุดราคา · ชีตที่ติ๊กไว้ (JSON array ของชื่อชีต) — ผิดรูปแบบ = ใช้ที่ระบบเลือกให้
+    const priceSet = typeof body.priceSet === "string" && /^\d{1,2}$/.test(body.priceSet) ? Number(body.priceSet) : undefined;
+    let sheets: string[] | null = null;
+    if (typeof body.sheets === "string" && body.sheets.length > 0 && body.sheets.length <= 10_000) {
+      try {
+        const list: unknown = JSON.parse(body.sheets);
+        if (Array.isArray(list) && list.every((x) => typeof x === "string")) sheets = list as string[];
+      } catch {
+        sheets = null;
+      }
+    }
+    try {
+      res.json(await previewBoqImport(req.params.projectId, req.file.buffer, defaultCategoryId, { priceSet, sheets }));
+    } catch (e) {
+      if (e instanceof ImportFileError) {
+        res.status(400).json({ error: e.message });
+        return;
+      }
+      if (e instanceof BoqError) {
+        res.status(e.status).json({ error: e.message });
+        return;
+      }
+      throw e;
+    }
+  });
+});
+
+boqRouter.post("/import", async (req: Request<ProjectParams>, res) => {
+  const parsed = commitBoqImportSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง" });
+    return;
+  }
+  try {
+    res.status(201).json(await commitBoqImport(req.params.projectId, parsed.data, req.user!.id));
+  } catch (e) {
+    if (e instanceof BoqError) {
+      res.status(e.status).json({ error: e.message });
+      return;
+    }
+    throw e;
   }
 });
 
@@ -130,6 +244,143 @@ boqRouter.post("/items", async (req: Request<ProjectParams>, res) => {
   try {
     const result = await addBoqItem(req.params.projectId, parsed.data, req.user!.id);
     res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// ปุ่ม "เพิ่มหลายรายการ" — ดู addBoqItems
+boqRouter.post("/items/batch", async (req: Request<ProjectParams>, res) => {
+  const parsed = createBoqItemsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง",
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+  try {
+    const result = await addBoqItems(req.params.projectId, parsed.data.items, req.user!.id);
+    res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// ตัวคิดชิ้นส่วนโครงสร้าง: เติมแถวใบถอดแบบลงหลายบรรทัดพร้อมกัน — ดู applyTakeoffRows
+boqRouter.post("/takeoff/apply", async (req: Request<ProjectParams>, res) => {
+  const parsed = applyTakeoffSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง", details: parsed.error.flatten() });
+    return;
+  }
+  try {
+    const result = await applyTakeoffRows(req.params.projectId, parsed.data, req.user!.id);
+    res.json(result);
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// แผนตัดเหล็กหน้างาน (Phase 3 ข้อ 3a) — ชุดสั่งตัด เทียบเส้น 10/12 ม. · ฝั่ง staff เท่านั้น
+boqRouter.get("/rebar-cutting", async (req: Request<ProjectParams>, res) => {
+  try {
+    await loadProjectOrThrow(req.params.projectId);
+    const version = await getLatestVersion(req.params.projectId);
+    res.json({ cutting: (await rebarSchedule(version.id, await getTakeoffRules())).cutting });
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// Excel รายการสั่งเหล็กหน้างาน (ข้อ 3d) — สรุปขนาด · รายชิ้นส่วน · แผนตัด
+boqRouter.get("/rebar-bbs.xlsx", async (req: Request<ProjectParams>, res) => {
+  try {
+    const file = await exportRebarBbs(req.params.projectId);
+    sendXlsx(res, file.buffer, file.fileName);
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// ชิ้นส่วนโครงสร้างที่ลงไว้ (Phase 2 ข้อ 3c) — รายการ · แก้ (ลงทับด้วย key เดิม) · ลบพร้อมแถวของมัน
+boqRouter.get("/structural-members", async (req: Request<ProjectParams>, res) => {
+  try {
+    await loadProjectOrThrow(req.params.projectId);
+    res.json({ members: await listStructuralMembers(req.params.projectId) });
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// คิดทุกชิ้นใหม่ด้วยชุดเสนอราคาปัจจุบัน (ข้อ 3b) — apply=false พรีวิวก่อน-หลัง ไม่เขียนอะไร
+boqRouter.post("/structural-members/recompute", async (req: Request<ProjectParams>, res) => {
+  const parsed = recomputeMembersSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
+    return;
+  }
+  try {
+    res.json({ recompute: await recomputeStructuralMembers(req.params.projectId, parsed.data.apply, req.user!.id) });
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+boqRouter.put("/structural-members/:key", async (req: Request<MemberParams>, res) => {
+  const key = memberKeySchema.safeParse(req.params.key);
+  const parsed = replaceMemberSchema.safeParse(req.body);
+  if (!key.success || !parsed.success) {
+    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง", details: parsed.success ? undefined : parsed.error.flatten() });
+    return;
+  }
+  try {
+    res.json(await replaceStructuralMember(req.params.projectId, key.data, parsed.data, req.user!.id));
+  } catch (err) {
+    if (err instanceof BoqError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+boqRouter.delete("/structural-members/:key", async (req: Request<MemberParams>, res) => {
+  const key = memberKeySchema.safeParse(req.params.key);
+  if (!key.success) {
+    res.status(400).json({ error: "ข้อมูลไม่ถูกต้อง" });
+    return;
+  }
+  try {
+    res.json(await deleteStructuralMember(req.params.projectId, key.data, req.user!.id));
   } catch (err) {
     if (err instanceof BoqError) {
       res.status(err.status).json({ error: err.message });

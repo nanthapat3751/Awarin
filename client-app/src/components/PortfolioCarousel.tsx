@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -19,6 +20,12 @@ const EDGE_FADE =
 
 function CarouselCard({ item }: Readonly<{ item: PortfolioDto }>) {
   const cover = item.images?.[0];
+  // แสงวิ่งใต้รูประหว่างรอ แล้วจางเข้า · พังก็ถือว่าจบ · รูปในแคชอาจเสร็จก่อนผูก onLoad
+  const [done, setDone] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    setDone(Boolean(imgRef.current?.complete));
+  }, [cover]);
   return (
     <Link
       to={`/portfolio/${item.id}`}
@@ -29,14 +36,20 @@ function CarouselCard({ item }: Readonly<{ item: PortfolioDto }>) {
       {/* การ์ดแนวตั้ง (portrait) — สูงเด่นแบบผลงานสถาปัตย์ */}
       <div className="relative overflow-hidden rounded-2xl bg-slate-100 aspect-4/5">
         {cover ? (
-          <img
-            src={cover}
-            alt={item.title}
-            draggable={false}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
+          <>
+            {!done && <div aria-hidden className="skeleton absolute inset-0 rounded-none" />}
+            <img
+              ref={imgRef}
+              src={cover}
+              alt={item.title}
+              draggable={false}
+              loading="lazy"
+              decoding="async"
+              onLoad={() => setDone(true)}
+              onError={() => setDone(true)}
+              className={`fade-image w-full h-full object-cover group-hover:scale-105 ${done ? "opacity-100" : "opacity-0"}`}
+            />
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-300 text-sm select-none">
             รูปผลงาน

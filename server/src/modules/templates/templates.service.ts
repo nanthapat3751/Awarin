@@ -1,3 +1,5 @@
+import type { TileCalcConfig } from "@systemboq/shared-types";
+
 import { BOQ_ITEM_ORDER } from "../../lib/boq-order";
 import { writeAuditLog } from "../../lib/audit-log";
 import { prisma } from "../../lib/prisma";
@@ -47,6 +49,8 @@ export interface TemplateItemSnapshot {
   note: string | null;
   // สูตรวัสดุย่อยที่ติดมากับบรรทัด (ว่าง/ไม่มี = วัสดุก้อนเดียว หรือแม่แบบเก่าที่บันทึกก่อนมีฟีเจอร์นี้)
   components?: TemplateComponentSnapshot[];
+  // ค่าตัวคิดกระเบื้อง — ไปถึงโครงการปลายทางแล้วคิดจากพื้นที่ของบรรทัดที่นั่น (ไม่มีขนาดห้องของแบบเดิม)
+  tileCalc?: TileCalcConfig | null;
 }
 
 function isTemplateStructure(value: unknown): value is TemplateItemSnapshot[] {
@@ -304,9 +308,10 @@ export async function saveProjectAsTemplate(
     laborUnitPrice: Number(item.laborUnitPrice),
     quantity: Number(item.quantity),
     // เก็บสูตรถอดปริมาณติดไปด้วย เพื่อให้แม่แบบ "คิดปริมาณตามพื้นที่" ได้เองตอนนำไปใช้ (Phase 3)
-    qtyBasis: item.qtyBasis,
+    // ใบถอดแบบเป็นของแบบหลังนี้เท่านั้น (ขนาดชิ้นส่วนจริงของโครงการ) — แม่แบบเก็บเป็นปริมาณคงที่
+    qtyBasis: item.qtyBasis === "SHEET" ? "MANUAL" : item.qtyBasis,
     qtyCoefficient: item.qtyCoefficient != null ? Number(item.qtyCoefficient) : null,
-    wasteFactorPct: item.wasteFactorPct != null ? Number(item.wasteFactorPct) : null,
+    wasteFactorPct: item.qtyBasis !== "SHEET" && item.wasteFactorPct != null ? Number(item.wasteFactorPct) : null,
     note: item.note,
     // เก็บสูตรวัสดุย่อยติดไปด้วย (ถอดปริมาณวัสดุ) — ว่าง = วัสดุก้อนเดียว
     components: item.components.length
@@ -320,6 +325,7 @@ export async function saveProjectAsTemplate(
           sortOrder: c.sortOrder,
         }))
       : undefined,
+    tileCalc: item.tileCalc ? (item.tileCalc as unknown as TileCalcConfig) : undefined,
   }));
 
   const template = await prisma.template.create({
@@ -375,6 +381,7 @@ function boqInputFromTemplateLine(line: TemplateItemSnapshot): CreateBoqItemInpu
           sortOrder: c.sortOrder,
         }))
       : undefined,
+    tileCalc: line.tileCalc ?? undefined,
   };
 }
 

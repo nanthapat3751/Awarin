@@ -1,0 +1,60 @@
+{
+  "project": "ชื่อแบบบ้าน (เช่น บ้านชั้นเดียว แบบ A)",
+  "source": "BOQ ของวิศวกร ... ฉบับวันที่ ... (ใส่ที่มาของตัวเลขให้ตรวจย้อนได้)",
+  "settings": { "lapFactor": 40, "stockLength": 10, "hookFactor": 10, "bendFactor": 12 },
+  "members": [
+    {
+      "kind": "FOOTING",
+      "label": "F1",
+      "count": 1,
+      "width": 1.2,
+      "depth": 0.3,
+      "length": 1.2,
+      "mesh": { "dia": 12, "spacing": 0.15 },
+      "endBends": true
+    },
+    {
+      "kind": "COLUMN",
+      "label": "C1",
+      "count": 1,
+      "width": 0.2,
+      "depth": 0.2,
+      "length": 3,
+      "mainBars": { "count": 4, "dia": 12 },
+      "ties": { "dia": 6, "spacing": 0.2 },
+      "tieEndZone": null,
+      "footingDepth": 0.3,
+      "topFloor": true
+    },
+    {
+      "kind": "BEAM",
+      "label": "B1",
+      "count": 1,
+      "width": 0.2,
+      "depth": 0.4,
+      "length": 4,
+      "topBars": { "count": 2, "dia": 12 },
+      "bottomBars": { "count": 2, "dia": 12 },
+      "ties": { "dia": 6, "spacing": 0.15 },
+      "tieEndZone": { "spacing": 0.1, "length": 1 },
+      "endBends": true
+    },
+    {
+      "kind": "SLAB",
+      "label": "S1",
+      "count": 1,
+      "width": 3,
+      "depth": 0.1,
+      "length": 4,
+      "mesh": { "dia": 9, "spacing": 0.2 },
+      "endBends": false,
+      "onGround": false
+    }
+  ],
+  "engineer": {
+    "concrete": null,
+    "formwork": null,
+    "rebar": { "6": null, "9": null, "12": null }
+  },
+  "engineerWastePct": { "concrete": 0, "formwork": 0, "rebar": 0 }
+}

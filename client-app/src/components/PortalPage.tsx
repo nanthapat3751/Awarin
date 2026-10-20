@@ -32,10 +32,12 @@ function PortalHero({
   title,
   subtitle,
   back,
+  width,
 }: Readonly<{
   title: string;
   subtitle: string;
   back?: PortalBack;
+  width: string;
 }>) {
   return (
     <div className="relative overflow-hidden bg-linear-to-br from-brand to-brand-dark text-white">
@@ -60,7 +62,7 @@ function PortalHero({
           <circle cx="140" cy="60" r="90" />
         </svg>
       </div>
-      <div className="relative mx-auto max-w-2xl px-4 py-10">
+      <div className={`relative mx-auto ${width} px-4 py-10`}>
         {/* ปุ่มย้อนกลับอยู่ในแถบหัว เหนือชื่อหน้า — ที่ทางที่คนคุ้นว่าต้องหาตรงนี้
             (เดิมเป็นข้อความมีขีดเส้นใต้ลอยอยู่ในเนื้อหา ดันเนื้อหาลงไปหนึ่งบรรทัดโดยไม่ได้ช่วยอะไร) */}
         {back && (
@@ -93,19 +95,25 @@ export function PortalPage({
   title,
   subtitle,
   back,
+  wide = false,
   children,
 }: Readonly<{
   title: string;
   subtitle: string;
   back?: PortalBack;
+  /** หน้าสองคอลัมน์ (เนื้อหา + การ์ดสรุปติดจอขวา) — กว้าง max-w-6xl ทั้งแถบหัวและเนื้อหา ขอบซ้ายจะตรงกัน */
+  wide?: boolean;
   children: ReactNode;
 }>) {
+  const width = wide ? "max-w-6xl" : "max-w-2xl";
   return (
     <div className="flex min-h-[calc(100vh-4.5rem)] flex-col">
-      <PortalHero title={title} subtitle={subtitle} back={back} />
-      <div className="relative isolate flex-1 overflow-hidden">
+      <PortalHero title={title} subtitle={subtitle} back={back} width={width} />
+      {/* ไม่ใส่ overflow-hidden ตอนกว้าง — position: sticky ของการ์ดสรุปจะไม่ทำงานถ้าบรรพบุรุษตัดขอบ
+          บล็อบพื้นหลังตัดขอบของตัวเองอยู่แล้ว (PortalBlobs มี overflow-hidden) จึงไม่ล้นจอ */}
+      <div className={`relative isolate flex-1 ${wide ? "" : "overflow-hidden"}`}>
         <PortalBlobs />
-        <div className="relative mx-auto max-w-2xl px-4 py-8">{children}</div>
+        <div className={`relative mx-auto ${width} px-4 py-8`}>{children}</div>
       </div>
     </div>
   );
@@ -214,6 +222,7 @@ export function StatusCard({
   action,
   index,
   children,
+  footer,
 }: Readonly<{
   accent: string; // คลาสสีแถบซ้าย เช่น "bg-amber-400"
   chip?: string; // คลาสสีชิปไอคอน เช่น "bg-amber-100 text-amber-600" (ใส่เมื่อมีไอคอน)
@@ -226,9 +235,17 @@ export function StatusCard({
   /** ลำดับในรายการ — ใส่แล้วการ์ดจะไล่โผล่ทีละใบ (ไม่ใส่ = ไม่มีอนิเมชัน เช่นการ์ดเดี่ยวในหน้ารายละเอียด) */
   index?: number;
   children?: ReactNode;
+  /**
+   * เนื้อหาเต็มความกว้างการ์ดใต้แถวหัว (ใต้ปุ่มขวาด้วย) — children อยู่ในคอลัมน์ซ้ายข้างปุ่ม จึงยาวไม่สุดขอบขวา
+   * (ผู้ใช้ทัก 18 ต.ค. แถบเหลือง "มีงวดที่ต้องชำระ" ในหน้าสัญญาดูไม่บาลานซ์)
+   */
+  footer?: ReactNode;
 }>) {
-  const cardClass =
-    "group relative block overflow-hidden rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:shadow-md";
+  const hasBody = children != null || footer != null;
+  // ลอยขึ้นตอนชี้เฉพาะการ์ดที่กดได้ — เดิมทุกใบลอย ลูกค้าเลยกดการ์ดคำขอ/สัญญาแล้วไม่มีอะไรเกิดขึ้น
+  const cardClass = `group relative block overflow-hidden rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur-sm transition-all${
+    href ? " hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand" : ""
+  }`;
 
   // หน่วงทีละ 60ms แต่หยุดเพิ่มที่ใบที่ 9 — รายการยาว ๆ ไม่ควรให้ใบท้าย ๆ รอเป็นวินาที
   const animated = index != null;
@@ -258,10 +275,20 @@ export function StatusCard({
             )}
           </div>
           {meta && <div className="mt-0.5 text-xs text-slate-400">{meta}</div>}
+          {/*
+            การ์ดที่มีเนื้อหาข้างใน (เช่น งวดเงิน + QR ในหน้าสัญญา) บนมือถือ: ปุ่มขวามาอยู่ใต้หัวการ์ดแทน
+            ไม่งั้นคอลัมน์ปุ่มกินที่ครึ่งจอ เนื้อหาเหลือแคบจน QR/ตัวเลขตกบรรทัด · การ์ดไม่มีเนื้อหาเหมือนเดิม
+          */}
+          {action && hasBody && <div className="mt-2 sm:hidden">{action}</div>}
           {children}
         </div>
-        {action && <div className="shrink-0 self-center">{action}</div>}
+        {/* การ์ดที่มีเนื้อหาข้างใน (กางรายละเอียดงวดได้) ปุ่มตรึงไว้บนสุดคู่กับหัวการ์ด — เดิม self-center
+            ทำให้ปุ่มเลื่อนลงไปกลางการ์ดทุกครั้งที่กางรายการ (ผู้ใช้ทัก 17 ต.ค.) · การ์ดบรรทัดเดียวยังอยู่กึ่งกลาง */}
+        {action && (
+          <div className={`shrink-0 ${hasBody ? "hidden self-start sm:block" : "self-center"}`}>{action}</div>
+        )}
       </div>
+      {footer != null && <div className="pl-2">{footer}</div>}
     </>
   );
 
