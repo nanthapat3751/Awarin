@@ -114,6 +114,17 @@ export function ContactPage() {
   const parsedArea = Number(projectArea);
   const areaValid = projectArea.trim() !== "" && Number.isFinite(parsedArea) && parsedArea > 0;
 
+  /** ข้อมูลโครงการเบื้องต้น — แนบเฉพาะงานก่อสร้าง/ออกแบบ และเฉพาะช่องที่กรอกจริง */
+  function projectInfo() {
+    if (!showProjectInfo) return {};
+    return {
+      siteAddress: siteAddress.trim() === "" ? undefined : siteAddress.trim(),
+      areaSqm: areaValid ? parsedArea : undefined,
+      areaRange: !areaValid && areaRange ? areaRange : undefined,
+      desiredStartDate: desiredStart === "" ? undefined : desiredStart,
+    };
+  }
+
   async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const nameValidationError = validateFullName(name);
@@ -153,11 +164,7 @@ export function ContactPage() {
         serviceType,
         houseDesignId,
         message: message || undefined,
-        // แนบข้อมูลโครงการเบื้องต้นเฉพาะงานก่อสร้าง/ออกแบบ และเฉพาะช่องที่กรอกจริง
-        siteAddress: showProjectInfo && siteAddress.trim() !== "" ? siteAddress.trim() : undefined,
-        areaSqm: showProjectInfo && areaValid ? parsedArea : undefined,
-        areaRange: showProjectInfo && !areaValid && areaRange ? areaRange : undefined,
-        desiredStartDate: showProjectInfo && desiredStart !== "" ? desiredStart : undefined,
+        ...projectInfo(),
         turnstileToken,
       });
       setSubmitted(true);

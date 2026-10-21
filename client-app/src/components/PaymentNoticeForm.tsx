@@ -146,7 +146,7 @@ export function PaymentNoticeForm({
               </span>
             </label>
             <label className="flex flex-col gap-1 text-xs text-slate-600">
-              ยอดที่โอน (บาท)
+              <span>ยอดที่โอน (บาท)</span>
               <input
                 type="number"
                 inputMode="decimal"
@@ -214,7 +214,7 @@ export function PaymentNoticeForm({
 
           {showNote ? (
             <label className="flex flex-col gap-1 text-xs text-slate-600">
-              หมายเหตุ (ถ้ามี)
+              <span>หมายเหตุ (ถ้ามี)</span>
               <input
                 value={note}
                 maxLength={500}

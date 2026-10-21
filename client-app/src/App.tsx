@@ -90,6 +90,35 @@ function ScrollOnNavigate() {
   return null;
 }
 
+/**
+ * โครงหน้าระหว่างโหลดโค้ดของหน้า — หน้าตาตรงกับหน้าที่กำลังจะขึ้น (เนื้อหาไม่กระโดดตอนโหลดเสร็จ)
+ * เรียก useMatch ทุกตัวเสมอ (จำนวน hook ต้องคงที่) แล้วค่อยเลือกโครงตามเส้นทาง
+ */
+function RouteFallback({ documentView }: Readonly<{ documentView: boolean }>) {
+  const about = useMatch("/about");
+  const houseList = useMatch("/house-designs");
+  const houseDetail = useMatch("/house-designs/:id");
+  const portfolioList = useMatch("/portfolio");
+  const portfolioDetail = useMatch("/portfolio/:id");
+  const services = useMatch("/services");
+  const contact = useMatch("/contact");
+  if (documentView) {
+    return (
+      <div className="h-screen bg-slate-100">
+        <PdfPaperSkeleton />
+      </div>
+    );
+  }
+  if (about) return <AboutPageSkeleton />;
+  if (houseList) return <CardListPageSkeleton label="กำลังโหลดแบบบ้าน" />;
+  if (houseDetail) return <HouseDesignDetailSkeleton />;
+  if (portfolioList) return <CardListPageSkeleton label="กำลังโหลดผลงาน" filters={3} />;
+  if (portfolioDetail) return <PortfolioDetailSkeleton />;
+  if (services) return <ServicesPageSkeleton />;
+  if (contact) return <ContactPageSkeleton />;
+  return <RouteSkeleton />;
+}
+
 function App() {
   const location = useLocation();
   // หน้าแรกมี hero แบบเต็มจอที่ nav แบบ fixed ซ้อนทับอยู่; ทุกหน้าที่เหลือต้องมี padding ด้านบน
@@ -106,13 +135,6 @@ function App() {
   const billingDocView = useMatch("/my/contracts/:contractId/documents/:docId/pdf");
   const changeOrderDocView = useMatch("/my/contracts/:contractId/change-orders/:docId/pdf");
   const isDocumentView = Boolean(quoteDocView ?? contractDocView ?? billingDocView ?? changeOrderDocView);
-  const aboutView = useMatch("/about");
-  const houseListView = useMatch("/house-designs");
-  const houseDetailView = useMatch("/house-designs/:id");
-  const portfolioListView = useMatch("/portfolio");
-  const portfolioDetailView = useMatch("/portfolio/:id");
-  const servicesView = useMatch("/services");
-  const contactView = useMatch("/contact");
   const navPadding = overlayHero ? "" : "pt-[var(--nav-h)]";
 
   return (
@@ -122,29 +144,7 @@ function App() {
       <main className={isDocumentView ? "" : `flex-1 ${navPadding}`}>
       <ErrorBoundary variant="page" resetKey={location.pathname}>
       <Suspense
-        fallback={
-          isDocumentView ? (
-            <div className="h-screen bg-slate-100">
-              <PdfPaperSkeleton />
-            </div>
-          ) : aboutView ? (
-            <AboutPageSkeleton />
-          ) : houseListView ? (
-            <CardListPageSkeleton label="กำลังโหลดแบบบ้าน" />
-          ) : houseDetailView ? (
-            <HouseDesignDetailSkeleton />
-          ) : portfolioListView ? (
-            <CardListPageSkeleton label="กำลังโหลดผลงาน" filters={3} />
-          ) : portfolioDetailView ? (
-            <PortfolioDetailSkeleton />
-          ) : servicesView ? (
-            <ServicesPageSkeleton />
-          ) : contactView ? (
-            <ContactPageSkeleton />
-          ) : (
-            <RouteSkeleton />
-          )
-        }
+        fallback={<RouteFallback documentView={isDocumentView} />}
       >
       <Routes>
         <Route path="/" element={<HomePage />} />

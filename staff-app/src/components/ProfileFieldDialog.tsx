@@ -45,7 +45,7 @@ export function ProfileFieldDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose, saving]);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const next = value.trim();
     if (required && !next) {
@@ -74,42 +74,46 @@ export function ProfileFieldDialog({
         onClick={() => !saving && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-slate-900/40"
       />
-      <form
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
         aria-labelledby="profile-field-title"
-        onSubmit={submit}
         className="relative w-full max-w-sm rounded-xl bg-white p-5 shadow-xl"
       >
-        <h2 id="profile-field-title" className="text-base font-semibold text-slate-800">
-          แก้{title}
-        </h2>
-        {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
-        <input
-          ref={inputRef}
-          type={inputType}
-          inputMode={inputType === "tel" ? "tel" : undefined}
-          autoComplete={autoComplete}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setError(null);
-          }}
-          placeholder={placeholder}
-          aria-label={title}
-          className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800"
-        />
-        {!required && <p className="mt-1.5 text-xs text-slate-400">เว้นว่างไว้ = ไม่แสดงข้อมูลนี้</p>}
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
-            ยกเลิก
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "กำลังบันทึก..." : "บันทึก"}
-          </Button>
-        </div>
-      </form>
+        <form
+          onSubmit={submit}
+          className="contents"
+        >
+          <h2 id="profile-field-title" className="text-base font-semibold text-slate-800">
+            แก้{title}
+          </h2>
+          {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+          <input
+            ref={inputRef}
+            type={inputType}
+            inputMode={inputType === "tel" ? "tel" : undefined}
+            autoComplete={autoComplete}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setError(null);
+            }}
+            placeholder={placeholder}
+            aria-label={title}
+            className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800"
+          />
+          {!required && <p className="mt-1.5 text-xs text-slate-400">เว้นว่างไว้ = ไม่แสดงข้อมูลนี้</p>}
+          {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+              ยกเลิก
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "กำลังบันทึก..." : "บันทึก"}
+            </Button>
+          </div>
+        </form>
+      </dialog>
     </div>,
     document.body,
   );

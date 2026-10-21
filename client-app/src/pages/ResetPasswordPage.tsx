@@ -50,6 +50,40 @@ type Status =
   | { kind: "unusable"; failure: Failure }
   | { kind: "ready"; maskedEmail: string };
 
+/** ลิงก์ใช้ไม่ได้ — โหลดไม่ผ่านเพราะเครือข่าย/เซิร์ฟเวอร์ = ลิงก์อาจยังดีอยู่ ห้ามบอกให้ไปขอใบใหม่ */
+function UnusableLink({ failure, onRetry }: Readonly<{ failure: Failure; onRetry: () => void }>) {
+  const reachable = !isRetryable(failure.kind);
+  const buttonClass =
+    "auth-submit mt-5 inline-flex min-h-11 items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark";
+  return (
+    <AuthShell>
+      <div className="auth-card w-full max-w-md rounded-2xl border border-slate-200 bg-paper p-8 text-center shadow-card">
+        <h1 className="text-xl font-semibold text-slate-800">{reachable ? "ลิงก์ใช้ไม่ได้" : "เปิดลิงก์ไม่ได้ในขณะนี้"}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">{failure.message}</p>
+        {reachable ? (
+          <Link to="/forgot-password" className={buttonClass}>
+            ขอลิงก์ใหม่
+          </Link>
+        ) : (
+          <button type="button" onClick={onRetry} className={buttonClass}>
+            ลองเปิดลิงก์อีกครั้ง
+          </button>
+        )}
+      </div>
+    </AuthShell>
+  );
+}
+
+function SubmitLabel({ done, submitting }: Readonly<{ done: boolean; submitting: boolean }>) {
+  if (!done) return submitting ? "กำลังบันทึก..." : "ตั้งรหัสผ่านใหม่";
+  return (
+    <>
+      <CheckIcon className="check-pop h-5 w-5" />
+      <span>ตั้งรหัสผ่านใหม่แล้ว</span>
+    </>
+  );
+}
+
 export function ResetPasswordPage() {
   usePageMeta("ตั้งรหัสผ่านใหม่");
   const { token = "" } = useParams();
@@ -128,34 +162,7 @@ export function ResetPasswordPage() {
   }
 
   if (status.kind === "unusable") {
-    // โหลดไม่ผ่านเพราะเครือข่าย/เซิร์ฟเวอร์ → ลิงก์อาจยังดีอยู่ ห้ามบอกให้ไปขอใบใหม่
-    const reachable = !isRetryable(status.failure.kind);
-    return (
-      <AuthShell>
-        <div className="auth-card w-full max-w-md rounded-2xl border border-slate-200 bg-paper p-8 text-center shadow-card">
-          <h1 className="text-xl font-semibold text-slate-800">
-            {reachable ? "ลิงก์ใช้ไม่ได้" : "เปิดลิงก์ไม่ได้ในขณะนี้"}
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-slate-500">{status.failure.message}</p>
-          {reachable ? (
-            <Link
-              to="/forgot-password"
-              className="auth-submit mt-5 inline-flex min-h-11 items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
-            >
-              ขอลิงก์ใหม่
-            </Link>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setReloadAt((n) => n + 1)}
-              className="auth-submit mt-5 inline-flex min-h-11 items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
-            >
-              ลองเปิดลิงก์อีกครั้ง
-            </button>
-          )}
-        </div>
-      </AuthShell>
-    );
+    return <UnusableLink failure={status.failure} onRetry={() => setReloadAt((n) => n + 1)} />;
   }
 
   return (
@@ -238,14 +245,7 @@ export function ResetPasswordPage() {
                 : "bg-brand hover:bg-brand-dark disabled:opacity-50"
             }`}
           >
-            {done ? (
-              <>
-                <CheckIcon className="check-pop h-5 w-5" />
-                ตั้งรหัสผ่านใหม่แล้ว
-              </>
-            ) : (
-              <>{submitting ? "กำลังบันทึก..." : "ตั้งรหัสผ่านใหม่"}</>
-            )}
+            <SubmitLabel done={done} submitting={submitting} />
           </button>
         </form>
       </div>

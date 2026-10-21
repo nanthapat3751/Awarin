@@ -2,6 +2,17 @@ import { prisma } from "../../src/lib/prisma";
 import { createAndLoginOwner, createCustomerDirect } from "../helpers/test-auth";
 import { sendQuote } from "../helpers/quote-send";
 
+// Puppeteer เป็น ESM รันใต้ ts-jest ไม่ได้ — แทนเฉพาะขั้นเรนเดอร์ เพื่อทดสอบเส้นทางเปิด PDF ว่าส่งข้อมูลของใบที่ถูกต้อง
+// เข้าไปและตอบเป็นไฟล์ PDF (เนื้อเอกสารจริงตรวจที่ tests/lib/change-order-pdf.test.ts)
+const renderedVo: { totalAmount: number; extensionDays: number | null }[] = [];
+jest.mock("../../src/lib/pdf/change-order-pdf", () => ({
+  ...jest.requireActual("../../src/lib/pdf/change-order-pdf"),
+  renderChangeOrderPdf: jest.fn(async (data: { totalAmount: number; extensionDays: number | null }) => {
+    renderedVo.push(data);
+    return new Uint8Array(Buffer.from("%PDF-1.7 mock"));
+  }),
+}));
+
 /**
  * ใบงานเพิ่ม-ลด (Variation Order) — ทั้งเส้นทาง: แก้ BOQ หลังลงนาม → ออกใบ → ส่ง → ลูกค้าตอบในพอร์ทัล
  * หรือพนักงานบันทึกจากใบที่เซ็นกระดาษ → มูลค่าสัญญาและงวดเงินขยับ
@@ -229,5 +240,55 @@ describe("ใบงานเพิ่ม-ลด", () => {
     const rows = (await owner.agent.get(coUrl())).body.changeOrders;
     const cancelled = rows.find((r: { status: string }) => r.status === "CANCELLED");
     expect((await customer.agent.get(`/api/my/contracts/${contractId}/change-orders/${cancelled.id}/pdf`)).status).toBe(404);
+  });
+
+  it("PDF: พนักงานและลูกค้าเปิดใบที่อนุมัติแล้วได้ ด้วยตัวเลขของใบนั้น", async () => {
+    const approved = (await owner.agent.get(coUrl())).body.changeOrders.find((r: { seq: number }) => r.seq === 1);
+    renderedVo.length = 0;
+    const staff = await owner.agent.get(coUrl(`/${approved.id}/pdf`));
+    expect(staff.status).toBe(200);
+    expect(staff.headers["content-type"]).toBe("application/pdf");
+    expect(staff.headers["content-disposition"]).toContain(`${approved.docNo}.pdf`);
+    const mine = await customer.agent.get(`/api/my/contracts/${contractId}/change-orders/${approved.id}/pdf`);
+    expect(mine.status).toBe(200);
+    expect(renderedVo).toHaveLength(2);
+    expect(renderedVo[0].totalAmount.toFixed(2)).toBe(approved.totalAmount);
+    expect(renderedVo[0].extensionDays).toBe(7);
+  });
+
+  it("ใบที่ปิดแล้ว (อนุมัติ/ไม่อนุมัติ/ยกเลิก) แก้ คิดใหม่ ส่ง ยกเลิก หรือบันทึกผลซ้ำไม่ได้", async () => {
+    const rows = (await owner.agent.get(coUrl())).body.changeOrders as { id: string; status: string }[];
+    const closed = ["APPROVED", "REJECTED", "CANCELLED"].map((st) => rows.find((r) => r.status === st)!);
+    for (const co of closed) {
+      const edit = await owner.agent.patch(coUrl(`/${co.id}`)).send({ title: "แก้หลังปิด" });
+      expect(edit.status).toBe(409);
+      expect(edit.body.error).toBe("แก้ได้เฉพาะใบที่ยังเป็นร่าง");
+      expect((await owner.agent.post(coUrl(`/${co.id}/refresh`))).body.error).toBe("คิดใหม่ได้เฉพาะใบที่ยังเป็นร่าง");
+      expect((await owner.agent.post(coUrl(`/${co.id}/send`))).body.error).toBe("ส่งได้เฉพาะใบที่ยังเป็นร่าง");
+      expect((await owner.agent.post(coUrl(`/${co.id}/cancel`))).status).toBe(409);
+      const decide = await owner.agent.post(coUrl(`/${co.id}/decision`)).send({ decision: "APPROVE" });
+      expect(decide.status).toBe(409);
+      expect(decide.body.error).toBe("ใบนี้ปิดไปแล้ว");
+    }
+    expect((await owner.agent.post(coUrl("/no-such-vo/send"))).status).toBe(404);
+  });
+
+  it("ร่างที่ล้าหลัง BOQ บันทึกว่าอนุมัติจากกระดาษไม่ได้ · แก้หัวใบได้ · ไม่อนุมัติจากกระดาษได้", async () => {
+    await addLine("ทาสีรั้ว", 1, 8_000);
+    const draft = (await owner.agent.post(coUrl()).send({ title: "ทาสีรั้วเพิ่ม" })).body.changeOrders.at(-1);
+    const renamed = await owner.agent.patch(coUrl(`/${draft.id}`)).send({ title: "ทาสีรั้วรอบบ้าน", note: "สีเดิม", extensionDays: 3 });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.changeOrders.at(-1)).toMatchObject({ title: "ทาสีรั้วรอบบ้าน", note: "สีเดิม", extensionDays: 3 });
+
+    await editLine("ทาสีรั้ว", { quantity: 2 });
+    const stale = await owner.agent.post(coUrl(`/${draft.id}/decision`)).send({ decision: "APPROVE" });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toContain("คิดใหม่");
+
+    const planBefore = await installments();
+    const rejected = await owner.agent.post(coUrl(`/${draft.id}/decision`)).send({ decision: "REJECT", note: "ลูกค้าไม่เอา" });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.changeOrders.at(-1)).toMatchObject({ status: "REJECTED", respondedVia: "PAPER", responseNote: "ลูกค้าไม่เอา" });
+    expect(sum(await installments())).toBe(sum(planBefore));
   });
 });

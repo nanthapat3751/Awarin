@@ -210,7 +210,7 @@ export function SiteRebarCard({
                         </p>
                         <ul className="flex flex-col gap-0.5 text-xs tabular-nums text-slate-700">
                           {plan.patterns.map((pt) => (
-                            <li key={`${pt.bars}-${pt.cuts.map((c) => `${c.length}x${c.count}`).join(",")}`}>
+                            <li key={patternKey(pt)}>
                               <span className="inline-block w-16 font-medium text-slate-900">{pt.bars} เส้น</span>
                               ตัดเป็น {pt.cuts.map((c) => `${len3(c.length)} × ${c.count}`).join(" + ")}
                               {pt.leftover > 0 && (
@@ -249,4 +249,10 @@ export function SiteRebarCard({
       </div>
     </section>
   );
+}
+
+const cutKey = (c: { length: number; count: number }) => `${c.length}x${c.count}`;
+
+function patternKey(pt: { bars: number; cuts: { length: number; count: number }[] }) {
+  return `${pt.bars}-${pt.cuts.map(cutKey).join(",")}`;
 }

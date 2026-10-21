@@ -364,11 +364,7 @@ export function CustomersPage() {
           {!error && customers === null && <TableSkeleton rows={8} cols={6} />}
           {!error && customers !== null && customers.length === 0 && (
             <p className="text-slate-500">
-              {query.trim()
-                ? `ไม่พบลูกค้าที่ตรงกับ “${query}”`
-                : view === "unverified"
-                  ? "ไม่มีบัญชีที่รอยืนยันอีเมล"
-                  : "ยังไม่มีบัญชีลูกค้าในระบบ"}
+              {emptyText(query, view)}
             </p>
           )}
 
@@ -445,11 +441,7 @@ export function CustomersPage() {
                         </td>
                         <td className={`whitespace-nowrap px-3 py-2 ${view === "unverified" ? "text-slate-500" : quiet.className}`}>
                           {/* มุมมองที่ยังไม่ยืนยัน = เข้าระบบไม่ได้อยู่แล้ว ช่องนี้จึงบอกกำหนดลบแทน */}
-                          {view !== "unverified"
-                            ? quiet.text
-                            : c.purgeAt
-                              ? formatDate(c.purgeAt)
-                              : "ไม่ลบ (มีของผูกไว้)"}
+                          {view === "unverified" ? purgeText(c.purgeAt) : quiet.text}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-500">
                           {formatDate(c.createdAt)}
@@ -549,4 +541,14 @@ export function CustomersPage() {
       )}
     </Layout>
   );
+}
+
+function emptyText(query: string, view: string) {
+  if (query.trim()) return `ไม่พบลูกค้าที่ตรงกับ “${query}”`;
+  return view === "unverified" ? "ไม่มีบัญชีที่รอยืนยันอีเมล" : "ยังไม่มีบัญชีลูกค้าในระบบ";
+}
+
+/** มุมมองที่ยังไม่ยืนยัน = เข้าระบบไม่ได้อยู่แล้ว ช่องนี้จึงบอกกำหนดลบแทน */
+function purgeText(purgeAt: string | null | undefined) {
+  return purgeAt ? formatDate(purgeAt) : "ไม่ลบ (มีของผูกไว้)";
 }

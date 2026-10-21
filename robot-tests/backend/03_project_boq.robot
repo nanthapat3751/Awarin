@@ -211,9 +211,9 @@ Fill BOQ Line
     Input Text    xpath=//main//form//input[@placeholder="เช่น งานรื้อถอนผนังเดิม"]    ${name}
     Input Text    xpath=//main//form//input[@role="combobox"]    ${unit}
     Click Element    xpath=//main//form//input[@placeholder="เช่น งานรื้อถอนผนังเดิม"]
-    Input Text    xpath=//main//form//label[starts-with(normalize-space(text()), "จำนวน")]//input    ${qty}
+    Input Text    xpath=//main//form//label[starts-with(normalize-space(span), "จำนวน")]//input    ${qty}
     Input Text    xpath=//main//form//label[normalize-space(text())="ค่าวัสดุ"]//input    ${material}
-    Input Text    xpath=//main//form//label[normalize-space(text())="ค่าแรง"]//input    ${labor}
+    Input Text    xpath=//main//form//label[normalize-space(span)="ค่าแรง"]//input    ${labor}
 
 Line Total In Form
     ${total}=    Execute JavaScript

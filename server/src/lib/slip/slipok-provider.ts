@@ -57,9 +57,12 @@ function parseWhen(transDate: unknown, transTime: unknown, transTimestamp: unkno
     if (!Number.isNaN(at.getTime())) return { date, at };
   }
   const t = str(transTime);
-  const at = t && /^\d{2}:\d{2}(:\d{2})?$/.test(t) ? new Date(`${date}T${t.length === 5 ? `${t}:00` : t}+07:00`) : null;
+  const at = t && /^\d{2}:\d{2}(:\d{2})?$/.test(t) ? new Date(`${date}T${withSeconds(t)}+07:00`) : null;
   return { date, at: at && !Number.isNaN(at.getTime()) ? at : null };
 }
+
+/** "14:05" → "14:05:00" · มีวินาทีอยู่แล้วคงเดิม */
+const withSeconds = (t: string) => (t.length === 5 ? `${t}:00` : t);
 
 /** แปลงข้อมูลสลิป — โครงไม่ครบ (ไม่มียอด/เลขอ้างอิง) ถือว่าตรวจไม่ได้ ไม่เดาค่า */
 export function parseSlipOkSuccess(data: Record<string, unknown>): SlipData | null {
@@ -94,25 +97,29 @@ export function interpretSlipOkResponse(status: number, body: Body): SlipReadRes
   const code = typeof body?.code === "number" ? body.code : Number(body?.code);
   // 1012/1013/1014 (ซ้ำ/ยอด/บัญชีผู้รับ) มากับข้อมูลสลิปเต็ม — ไม่ได้ส่ง log/amount จึงไม่ควรเจอ
   // ถ้าเจอ (เช่น มีคนเปิดตั้งค่าฝั่ง SlipOK) ใช้ข้อมูลสลิปแล้วตัดสินด้วยกติกาของระบบเราเหมือนเดิม
-  if ((code === 1012 || code === 1013 || code === 1014) && data) {
-    const slip = parseSlipOkSuccess(data);
-    if (slip) return { kind: "ok", slip };
-  }
-  const providerMessage = str(body?.message) ?? `SlipOK ตอบกลับ HTTP ${status}`;
+  const slip = (code === 1012 || code === 1013 || code === 1014) && data ? parseSlipOkSuccess(data) : null;
+  if (slip) return { kind: "ok", slip };
+  return failureOf(status, code, str(body?.message), data);
+}
+
+/** คำตอบไม่สำเร็จของ SlipOK → ข้อความที่พนักงานอ่านแล้วรู้ว่าต้องทำอะไร */
+function failureOf(status: number, code: number, providerText: string | null, data: Record<string, unknown> | null): SlipReadResult {
+  const providerMessage = providerText ?? `SlipOK ตอบกลับ HTTP ${status}`;
   if (Number.isFinite(code) && CONFIG_PROBLEM[code]) {
     return { kind: "unreadable", message: `ระบบตรวจสลิปใช้งานไม่ได้: ${CONFIG_PROBLEM[code]}`, configProblem: true };
   }
-  if (code === 1010) {
-    // สลิปกรุงเทพ/ไทยพาณิชย์ต้องรอหลังโอนก่อนธนาคารให้ตรวจ (data.delay = นาที)
-    const delay = data && Number(data.delay) > 0 ? Number(data.delay) : null;
-    const bank = data ? str(data.bankName) : null;
-    return {
-      kind: "unreadable",
-      message: `สลิป${bank ? `ธนาคาร${bank}` : "นี้"}ต้องรอ${delay ? `ราว ${delay} นาที` : "สักครู่"}หลังโอนถึงจะตรวจได้ — กด "ตรวจสลิปอีกครั้ง" ภายหลัง`,
-    };
-  }
-  const message = Number.isFinite(code) ? (STAFF_MESSAGE[code] ?? providerMessage) : providerMessage;
-  return { kind: "unreadable", message: Number.isFinite(code) ? `${message} (รหัส ${code})` : message };
+  if (code === 1010) return { kind: "unreadable", message: waitMessage(data) };
+  if (!Number.isFinite(code)) return { kind: "unreadable", message: providerMessage };
+  return { kind: "unreadable", message: `${STAFF_MESSAGE[code] ?? providerMessage} (รหัส ${code})` };
+}
+
+/** สลิปกรุงเทพ/ไทยพาณิชย์ต้องรอหลังโอนก่อนธนาคารให้ตรวจ (data.delay = นาที) */
+function waitMessage(data: Record<string, unknown> | null): string {
+  const delay = data && Number(data.delay) > 0 ? Number(data.delay) : null;
+  const bank = data ? str(data.bankName) : null;
+  const which = bank ? `ธนาคาร${bank}` : "นี้";
+  const wait = delay ? `ราว ${delay} นาที` : "สักครู่";
+  return `สลิป${which}ต้องรอ${wait}หลังโอนถึงจะตรวจได้ — กด "ตรวจสลิปอีกครั้ง" ภายหลัง`;
 }
 
 export function slipOkProvider(config: { apiKey: string; branchId: string }): SlipProvider {

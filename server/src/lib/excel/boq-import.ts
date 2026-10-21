@@ -180,14 +180,31 @@ type HeaderColumns = Partial<Record<ColumnKey, number>>;
 type HeaderAll = Partial<Record<ColumnKey, number[]>>;
 
 function record(columns: HeaderColumns, all: HeaderAll, key: ColumnKey, col: number) {
-  if (columns[key] === undefined) columns[key] = col;
-  (all[key] ??= []).push(col);
+  columns[key] ??= col;
+  const list = all[key] ?? [];
+  list.push(col);
+  all[key] = list;
+}
+
+/** ตัดวงเล็บพร้อมข้อความข้างใน — ไล่ทีละตัวแทน regex ที่ย้อนลองได้หลายทาง · "(" ที่ไม่มี ")" ปิดตามมาเก็บไว้ตามเดิม */
+function stripParens(s: string): string {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const close = s[i] === "(" ? s.indexOf(")", i + 1) : -1;
+    if (close >= 0) {
+      i = close + 1;
+    } else {
+      out += s[i];
+      i++;
+    }
+  }
+  return out;
 }
 
 /** ตัดช่องว่าง จุด โคลอน และวงเล็บต่อท้ายเช่น "(บาท)" ออก แล้วเป็นตัวพิมพ์เล็ก — "No." = "no" · "ค่าวัสดุ (บาท)" = "ค่าวัสดุ" */
 const normalize = (s: string) =>
-  s
-    .replace(/\([^)]*\)/g, "")
+  stripParens(s)
     .replace(/[\s.:]+/g, "")
     .toLowerCase();
 
@@ -218,7 +235,7 @@ function cellNumber(value: ExcelJS.CellValue): number | null {
   if (value == null) return null;
   if (typeof value === "number") return value;
   if (typeof value === "object" && value !== null && "result" in value) return cellNumber(value.result as ExcelJS.CellValue);
-  const text = cellText(value).replace(/,/g, "");
+  const text = cellText(value).replaceAll(",", "");
   if (text === "" || text === "-" || text === "—") return null;
   const n = Number(text);
   return Number.isFinite(n) ? n : Number.NaN;
@@ -265,21 +282,38 @@ function twoRowHeader(ws: ExcelJS.Worksheet, r: number): { columns: HeaderColumn
     const ownTop = headerText(ws, r, col);
     if (ownTop) carried = ownTop;
     const top = ownTop || (sub ? carried : "");
-    let key: ColumnKey | null;
-    const group = inList(MATERIAL_GROUP, top) ? "materialUnitPrice" : inList(LABOR_GROUP, top) ? "laborUnitPrice" : null;
-    if (group && sub !== top) {
-      key = inList(UNIT_PRICE_SUB, sub) ? group : null;
-      if (key) viaGroup = true;
-    }
-    else key = keyOf(sub) ?? keyOf(top) ?? keyOf(top + sub);
-    // ช่องที่ผสานต่อจากช่องซ้าย (คอลัมน์ของช่องหลักไม่ใช่คอลัมน์นี้) ไม่นับซ้ำ — "ราคาวัสดุ" ผสานสองช่องคือหัวเดียว
-    // ผสานแนวตั้ง ("รายการ" แถว 3–4) ยังเป็นคอลัมน์เดียวกัน ต้องนับ
-    const subCell = ws.getCell(r + 1, col);
-    const colOf = (address: string) => address.replace(/\d+/g, "");
-    const continuation = subCell.isMerged && colOf(subCell.master.address) !== colOf(subCell.address);
-    if (key && !continuation) record(columns, all, key, col);
+    const { key, fromGroup } = twoRowKey(top, sub);
+    if (fromGroup) viaGroup = true;
+    if (key && !mergedFromLeft(ws, r + 1, col)) record(columns, all, key, col);
   }
   return { columns, all, viaGroup };
+}
+
+/** หัวกลุ่มราคา "ค่าวัสดุ" / "ค่าแรง" → คอลัมน์ที่ช่องชั้นล่างของมันเป็นราคาต่อหน่วย */
+function groupKeyOf(top: string): ColumnKey | null {
+  if (inList(MATERIAL_GROUP, top)) return "materialUnitPrice";
+  if (inList(LABOR_GROUP, top)) return "laborUnitPrice";
+  return null;
+}
+
+/** ชนิดคอลัมน์ของช่องหัวสองชั้น — ใต้หัวกลุ่มราคาตัดสินจากชั้นล่างเท่านั้น (fromGroup = จับราคาผ่านกลุ่มได้จริง) */
+function twoRowKey(top: string, sub: string): { key: ColumnKey | null; fromGroup: boolean } {
+  const group = groupKeyOf(top);
+  if (group && sub !== top) {
+    const key = inList(UNIT_PRICE_SUB, sub) ? group : null;
+    return { key, fromGroup: key !== null };
+  }
+  return { key: keyOf(sub) ?? keyOf(top) ?? keyOf(top + sub), fromGroup: false };
+}
+
+/**
+ * ช่องที่ผสานต่อจากช่องซ้าย (คอลัมน์ของช่องหลักไม่ใช่คอลัมน์นี้) ไม่นับซ้ำ — "ราคาวัสดุ" ผสานสองช่องคือหัวเดียว
+ * ผสานแนวตั้ง ("รายการ" แถว 3–4) ยังเป็นคอลัมน์เดียวกัน ต้องนับ
+ */
+function mergedFromLeft(ws: ExcelJS.Worksheet, row: number, col: number): boolean {
+  const cell = ws.getCell(row, col);
+  const colOf = (address: string) => address.replace(/\d+/g, "");
+  return cell.isMerged && colOf(cell.master.address) !== colOf(cell.address);
 }
 
 type FoundHeader = { row: number; top: number; columns: HeaderColumns; all: HeaderAll; salePriceOnly: boolean };
@@ -296,26 +330,39 @@ function findHeader(ws: ExcelJS.Worksheet): FoundHeader | null {
     return two.viaGroup && complete(two.columns) ? two : null;
   };
   for (let r = 1; r <= last; r++) {
-    const single = singleRowHeader(ws, r);
-    const two = r < last ? twoRowHeader(ws, r) : null;
-    // หัวสองชั้นที่จับราคาผ่านกลุ่ม (ค่าวัสดุ → ราคาต่อหน่วย) มาก่อนหัวแถวเดียวเสมอ — ไม่งั้นชั้นบน "ราคาวัสดุ"
-    // ถูกรับเป็นหัวแถวเดียว แล้วคอลัมน์ "จำนวนเงิน" ใต้มันกลายเป็นราคาต่อหน่วย (ตัวเลขผิดเงียบ ๆ)
-    if (two?.viaGroup && complete(two.columns)) return { row: r + 1, top: r, columns: two.columns, all: two.all, salePriceOnly: false };
-    const next = groupedAt(r + 1);
-    if (next) return { row: r + 2, top: r + 1, columns: next.columns, all: next.all, salePriceOnly: false };
-    if (complete(single.columns)) return { row: r, top: r, columns: single.columns, all: single.all, salePriceOnly: false };
-    // แถวเดียวยังไม่ครบราคา → ลองอ่านรวมกับแถวถัดไปเป็นหัวสองชั้น (บรรทัดข้อมูลเริ่มหลังแถวล่าง)
-    if (two && complete(two.columns)) return { row: r + 1, top: r, columns: two.columns, all: two.all, salePriceOnly: false };
-    if (single.columns.name !== undefined && single.columns.quantity !== undefined) {
-      return { row: r, top: r, columns: single.columns, all: single.all, salePriceOnly: single.salePrice };
-    }
+    const hit = headerAt(ws, r, last, complete, groupedAt);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** หัวตารางที่เริ่มแถว r (หรือแถวถัดไปถ้าเป็นหัวสองชั้นแบบ ปร.4) — ไม่ใช่ = null */
+function headerAt(
+  ws: ExcelJS.Worksheet,
+  r: number,
+  last: number,
+  complete: (c: HeaderColumns) => boolean,
+  groupedAt: (r: number) => ReturnType<typeof twoRowHeader> | null,
+): FoundHeader | null {
+  const single = singleRowHeader(ws, r);
+  const two = r < last ? twoRowHeader(ws, r) : null;
+  // หัวสองชั้นที่จับราคาผ่านกลุ่ม (ค่าวัสดุ → ราคาต่อหน่วย) มาก่อนหัวแถวเดียวเสมอ — ไม่งั้นชั้นบน "ราคาวัสดุ"
+  // ถูกรับเป็นหัวแถวเดียว แล้วคอลัมน์ "จำนวนเงิน" ใต้มันกลายเป็นราคาต่อหน่วย (ตัวเลขผิดเงียบ ๆ)
+  if (two?.viaGroup && complete(two.columns)) return { row: r + 1, top: r, columns: two.columns, all: two.all, salePriceOnly: false };
+  const next = groupedAt(r + 1);
+  if (next) return { row: r + 2, top: r + 1, columns: next.columns, all: next.all, salePriceOnly: false };
+  if (complete(single.columns)) return { row: r, top: r, columns: single.columns, all: single.all, salePriceOnly: false };
+  // แถวเดียวยังไม่ครบราคา → ลองอ่านรวมกับแถวถัดไปเป็นหัวสองชั้น (บรรทัดข้อมูลเริ่มหลังแถวล่าง)
+  if (two && complete(two.columns)) return { row: r + 1, top: r, columns: two.columns, all: two.all, salePriceOnly: false };
+  if (single.columns.name !== undefined && single.columns.quantity !== undefined) {
+    return { row: r, top: r, columns: single.columns, all: single.all, salePriceOnly: single.salePrice };
   }
   return null;
 }
 
 const colLetter = (col: number) => {
   let s = "";
-  for (let n = col; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  for (let n = col; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCodePoint(65 + ((n - 1) % 26)) + s;
   return s;
 };
 
@@ -337,19 +384,25 @@ function priceSetsOf(ws: ExcelJS.Worksheet, h: FoundHeader): { label: string; co
       unit: h.all.unit?.[i] ?? h.columns.unit,
     };
     const priceCols = [columns.materialUnitPrice, columns.laborUnitPrice].filter((c): c is number => c !== undefined);
-    // ป้ายเหนือหัวตาราง (ช่องหลักของช่องที่ผสาน) — ข้อความสั้นที่ไม่ใช่ชื่อคอลัมน์ เช่น "ต้นทุน"
-    let label = "";
-    if (h.top > 1 && priceCols.length > 0) {
-      const cell = ws.getCell(h.top - 1, priceCols[0]);
-      const text = cellText((cell.isMerged ? cell.master : cell).value).trim();
-      if (text && text.length <= 30 && !keyOf(normalize(text))) label = text;
-    }
-    if (!label) label = count === 1 ? "ชุดราคาเดียว" : i === 0 ? "ชุดซ้าย" : `ชุดที่ ${i + 1}`;
+    const label = labelAbove(ws, h, priceCols) || defaultSetLabel(count, i);
     const span = [columns.quantity, ...priceCols].filter((c): c is number => c !== undefined);
     const range = span.length ? `คอลัมน์ ${colLetter(Math.min(...span))}–${colLetter(Math.max(...span))}` : "";
     sets.push({ label: [label, range].filter(Boolean).join(" · "), columns });
   }
   return sets;
+}
+
+/** ป้ายเหนือหัวตาราง (ช่องหลักของช่องที่ผสาน) — ข้อความสั้นที่ไม่ใช่ชื่อคอลัมน์ เช่น "ต้นทุน" · ไม่มี = "" */
+function labelAbove(ws: ExcelJS.Worksheet, h: FoundHeader, priceCols: number[]): string {
+  if (h.top <= 1 || priceCols.length === 0) return "";
+  const cell = ws.getCell(h.top - 1, priceCols[0]);
+  const text = cellText((cell.isMerged ? cell.master : cell).value).trim();
+  return text && text.length <= 30 && !keyOf(normalize(text)) ? text : "";
+}
+
+function defaultSetLabel(count: number, i: number): string {
+  if (count === 1) return "ชุดราคาเดียว";
+  return i === 0 ? "ชุดซ้าย" : `ชุดที่ ${i + 1}`;
 }
 
 /** ชื่อเทียบคลัง: ตัดช่องว่างซ้ำ ไม่สนตัวพิมพ์ · หน่วย: ตัดจุดและช่องว่าง ("ลบ.ม." = "ลบม") */
@@ -437,8 +490,23 @@ function summaryReason(sheetName: string, rowNames: string[]): string | null {
   return null;
 }
 
+const COPY_WORDS = /สำรอง|สำเนา|\bcopy\b|\bold\b|เก่า/i;
+
+/** มีคำว่า back up / back-up / backup ไหม — ไล่หาเองแทน regex `back\s*-?\s*up` ที่ย้อนลองได้หลายทาง */
+function mentionsBackup(name: string): boolean {
+  const lower = name.toLowerCase();
+  for (let at = lower.indexOf("back"); at >= 0; at = lower.indexOf("back", at + 1)) {
+    let j = at + 4;
+    while (j < lower.length && lower[j].trim() === "") j++;
+    if (lower[j] === "-") j++;
+    while (j < lower.length && lower[j].trim() === "") j++;
+    if (lower.startsWith("up", j)) return true;
+  }
+  return false;
+}
+
 /** ชื่อชีตที่บอกว่าเป็นฉบับสำรอง/สำเนา (ไฟล์บริษัทมี "BOQ (BackUp)" ที่เป็น BOQ เก่าทั้งชุด) */
-const COPY_SHEET = /back\s*-?\s*up|สำรอง|สำเนา|\bcopy\b|\bold\b|เก่า/i;
+const isCopySheet = (name: string) => mentionsBackup(name) || COPY_WORDS.test(name);
 
 /** ชีตสำเนา: ชื่อบรรทัดซ้ำกับชีตที่อยู่ก่อนหน้าเกือบทั้งหมด (เช่น "BOQ (BackUp)") — อ่านทั้งคู่ = ยอดเบิ้ลสองเท่า */
 function duplicateOf(rowNames: string[], earlier: { name: string; names: Set<string> }[]): string | null {
@@ -454,19 +522,126 @@ function duplicateOf(rowNames: string[], earlier: { name: string; names: Set<str
   return null;
 }
 
+type SheetContext = {
+  byCode: Map<string, ImportCategory>;
+  byId: Map<string, ImportCategory>;
+  fallback: ImportCategory | null;
+  materials: ImportMaterial[];
+};
+
+/** ข้อมูลในแถวที่ใช้ไม่ได้ (ชื่อ/ปริมาณ/หน่วย/ราคา) — ว่าง = แถวนี้ใช้ได้ */
+function rowErrors(name: string, quantity: number | null, unit: string, mat: number | null, lab: number | null): string[] {
+  const errors: string[] = [];
+  if (name.length > 300) errors.push("ชื่อรายการยาวเกิน 300 ตัวอักษร");
+  if (quantity == null) errors.push("ไม่มีปริมาณ");
+  else if (Number.isNaN(quantity)) errors.push("ปริมาณไม่ใช่ตัวเลข");
+  else if (quantity <= 0) errors.push("ปริมาณต้องมากกว่า 0");
+  if (!unit) errors.push("ไม่มีหน่วย");
+  if (Number.isNaN(mat) || Number.isNaN(lab)) errors.push("ราคาไม่ใช่ตัวเลข");
+  else if ((mat ?? 0) < 0 || (lab ?? 0) < 0) errors.push("ราคาติดลบไม่ได้");
+  else if (mat == null && lab == null) errors.push("ไม่มีราคาวัสดุและค่าแรง");
+  return errors;
+}
+
+type Placement = {
+  category: ImportCategory | null;
+  newCode: ImportNewCode | null;
+  hintTop: ImportRow["hintTop"];
+  material: ImportMaterial | null;
+};
+
+/**
+ * ลำดับการหารหัสงาน: รหัสในไฟล์ตรง → วัสดุในคลังชื่อ+หน่วยตรง (ใช้รหัสงานของวัสดุนั้น) →
+ * เสนอสร้างรหัสใหม่ใต้หมวดย่อยแม่ (B) → หมวดสำรองที่เลือกไว้ → ให้คนเลือกในพรีวิว (D)
+ */
+function placeRow(code: string | null, name: string, unit: string, ctx: SheetContext, warnings: string[]): Placement {
+  const { byCode, byId, materials } = ctx;
+  let category: ImportCategory | null = null;
+  const matched = code ? byCode.get(code.toUpperCase()) : undefined;
+  if (matched?.usable) category = matched;
+  const material = matchMaterial(materials, name, unit, category?.id ?? null);
+  const viaMaterial = material?.categoryId ? byId.get(material.categoryId) : undefined;
+  if (!category && viaMaterial?.usable) {
+    category = viaMaterial;
+    // ไม่มีรหัสในไฟล์ = ไม่มีอะไรให้เตือน (หน้าจอแสดงป้าย "✓ MAT-xxxx" แทน)
+    if (code) warnings.push(`รหัส ${code} ไม่มีในระบบ — ใช้รหัสงานของ ${material?.code ?? "วัสดุ"} ที่ชื่อตรงกันแทน`);
+  }
+  if (category) return { category, newCode: null, hintTop: null, material };
+  return { ...placeWithoutCategory(code, matched, ctx, warnings), material };
+}
+
+/** ยังไม่ได้รหัสงาน: เสนอรหัสใหม่ใต้หมวดย่อยแม่ → หมวดสำรองที่เลือกไว้ → ให้คนเลือก (พร้อมบอกเหตุผล) */
+function placeWithoutCategory(
+  code: string | null,
+  matched: ImportCategory | undefined,
+  ctx: SheetContext,
+  warnings: string[],
+): Omit<Placement, "material"> {
+  let newCode: ImportNewCode | null = null;
+  let hintTop: ImportRow["hintTop"] = null;
+  if (code) {
+    const placement = matched ? { newCode: null, hintTop: topOf(matched, ctx.byId) } : suggestPlacement(code, ctx.byCode, ctx.byId);
+    newCode = placement.newCode;
+    hintTop = placement.hintTop;
+  }
+  if (newCode) return { category: null, newCode, hintTop };
+  if (ctx.fallback) {
+    if (code) warnings.push(`รหัส ${code} ${matched ? "ไม่ใช่หมวดระดับรายการหรือถูกปิดใช้งาน" : "ไม่มีในระบบ"} — ใส่ในหมวดที่เลือกไว้`);
+    return { category: ctx.fallback, newCode: null, hintTop };
+  }
+  if (code) warnings.push(matched ? `รหัส ${code} ไม่ใช่หมวดระดับรายการ หรือถูกปิดใช้งาน` : `ไม่พบหมวดงานรหัส ${code}`);
+  return { category: null, newCode: null, hintTop };
+}
+
+/** ค่าที่อ่านได้จากหนึ่งแถว */
+type RowCells = {
+  name: string;
+  quantity: number | null;
+  unit: string;
+  mat: number | null;
+  lab: number | null;
+  code: string | null;
+  lineId: string | null;
+  note: string | null;
+};
+
+function importRowOf(sheet: string, rowNumber: number, c: RowCells, ctx: SheetContext): ImportRow {
+  const errors = rowErrors(c.name, c.quantity, c.unit, c.mat, c.lab);
+  const warnings: string[] = [];
+  const { category, newCode, hintTop, material } = placeRow(c.code, c.name, c.unit, ctx, warnings);
+  const materialUnitPrice = Number.isFinite(c.mat) && c.mat != null ? roundTo(c.mat, 2) : 0;
+  const laborUnitPrice = Number.isFinite(c.lab) && c.lab != null ? roundTo(c.lab, 2) : 0;
+  const qty = c.quantity != null && Number.isFinite(c.quantity) && c.quantity > 0 ? roundTo(c.quantity, 3) : null;
+  return {
+    lineId: c.lineId,
+    sheet,
+    rowNumber,
+    code: c.code,
+    categoryId: category?.id ?? null,
+    categoryName: category ? `${category.code ?? ""} ${category.name}`.trim() : null,
+    name: c.name.slice(0, 300),
+    quantity: qty,
+    unit: c.unit,
+    materialUnitPrice,
+    laborUnitPrice,
+    lineTotal: qty != null && errors.length === 0 ? calculateLineAmounts({ quantity: qty, materialUnitPrice, laborUnitPrice }).lineTotal : 0,
+    note: c.note,
+    errors,
+    warnings,
+    newCode,
+    needsCategory: !category && !newCode,
+    hintTop,
+    materialMatch: material ? { id: material.id, code: material.code, name: material.name } : null,
+  };
+}
+
 /** อ่านบรรทัดของชีตเดียวด้วยคอลัมน์ชุดที่เลือก — ยังไม่ตัดสินว่าจะเอาชีตนี้หรือไม่ */
 function parseSheet(
   ws: ExcelJS.Worksheet,
   headerRow: number,
   col: HeaderColumns,
-  ctx: {
-    byCode: Map<string, ImportCategory>;
-    byId: Map<string, ImportCategory>;
-    fallback: ImportCategory | null;
-    materials: ImportMaterial[];
-  },
+  ctx: SheetContext,
 ): { rows: ImportRow[]; skipped: ImportSkippedRow[] } {
-  const { byCode, byId, fallback, materials } = ctx;
   const rows: ImportRow[] = [];
   const skipped: ImportSkippedRow[] = [];
   // หัวข้อที่ผ่านมาในชีต — แถวที่ชื่อซ้ำหัวข้อและไม่มีราคาต่อหน่วย = ยอดรวมของหมวดนั้น
@@ -484,88 +659,106 @@ function parseSheet(
     if (row.hidden) continue;
     const name = cellText(get(row, "name"));
     if (!name) continue;
-    const quantity = cellNumber(own(row, "quantity"));
-    const unit = cellText(own(row, "unit"));
-    const mat = cellNumber(own(row, "materialUnitPrice"));
-    const lab = cellNumber(own(row, "laborUnitPrice"));
-    const code = cellText(own(row, "code")) || null;
-    const lineId = cellText(own(row, "lineId")) || null;
+    const cells: RowCells = {
+      name,
+      quantity: cellNumber(own(row, "quantity")),
+      unit: cellText(own(row, "unit")),
+      mat: cellNumber(own(row, "materialUnitPrice")),
+      lab: cellNumber(own(row, "laborUnitPrice")),
+      code: cellText(own(row, "code")) || null,
+      lineId: cellText(own(row, "lineId")) || null,
+      note: null,
+    };
     // แถวที่มีรหัสบรรทัดเดิมเป็นบรรทัดงานเสมอ — ข้ามไปจะกลายเป็น "บรรทัดหายจากไฟล์" แล้วถูกเสนอให้ลบ
-    const kind = lineId ? null : skipKind(name, quantity, unit, mat, lab, headings);
+    const kind = cells.lineId ? null : skipKind(name, cells.quantity, cells.unit, cells.mat, cells.lab, headings);
     if (kind) {
       if (kind === "heading") headings.add(nameKey(name));
-      skipped.push({ sheet: ws.name, rowNumber: r, code, name: name.slice(0, 300), kind });
+      skipped.push({ sheet: ws.name, rowNumber: r, code: cells.code, name: name.slice(0, 300), kind });
       continue;
     }
     if (rows.length >= IMPORT_MAX_ROWS) {
       throw new ImportFileError(`ไฟล์มีรายการเกิน ${IMPORT_MAX_ROWS.toLocaleString("th-TH")} บรรทัด — แบ่งเป็นหลายไฟล์แล้วนำเข้าทีละไฟล์`);
     }
-
-    const errors: string[] = [];
-    const warnings: string[] = [];
-    const note = cellText(get(row, "note")) || null;
-
-    if (name.length > 300) errors.push("ชื่อรายการยาวเกิน 300 ตัวอักษร");
-    if (quantity == null) errors.push("ไม่มีปริมาณ");
-    else if (Number.isNaN(quantity)) errors.push("ปริมาณไม่ใช่ตัวเลข");
-    else if (quantity <= 0) errors.push("ปริมาณต้องมากกว่า 0");
-    if (!unit) errors.push("ไม่มีหน่วย");
-    if (Number.isNaN(mat) || Number.isNaN(lab)) errors.push("ราคาไม่ใช่ตัวเลข");
-    else if ((mat ?? 0) < 0 || (lab ?? 0) < 0) errors.push("ราคาติดลบไม่ได้");
-    else if (mat == null && lab == null) errors.push("ไม่มีราคาวัสดุและค่าแรง");
-
-    // ลำดับการหารหัสงาน: รหัสในไฟล์ตรง → วัสดุในคลังชื่อ+หน่วยตรง (ใช้รหัสงานของวัสดุนั้น) →
-    // เสนอสร้างรหัสใหม่ใต้หมวดย่อยแม่ (B) → หมวดสำรองที่เลือกไว้ → ให้คนเลือกในพรีวิว (D)
-    let category: ImportCategory | null = null;
-    let newCode: ImportNewCode | null = null;
-    let hintTop: ImportRow["hintTop"] = null;
-    const matched = code ? byCode.get(code.toUpperCase()) : undefined;
-    if (matched?.usable) category = matched;
-    const material = matchMaterial(materials, name, unit, category?.id ?? null);
-    if (!category && material?.categoryId && byId.get(material.categoryId)?.usable) {
-      category = byId.get(material.categoryId)!;
-      // ไม่มีรหัสในไฟล์ = ไม่มีอะไรให้เตือน (หน้าจอแสดงป้าย "✓ MAT-xxxx" แทน)
-      if (code) warnings.push(`รหัส ${code} ไม่มีในระบบ — ใช้รหัสงานของ ${material.code ?? "วัสดุ"} ที่ชื่อตรงกันแทน`);
-    }
-    if (!category && code) {
-      const placement = matched ? { newCode: null, hintTop: topOf(matched, byId) } : suggestPlacement(code, byCode, byId);
-      newCode = placement.newCode;
-      hintTop = placement.hintTop;
-    }
-    if (!category && !newCode && fallback) {
-      category = fallback;
-      if (code) warnings.push(`รหัส ${code} ${matched ? "ไม่ใช่หมวดระดับรายการหรือถูกปิดใช้งาน" : "ไม่มีในระบบ"} — ใส่ในหมวดที่เลือกไว้`);
-    }
-    if (!category && !newCode && code) {
-      warnings.push(matched ? `รหัส ${code} ไม่ใช่หมวดระดับรายการ หรือถูกปิดใช้งาน` : `ไม่พบหมวดงานรหัส ${code}`);
-    }
-
-    const materialUnitPrice = Number.isFinite(mat) && mat != null ? roundTo(mat, 2) : 0;
-    const laborUnitPrice = Number.isFinite(lab) && lab != null ? roundTo(lab, 2) : 0;
-    const qty = quantity != null && Number.isFinite(quantity) && quantity > 0 ? roundTo(quantity, 3) : null;
-    rows.push({
-      lineId,
-      sheet: ws.name,
-      rowNumber: r,
-      code,
-      categoryId: category?.id ?? null,
-      categoryName: category ? `${category.code ?? ""} ${category.name}`.trim() : null,
-      name: name.slice(0, 300),
-      quantity: qty,
-      unit,
-      materialUnitPrice,
-      laborUnitPrice,
-      lineTotal: qty != null && errors.length === 0 ? calculateLineAmounts({ quantity: qty, materialUnitPrice, laborUnitPrice }).lineTotal : 0,
-      note,
-      errors,
-      warnings,
-      newCode,
-      needsCategory: !category && !newCode,
-      hintTop,
-      materialMatch: material ? { id: material.id, code: material.code, name: material.name } : null,
-    });
+    cells.note = cellText(get(row, "note")) || null;
+    rows.push(importRowOf(ws.name, r, cells, ctx));
   }
   return { rows, skipped };
+}
+
+/**
+ * อ่าน "ทุกชีต" ที่มีหัวตาราง "รายการ" + "ปริมาณ" ตามลำดับในไฟล์ — ไฟล์ส่งออกของระบบแยกชีตตามหมวด
+ * (หมวดยาวต่อหลายชีต) อ่านแค่ชีตแรกจะได้บรรทัดไม่ครบโดยไม่มีใครรู้ · ชีตใบถอดแบบ/รายการสั่งซื้อ
+ * ไม่มีหัวตารางคู่นี้จึงไม่ถูกอ่าน · ชีตที่ซ่อนอยู่ข้าม (คนเปิดไฟล์มองไม่เห็น ไม่ควรถูกนำเข้าแบบลับ ๆ)
+ */
+function sheetsWithHeader(wb: ExcelJS.Workbook): { ws: ExcelJS.Worksheet; header: FoundHeader }[] {
+  const found: { ws: ExcelJS.Worksheet; header: FoundHeader }[] = [];
+  for (const ws of wb.worksheets) {
+    if (ws.state !== undefined && ws.state !== "visible") continue;
+    const header = findHeader(ws);
+    if (header) found.push({ ws, header });
+  }
+  if (found.length === 0) {
+    throw new ImportFileError(
+      'ไม่พบหัวตารางในไฟล์ — ต้องมีคอลัมน์ชื่องาน ("รายการ" / "รายละเอียด" / "Description") และจำนวน ("ปริมาณ" / "จำนวน" / "Qty")',
+    );
+  }
+  return found;
+}
+
+/** ชีตที่มีคอลัมน์ราคาทุน — ไม่มีเลยสักชีต = บอกเหตุ (ไฟล์ราคาขายของลูกค้า / ไม่มีคอลัมน์ราคา) */
+function costSheetsOf(found: { ws: ExcelJS.Worksheet; header: FoundHeader }[]) {
+  const costSheets = found.filter((x) => hasCostColumn(x.header.columns));
+  if (costSheets.length > 0) return costSheets;
+  if (found.some((x) => x.header.salePriceOnly)) {
+    throw new ImportFileError(
+      'ไฟล์นี้มีแต่ "ราคาต่อหน่วย" ซึ่งเป็นราคาขาย (ฉบับลูกค้า) — นำเข้าเป็นราคาทุนไม่ได้ เพราะกำไรจะถูกบวกซ้ำ ใช้ไฟล์ฉบับภายในหรือแม่แบบนำเข้า',
+    );
+  }
+  throw new ImportFileError(
+    'ไม่พบคอลัมน์ราคาทุน — ต้องมี "ค่าวัสดุ/หน่วย" หรือ "ค่าแรง/หน่วย" (หรือ "ราคาวัสดุ" / "ราคาค่าแรง") หรือหัวสองชั้นแบบ ปร.4: "ค่าวัสดุ" / "ค่าแรง" แล้วแถวล่างเป็น "ราคาต่อหน่วย"',
+  );
+}
+
+/** ระบบเลือกชีตให้ก่อน: ไม่เอาชีตสรุป ชีตสำเนาของชีตที่เลือกไปแล้ว และชีตที่ไม่มีบรรทัดงาน */
+function sheetChoices(parsed: { ws: ExcelJS.Worksheet; rows: ImportRow[] }[], picked: string[] | null | undefined): ImportSheet[] {
+  const kept: { name: string; names: Set<string> }[] = [];
+  return parsed.map((p) => {
+    const names = p.rows.map((r) => r.name);
+    const reason = sheetSkipReason(p.ws.name, names, kept);
+    if (!reason) kept.push({ name: p.ws.name, names: new Set(names.map(nameKey)) });
+    const suggested = reason === null;
+    return {
+      name: p.ws.name,
+      rows: p.rows.length,
+      suggested,
+      selected: picked ? picked.includes(p.ws.name) : suggested,
+      reason,
+    };
+  });
+}
+
+function sheetSkipReason(sheetName: string, names: string[], kept: { name: string; names: Set<string> }[]): string | null {
+  const summary = summaryReason(sheetName, names);
+  if (summary) return summary;
+  if (isCopySheet(sheetName)) return "ชื่อชีตบอกว่าเป็นฉบับสำรอง/สำเนา";
+  const dup = duplicateOf(names, kept);
+  if (dup) return `ซ้ำกับชีต "${dup}"`;
+  return names.length === 0 ? "ไม่มีบรรทัดงาน" : null;
+}
+
+/** ห้ามให้ราคาฝั่งไหนเป็น 0 เงียบ ๆ เพราะหาคอลัมน์ไม่เจอ · ชีตที่ไม่มีชุดราคาที่เลือกต้องบอก */
+function priceSetWarnings(
+  chosen: { ws: ExcelJS.Worksheet; set: { columns: HeaderColumns }; sets: unknown[] }[],
+  requested: number,
+  firstSetCount: number,
+): string[] {
+  const out: string[] = [];
+  for (const p of chosen) {
+    if (p.sets.length <= requested && firstSetCount > 1) out.push(`ชีต "${p.ws.name}" มีราคาชุดเดียว — ใช้ชุดนั้นแทนชุดที่เลือก`);
+    if (p.set.columns.laborUnitPrice === undefined) out.push(`ชีต "${p.ws.name}": ไม่พบคอลัมน์ค่าแรง — ค่าแรงทุกบรรทัดจะเป็น 0`);
+    if (p.set.columns.materialUnitPrice === undefined) out.push(`ชีต "${p.ws.name}": ไม่พบคอลัมน์ราคาวัสดุ — ราคาวัสดุทุกบรรทัดจะเป็น 0`);
+  }
+  return out;
 }
 
 export async function parseBoqImport(
@@ -582,32 +775,8 @@ export async function parseBoqImport(
     throw new ImportFileError("เปิดไฟล์ไม่ได้ — ต้องเป็นไฟล์ Excel นามสกุล .xlsx");
   }
 
-  // อ่าน "ทุกชีต" ที่มีหัวตาราง "รายการ" + "ปริมาณ" ตามลำดับในไฟล์ — ไฟล์ส่งออกของระบบแยกชีตตามหมวด
-  // (หมวดยาวต่อหลายชีต) อ่านแค่ชีตแรกจะได้บรรทัดไม่ครบโดยไม่มีใครรู้ · ชีตใบถอดแบบ/รายการสั่งซื้อ
-  // ไม่มีหัวตารางคู่นี้จึงไม่ถูกอ่าน · ชีตที่ซ่อนอยู่ข้าม (คนเปิดไฟล์มองไม่เห็น ไม่ควรถูกนำเข้าแบบลับ ๆ)
-  const found: { ws: ExcelJS.Worksheet; header: FoundHeader }[] = [];
-  for (const ws of wb.worksheets) {
-    if (ws.state !== undefined && ws.state !== "visible") continue;
-    const header = findHeader(ws);
-    if (header) found.push({ ws, header });
-  }
-  if (found.length === 0) {
-    throw new ImportFileError(
-      'ไม่พบหัวตารางในไฟล์ — ต้องมีคอลัมน์ชื่องาน ("รายการ" / "รายละเอียด" / "Description") และจำนวน ("ปริมาณ" / "จำนวน" / "Qty")',
-    );
-  }
-  const hasCost = (h: FoundHeader) => h.columns.materialUnitPrice !== undefined || h.columns.laborUnitPrice !== undefined;
-  const costSheets = found.filter((x) => hasCost(x.header));
-  if (costSheets.length === 0) {
-    if (found.some((x) => x.header.salePriceOnly)) {
-      throw new ImportFileError(
-        'ไฟล์นี้มีแต่ "ราคาต่อหน่วย" ซึ่งเป็นราคาขาย (ฉบับลูกค้า) — นำเข้าเป็นราคาทุนไม่ได้ เพราะกำไรจะถูกบวกซ้ำ ใช้ไฟล์ฉบับภายในหรือแม่แบบนำเข้า',
-      );
-    }
-    throw new ImportFileError(
-      'ไม่พบคอลัมน์ราคาทุน — ต้องมี "ค่าวัสดุ/หน่วย" หรือ "ค่าแรง/หน่วย" (หรือ "ราคาวัสดุ" / "ราคาค่าแรง") หรือหัวสองชั้นแบบ ปร.4: "ค่าวัสดุ" / "ค่าแรง" แล้วแถวล่างเป็น "ราคาต่อหน่วย"',
-    );
-  }
+  const found = sheetsWithHeader(wb);
+  const costSheets = costSheetsOf(found);
 
   const ctx = {
     byCode: new Map(categories.filter((c) => c.code).map((c) => [c.code!.trim().toUpperCase(), c])),
@@ -628,26 +797,7 @@ export async function parseBoqImport(
     return { ws, set, sets, rows, skipped };
   });
 
-  // ระบบเลือกชีตให้ก่อน: ไม่เอาชีตสรุป ชีตสำเนาของชีตที่เลือกไปแล้ว และชีตที่ไม่มีบรรทัดงาน
-  const kept: { name: string; names: Set<string> }[] = [];
-  const sheets: ImportSheet[] = parsed.map((p) => {
-    const names = p.rows.map((r) => r.name);
-    const dup = duplicateOf(names, kept);
-    const reason =
-      summaryReason(p.ws.name, names) ??
-      (COPY_SHEET.test(p.ws.name) ? "ชื่อชีตบอกว่าเป็นฉบับสำรอง/สำเนา" : null) ??
-      (dup ? `ซ้ำกับชีต "${dup}"` : null) ??
-      (p.rows.length === 0 ? "ไม่มีบรรทัดงาน" : null);
-    if (!reason) kept.push({ name: p.ws.name, names: new Set(names.map(nameKey)) });
-    const suggested = reason === null;
-    return {
-      name: p.ws.name,
-      rows: p.rows.length,
-      suggested,
-      selected: options.sheets ? options.sheets.includes(p.ws.name) : suggested,
-      reason,
-    };
-  });
+  const sheets = sheetChoices(parsed, options.sheets);
   const chosen = parsed.filter((_, i) => sheets[i].selected);
   if (chosen.length === 0) {
     throw new ImportFileError(options.sheets ? "ยังไม่ได้เลือกชีตที่จะนำเข้า" : "ไม่พบบรรทัดรายการใต้หัวตาราง");
@@ -655,12 +805,7 @@ export async function parseBoqImport(
 
   const firstSets = chosen[0].sets;
   const priceSet = Math.min(requested, firstSets.length - 1);
-  for (const p of chosen) {
-    if (p.sets.length <= requested && firstSets.length > 1) headerWarnings.push(`ชีต "${p.ws.name}" มีราคาชุดเดียว — ใช้ชุดนั้นแทนชุดที่เลือก`);
-    // ห้ามให้ราคาฝั่งไหนเป็น 0 เงียบ ๆ เพราะหาคอลัมน์ไม่เจอ
-    if (p.set.columns.laborUnitPrice === undefined) headerWarnings.push(`ชีต "${p.ws.name}": ไม่พบคอลัมน์ค่าแรง — ค่าแรงทุกบรรทัดจะเป็น 0`);
-    if (p.set.columns.materialUnitPrice === undefined) headerWarnings.push(`ชีต "${p.ws.name}": ไม่พบคอลัมน์ราคาวัสดุ — ราคาวัสดุทุกบรรทัดจะเป็น 0`);
-  }
+  headerWarnings.push(...priceSetWarnings(chosen, requested, firstSets.length));
 
   const rows = chosen.flatMap((p) => p.rows);
   if (rows.length > IMPORT_MAX_ROWS) {
@@ -670,7 +815,7 @@ export async function parseBoqImport(
   return {
     source: readSource(wb),
     sheetNames: chosen.map((p) => p.ws.name),
-    skippedSheets: found.filter((x) => !hasCost(x.header)).map((x) => x.ws.name),
+    skippedSheets: found.filter((x) => !hasCostColumn(x.header.columns)).map((x) => x.ws.name),
     rows,
     skippedRows: chosen.flatMap((p) => p.skipped),
     sheets,

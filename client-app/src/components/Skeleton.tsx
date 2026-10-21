@@ -164,7 +164,6 @@ export function RequestDetailSkeleton() {
 
 function RequestDetailBody() {
   return (
-    <>
       <div className="flex flex-col gap-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <Skeleton className="h-4 w-16" />
@@ -188,7 +187,6 @@ function RequestDetailBody() {
           ))}
         </div>
       </div>
-    </>
   );
 }
 
@@ -207,7 +205,6 @@ export function DocumentSkeleton() {
 
 function DocumentBody() {
   return (
-    <>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start lg:gap-8">
         <div className="rounded-xl border border-slate-200 bg-white p-5 lg:col-span-4 lg:col-start-9 lg:row-start-1">
           <div className="flex items-center justify-between">
@@ -237,7 +234,6 @@ function DocumentBody() {
           </div>
         </div>
       </div>
-    </>
   );
 }
 
@@ -565,8 +561,8 @@ export function FormFieldsSkeleton({
 }: Readonly<{ fields?: ("input" | "choice" | "textarea")[]; label?: string }>) {
   return (
     <SkeletonGroup label={label} className="flex flex-col gap-4">
-      {fields.map((kind, i) => (
-        <div key={i} className="flex flex-col gap-2">
+      {fields.map((kind, n) => ({ kind, key: `${kind}-${n}` })).map(({ kind, key }) => (
+        <div key={key} className="flex flex-col gap-2">
           <Skeleton className="h-3.5 w-28" />
           {kind === "input" && <Skeleton className="h-10.5 w-full rounded" />}
           {kind === "textarea" && <Skeleton className="h-21 w-full rounded" />}

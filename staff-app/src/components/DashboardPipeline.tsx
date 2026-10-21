@@ -151,7 +151,7 @@ export function DashboardPipeline({ pipeline }: Readonly<{ pipeline: DashboardPi
           <StageCard
             key={stage.key}
             stage={stage}
-            share={stage.value == null ? null : totalValue > 0 ? stage.value / totalValue : 0}
+            share={shareOf(stage.value, totalValue)}
           />
         ))}
       </div>
@@ -161,4 +161,10 @@ export function DashboardPipeline({ pipeline }: Readonly<{ pipeline: DashboardPi
       </p>
     </section>
   );
+}
+
+/** สัดส่วนมูลค่าของขั้นจากทั้งท่อ — ไม่รู้มูลค่า = null (ไม่วาดแถบ) · ท่อว่าง = 0 */
+function shareOf(value: number | null, total: number) {
+  if (value == null) return null;
+  return total > 0 ? value / total : 0;
 }

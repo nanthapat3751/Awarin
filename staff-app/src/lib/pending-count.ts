@@ -31,7 +31,7 @@ export function setPendingBadge(items: PendingItem[]): void {
   fetchedAt = Date.now();
   const urgent = items.filter((it) => it.level === "urgent").length;
   const count = urgent + items.filter((it) => it.level === "soon").length;
-  if (badge && badge.count === count && badge.urgent === urgent) return;
+  if (badge?.count === count && badge.urgent === urgent) return;
   badge = { count, urgent };
   listeners.forEach((l) => l());
 }

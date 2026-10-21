@@ -111,7 +111,7 @@ export function ServiceTile({
           aria-hidden="true"
           className="mt-3 inline-flex items-center gap-1 text-sm font-medium"
         >
-          ดูรายละเอียด
+          <span>ดูรายละเอียด</span>
           <span className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none">
             →
           </span>

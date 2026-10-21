@@ -181,28 +181,34 @@ function renderTotals(data: BillingDocPdfData): string {
 /** หมายเหตุ (ช่องซ้ายของตารางยอดรวม) — ทุกเรื่องที่คนรับเอกสารต้องรู้ เรียงเป็นบรรทัด */
 function notesOf(data: BillingDocPdfData): string[] {
   const notes: string[] = [`อ้างอิงสัญญาเลขที่ ${esc(data.contractNo)} · โครงการ ${esc(data.projectNo)}`];
-  const retention = data.retentionAmount ?? 0;
-  if (data.type === "INVOICE") {
-    if (data.dueOn) notes.push(`<b>กำหนดชำระภายในวันที่ ${thaiDate(data.dueOn)}</b>`);
-    if (retention > 0) {
-      notes.push("เงินประกันผลงานที่หักไว้ ผู้ว่าจ้างจะคืนให้เมื่อพ้นระยะรับประกันผลงานตามสัญญา — บริษัทจะออกใบกำกับภาษีของเงินส่วนนี้เมื่อได้รับคืน");
-    }
-    if ((data.withholdingAmount ?? 0) > 0) {
-      notes.push(`ผู้ว่าจ้างเป็นนิติบุคคล กรุณาหักภาษี ณ ที่จ่าย ${WITHHOLDING_TAX_PCT}% ของมูลค่างานก่อนภาษีมูลค่าเพิ่ม และส่งหนังสือรับรองการหักภาษี ณ ที่จ่ายให้บริษัทพร้อมการชำระเงิน`);
-    }
-    notes.push("เอกสารนี้ไม่ใช่ใบกำกับภาษี — บริษัทจะออกใบเสร็จรับเงิน/ใบกำกับภาษีให้เมื่อได้รับชำระเงินแล้ว");
-  } else {
-    const paid = [
-      `ชำระโดย ${data.method ? PAYMENT_METHOD_LABELS[data.method] : "-"}`,
-      data.reference ? `เลขอ้างอิง ${escapeHtml(data.reference)}` : null,
-      `ได้รับเงินวันที่ ${thaiDate(data.issuedOn)}`,
-    ].filter(Boolean);
-    notes.push(paid.join(" · "));
-    if (retention > 0) notes.push("เงินประกันผลงานที่ผู้ว่าจ้างกันไว้ จะได้รับคืนเมื่อพ้นระยะรับประกันผลงานตามสัญญา");
-    if (data.method === "CHEQUE") notes.push("ชำระด้วยเช็ค — ใบเสร็จนี้สมบูรณ์เมื่อบริษัทเรียกเก็บเงินตามเช็คได้แล้ว");
-  }
+  notes.push(...(data.type === "INVOICE" ? invoiceNotes(data) : receiptNotes(data)));
   if (data.vatAmount == null) notes.push("สัญญาฉบับนี้ไม่ได้แยกยอดภาษีมูลค่าเพิ่มไว้ ยอดในเอกสารจึงไม่แยก VAT");
   if (data.replacesDocNo) notes.push(`ออกแทนเอกสารเลขที่ ${escapeHtml(data.replacesDocNo)} ที่ยกเลิก`);
+  return notes;
+}
+
+function invoiceNotes(data: BillingDocPdfData): string[] {
+  const notes: string[] = [];
+  if (data.dueOn) notes.push(`<b>กำหนดชำระภายในวันที่ ${thaiDate(data.dueOn)}</b>`);
+  if ((data.retentionAmount ?? 0) > 0) {
+    notes.push("เงินประกันผลงานที่หักไว้ ผู้ว่าจ้างจะคืนให้เมื่อพ้นระยะรับประกันผลงานตามสัญญา — บริษัทจะออกใบกำกับภาษีของเงินส่วนนี้เมื่อได้รับคืน");
+  }
+  if ((data.withholdingAmount ?? 0) > 0) {
+    notes.push(`ผู้ว่าจ้างเป็นนิติบุคคล กรุณาหักภาษี ณ ที่จ่าย ${WITHHOLDING_TAX_PCT}% ของมูลค่างานก่อนภาษีมูลค่าเพิ่ม และส่งหนังสือรับรองการหักภาษี ณ ที่จ่ายให้บริษัทพร้อมการชำระเงิน`);
+  }
+  notes.push("เอกสารนี้ไม่ใช่ใบกำกับภาษี — บริษัทจะออกใบเสร็จรับเงิน/ใบกำกับภาษีให้เมื่อได้รับชำระเงินแล้ว");
+  return notes;
+}
+
+function receiptNotes(data: BillingDocPdfData): string[] {
+  const paid = [
+    `ชำระโดย ${data.method ? PAYMENT_METHOD_LABELS[data.method] : "-"}`,
+    data.reference ? `เลขอ้างอิง ${escapeHtml(data.reference)}` : null,
+    `ได้รับเงินวันที่ ${thaiDate(data.issuedOn)}`,
+  ].filter(Boolean);
+  const notes = [paid.join(" · ")];
+  if ((data.retentionAmount ?? 0) > 0) notes.push("เงินประกันผลงานที่ผู้ว่าจ้างกันไว้ จะได้รับคืนเมื่อพ้นระยะรับประกันผลงานตามสัญญา");
+  if (data.method === "CHEQUE") notes.push("ชำระด้วยเช็ค — ใบเสร็จนี้สมบูรณ์เมื่อบริษัทเรียกเก็บเงินตามเช็คได้แล้ว");
   return notes;
 }
 
@@ -213,10 +219,9 @@ function renderVoidMark(data: BillingDocPdfData): string {
 
 function renderVoided(data: BillingDocPdfData): string {
   if (!data.voidedAt) return "";
+  const reason = data.voidReason ? ` — ${escapeHtml(data.voidReason)}` : "";
   return `
-    <div class="void-banner">เอกสารนี้ถูกยกเลิกเมื่อ ${voidedAtFormat.format(data.voidedAt)}${
-      data.voidReason ? ` — ${escapeHtml(data.voidReason)}` : ""
-    } · ใช้อ้างอิงไม่ได้</div>`;
+    <div class="void-banner">เอกสารนี้ถูกยกเลิกเมื่อ ${voidedAtFormat.format(data.voidedAt)}${reason} · ใช้อ้างอิงไม่ได้</div>`;
 }
 
 /** บรรทัดรายการ (หัวข้อโครงการขีดเส้นใต้ + รายการงวด) ตามแบบฟอร์ม */
@@ -233,9 +238,11 @@ function itemOf(data: BillingDocPdfData): { title: string; sub: string | null } 
 /** ชื่อบริษัทบรรทัดแรกของหัว: ชื่อไทย + สาขา / ชื่ออังกฤษ (ตามแบบฟอร์ม) */
 function companyLine(data: BillingDocPdfData): string {
   const branch = data.companyBranch?.trim();
-  const branchText = branch ? (branch.startsWith("สาขา") ? ` ${branch}` : ` สาขา ${branch}`) : "";
+  let branchText = "";
+  if (branch) branchText = branch.startsWith("สาขา") ? ` ${branch}` : ` สาขา ${branch}`;
   const en = data.companyNameEn?.trim();
-  return `${escapeHtml(data.companyName)}${escapeHtml(branchText)}${en ? ` / ${escapeHtml(en)}` : ""}`;
+  const enText = en ? ` / ${escapeHtml(en)}` : "";
+  return `${escapeHtml(data.companyName)}${escapeHtml(branchText)}${enText}`;
 }
 
 type CopyLabel = "ต้นฉบับ" | "สำเนา";
@@ -332,7 +339,8 @@ function renderSummary(data: BillingDocPdfData): string {
 /** ช่องเซ็น ผู้วางบิล / ผู้รับวางบิล ทุกใบ (ตามแบบฟอร์มเดิมของบริษัท — ผู้ใช้เลือกคงคำเดิม) */
 function renderSignatures(data: BillingDocPdfData): string {
   const ink = data.signatureDataUrl ? `<img class="sign-ink" src="${data.signatureDataUrl}" alt="" />` : "";
-  const who = `${escapeHtml(data.issuedByName)}${data.issuedByTitle ? ` · ${escapeHtml(data.issuedByTitle)}` : ""}`;
+  const titleText = data.issuedByTitle ? ` · ${escapeHtml(data.issuedByTitle)}` : "";
+  const who = `${escapeHtml(data.issuedByName)}${titleText}`;
   return `
     <table class="grid signs">
       <colgroup><col style="width:17%" /><col style="width:33%" /><col style="width:17%" /><col style="width:33%" /></colgroup>

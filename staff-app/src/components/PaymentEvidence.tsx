@@ -149,7 +149,7 @@ export function EvidencePicker({
         )}
         {viewing != null && attached.length > 0 && (
           <SlipViewerDialog
-            title={`${evidenceNoun(method)}${attachedLabel ? ` ${attachedLabel}` : ""}`}
+            title={[evidenceNoun(method), attachedLabel].filter(Boolean).join(" ")}
             files={attached}
             startIndex={viewing}
             onClose={() => setViewing(null)}
@@ -218,7 +218,7 @@ export function PaymentEvidenceList({
           <button
             type="button"
             onClick={() => setViewing(i)}
-            title={`${e.fileName}${e.uploadedByName ? ` · แนบโดย ${e.uploadedByName}` : ""}`}
+            title={uploadedTitle(e.fileName, e.uploadedByName)}
             className="link-pill -my-0.5 -ml-1.5 inline-flex max-w-[10rem] items-center gap-1 px-1.5 py-0.5 font-medium text-brand"
           >
             <FileIcon name={e.fileName} />
@@ -245,7 +245,7 @@ export function PaymentEvidenceList({
           className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 font-medium text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
         >
           <Paperclip size={11} />
-          {evidence.length === 0 ? `แนบ${method === "TRANSFER" ? "สลิป" : "หลักฐาน"}` : "เพิ่มไฟล์"}
+          {evidence.length === 0 ? `แนบ${slipNoun(method)}` : "เพิ่มไฟล์"}
         </button>
       )}
       {viewing != null && evidence.length > 0 && (
@@ -269,4 +269,12 @@ export function PaymentEvidenceList({
       />
     </span>
   );
+}
+
+function uploadedTitle(fileName: string, uploadedByName: string | null | undefined) {
+  return uploadedByName ? `${fileName} · แนบโดย ${uploadedByName}` : fileName;
+}
+
+function slipNoun(method: PaymentMethod) {
+  return method === "TRANSFER" ? "สลิป" : "หลักฐาน";
 }

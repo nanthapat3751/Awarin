@@ -208,6 +208,27 @@ describe("เงินประกันผลงาน", () => {
     expect(Number(invoiced.body.retention.documents[0].amount)).toBe(outstanding);
     expect((await owner.agent.post(url("/retention/invoice")).send({ dueOn })).status).toBe(409);
 
+    // พิมพ์ยอดรับคืนผิด → แก้ได้ · ลบทิ้งแล้วบันทึกใหม่ได้ (ตราบใดที่ยังไม่ออกใบเสร็จ)
+    const half = r2(outstanding / 2);
+    const typo = await owner.agent
+      .post(url("/retention/releases"))
+      .send({ paidOn: todayIso(), amount: half, withholdingAmount: 0 });
+    expect(typo.status).toBe(200);
+    const typoRelease = typo.body.retention.releases[0];
+    expect(typo.body.retention.balance.outstanding).toBeCloseTo(outstanding - half, 2);
+
+    const fixed = await owner.agent
+      .patch(url(`/retention/releases/${typoRelease.id}`))
+      .send({ paidOn: todayIso(), amount: outstanding, withholdingAmount: 0, note: "แก้ยอดที่พิมพ์ผิด" });
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.retention.balance.outstanding).toBe(0);
+    expect(fixed.body.retention.releases[0]).toMatchObject({ id: typoRelease.id, note: "แก้ยอดที่พิมพ์ผิด" });
+
+    const removed = await owner.agent.delete(url(`/retention/releases/${typoRelease.id}`));
+    expect(removed.status).toBe(200);
+    expect(removed.body.retention.releases).toHaveLength(0);
+    expect(removed.body.retention.balance.outstanding).toBe(outstanding);
+
     const released = await owner.agent.post(url("/retention/releases")).send({
       paidOn: todayIso(),
       amount: outstanding,

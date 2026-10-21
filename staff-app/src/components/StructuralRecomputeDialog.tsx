@@ -11,7 +11,11 @@ import { Notice } from "./Notice";
 
 const qty = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const money = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(Math.abs(n))}`;
+/** ยอดพร้อมเครื่องหมาย + / − (ศูนย์ไม่มีเครื่องหมาย) */
+function signed(n: number) {
+  if (n > 0) return `+${money(n)}`;
+  return n < 0 ? `−${money(Math.abs(n))}` : money(Math.abs(n));
+}
 
 /**
  * คิดชิ้นส่วนทุกชิ้นใหม่ด้วยชุดเสนอราคาปัจจุบัน (Phase 2 ข้อ 3b) — พรีวิวก่อน-หลังก่อนยืนยันเสมอ
@@ -63,7 +67,7 @@ export function StructuralRecomputeDialog({
     }
   }
 
-  const nothing = preview != null && preview.changedMembers === 0;
+  const nothing = preview?.changedMembers === 0;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -74,8 +78,7 @@ export function StructuralRecomputeDialog({
         onClick={() => !saving && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="recompute-title"
         className="relative flex max-h-[88vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl"
@@ -196,7 +199,7 @@ export function StructuralRecomputeDialog({
             </Button>
           )}
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body,
   );

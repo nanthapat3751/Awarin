@@ -57,6 +57,17 @@ const blankRow = (deduct = false): EditorRow => ({
 });
 
 /** แถวที่บันทึกไว้ (string จาก API หรือ number จากตัวคิดโครงสร้าง) → แถวแก้ไขได้ */
+/** หน่วยของคอลัมน์ผลลัพธ์ — เหล็กคิดเป็นน้ำหนัก (ตัน/กก.) · อื่น ๆ ใช้หน่วยของบรรทัด */
+function resultUnitOf(shape: TakeoffShape, unit: string) {
+  if (shape !== "WEIGHT") return unit;
+  return unit.includes("ตัน") ? "ตัน" : "กก.";
+}
+
+function labelPlaceholder(deduct: boolean, index: number) {
+  if (deduct) return "เช่น ประตู D1";
+  return index === 0 ? "เช่น F1, ผนังห้องนอน 1" : "";
+}
+
 function toEditorRows(rows: (TakeoffRowDto | TakeoffRowInput)[]): EditorRow[] {
   const s = (v: string | number | null | undefined) => (v == null ? "" : String(Number(v)));
   return rows.map((r) => ({
@@ -236,8 +247,7 @@ export function TakeoffSheetDialog({
         onClick={() => !saving && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="takeoff-title"
         className="relative flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl"
@@ -306,7 +316,7 @@ export function TakeoffSheetDialog({
                       {DIM_LABEL[shape][d]}
                     </th>
                   ))}
-                  <th className="w-28 text-right">= {shape === "WEIGHT" ? (unit.includes("ตัน") ? "ตัน" : "กก.") : unit}</th>
+                  <th className="w-28 text-right">= {resultUnitOf(shape, unit)}</th>
                   <th className="w-20" />
                 </tr>
               </thead>
@@ -332,7 +342,7 @@ export function TakeoffSheetDialog({
                             value={r.label}
                             onChange={(e) => update(i, { label: e.target.value })}
                             onKeyDown={(e) => onCellKeyDown(e, i, "label")}
-                            placeholder={r.deduct ? "เช่น ประตู D1" : i === 0 ? "เช่น F1, ผนังห้องนอน 1" : ""}
+                            placeholder={labelPlaceholder(r.deduct, i)}
                             maxLength={120}
                             className="w-full min-w-0 rounded-md border border-slate-300 px-2 py-1 text-sm"
                           />
@@ -394,7 +404,14 @@ export function TakeoffSheetDialog({
                       <td
                         className={`px-2 py-1.5 text-right tabular-nums whitespace-nowrap ${r.deduct ? "text-red-700" : "text-slate-800"}`}
                       >
-                        {value == null ? <span className="text-slate-300">—</span> : `${r.deduct ? "−" : ""}${fmt3(value)}`}
+                        {value == null ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          <>
+                            {r.deduct && "−"}
+                            {fmt3(value)}
+                          </>
+                        )}
                       </td>
                       <td className="px-1 py-1.5">
                         <div className="flex items-center justify-end gap-0.5">
@@ -469,7 +486,7 @@ export function TakeoffSheetDialog({
                   onChange={(e) => setWaste(e.target.value)}
                   className="w-16 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-right text-sm"
                 />
-                %
+                <span>%</span>
               </dt>
               <dd className="text-right text-slate-500">{wasteNum > 0 ? `+${fmt3(total.quantity - total.net)}` : "—"}</dd>
             </dl>
@@ -500,7 +517,7 @@ export function TakeoffSheetDialog({
             </Button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body,
   );

@@ -129,7 +129,7 @@ function VerifyBadge({ payment, canVerify }: Readonly<{ payment: InstallmentPaym
       <span className="inline-flex items-center gap-0.5 text-emerald-700" title={by}>
         <ShieldCheck size={13} aria-hidden />
         <span className="sr-only">{by}</span>
-        ตรงกับบัญชี
+        <span>ตรงกับบัญชี</span>
       </span>
     );
   }
@@ -144,6 +144,149 @@ function VerifyBadge({ payment, canVerify }: Readonly<{ payment: InstallmentPaym
 
 /** มีคนถือเงินมากับมือ (ไม่ได้เข้าบัญชีบริษัทตรง) — ต้องรู้ว่าใครรับ */
 const handCarried = (m: PaymentMethod) => m === "CASH" || m === "CHEQUE";
+
+/**
+ * ยอดที่ตั้งต้นในฟอร์มรับเงิน (ชำระส่วนที่เหลือของงวด) — ใช้ทั้งฟอร์มและหน้าต่างตรวจสลิป
+ * "เข้าบัญชีจริง" = ยอด − หัก ณ ที่จ่าย − เงินประกัน คือตัวเลขที่ควรเห็นบนสลิป
+ */
+function receiptDefaultsOf(item: InstallmentWithPaymentsDto, retentionPct: number | null) {
+  const amount = item.progress.remaining > 0 ? item.progress.remaining : Number(item.amount);
+  // เติมเฉพาะครั้งแรกของงวด — รับบางส่วนแล้วเดาสัดส่วนที่ถูกหักแทนกันไม่ได้
+  const withholding = item.expectedWithholding != null && item.payments.length === 0 ? item.expectedWithholding : 0;
+  // เงินประกันคิดตาม % ของยอดที่ชำระครั้งนี้ — แก้เองได้ถ้าลูกค้ากันไว้ไม่ตรง
+  const retention = retentionOf(amount, retentionPct);
+  return { amount, withholding, retention, transfer: Math.round((amount - withholding - retention) * 100) / 100 };
+}
+
+const receiptOf = (item: InstallmentWithPaymentsDto, paymentId: string) =>
+  item.documents.find((d) => d.type === "RECEIPT" && d.paymentId === paymentId && !d.voidedAt);
+
+function formTitle(editing: boolean, fromNotice: boolean) {
+  if (editing) return "แก้รายการรับเงิน";
+  return fromNotice ? "ยืนยันรับเงินตามที่ลูกค้าแจ้งโอน" : "บันทึกรับเงิน";
+}
+
+function moreToggleLabel(more: boolean, showWithholding: boolean) {
+  if (more) return "ซ่อนรายละเอียด";
+  const wht = showWithholding ? " / หัก ณ ที่จ่าย" : "";
+  return `รับไม่ครบ${wht} / เลขอ้างอิง / หมายเหตุ`;
+}
+
+/** ป้ายยอดในฟอร์ม: รับครบงวด · รับส่วนที่เหลือ · หรือยอดที่ชำระ (รับบางส่วน/รับเกิน) */
+function amountLabelOf(amount: number, item: InstallmentWithPaymentsDto) {
+  if (amount === Number(item.amount)) return "รับครบงวด";
+  if (amount === item.progress.remaining) return "รับส่วนที่เหลือของงวด";
+  return "ยอดที่ชำระ";
+}
+
+/** ยอดเงินอ่านเป็นประโยคเดียว (มีลูกน้ำ) — เงินเข้าบัญชีจริงคิดสดให้ ไม่ต้องคำนวณเอง */
+function FormAmountSummary({
+  amountLabel,
+  amount,
+  wht,
+  ret,
+  net,
+  notice,
+  more,
+}: Readonly<{
+  amountLabel: string;
+  amount: number;
+  wht: number;
+  ret: number;
+  net: number;
+  notice: PaymentNoticeDto | null;
+  more: boolean;
+}>) {
+  const noticeAmount = notice ? Number(notice.amount) : 0;
+  const mismatch = notice != null && Math.abs(net - noticeAmount) > 0.009;
+  return (
+    <>
+      <p className="mt-3 text-sm text-slate-600">
+        {amountLabel}{" "}
+        <span className="font-semibold tabular-nums text-slate-800">{money(amount)}</span> บาท
+        {(wht > 0 || ret > 0) && (
+          <span className="text-slate-500">
+            {wht > 0 && (
+              <>
+                {" "}· หัก ณ ที่จ่าย <span className="tabular-nums">{money(wht)}</span>
+              </>
+            )}
+            {ret > 0 && (
+              <>
+                {" "}· กันเงินประกัน <span className="tabular-nums">{money(ret)}</span>
+              </>
+            )}{" "}
+            · เข้าบัญชีจริง <span className="tabular-nums text-slate-700">{money(net)}</span>
+          </span>
+        )}
+      </p>
+      {notice && (
+        <p className="text-xs text-slate-500">
+          ลูกค้าแจ้งโอน{" "}
+          <span className={`tabular-nums ${mismatch ? "font-semibold text-amber-700" : "text-slate-700"}`}>{money(noticeAmount)}</span>{" "}
+          บาท{notice.evidence.length > 0 && " · สลิปของลูกค้าในช่องหลักฐานจะแนบให้เองตอนบันทึก"}
+          {mismatch && " — ไม่ตรงกับเงินเข้าบัญชีจริงด้านบน ตรวจยอดอีกครั้ง"}
+        </p>
+      )}
+      {ret > 0 && more && <p className="text-xs text-slate-400">ยอดที่ชำระทั้งหมดนับว่าจ่ายงวดนี้แล้ว ส่วนที่กันไว้ไปรอคืนท้ายสัญญา</p>}
+    </>
+  );
+}
+
+/** ช่อง "รับแล้ว" ของงวด (จอกว้าง) */
+function PaidCell({ p, narrow }: Readonly<{ p: InstallmentWithPaymentsDto["progress"]; narrow: boolean }>) {
+  return (
+    <td className={`py-2.5 pr-2 text-right ${narrow ? "hidden" : ""}`}>
+      {p.paidAmount > 0 ? (
+        <p className="tabular-nums text-slate-700">{money(p.paidAmount)}</p>
+      ) : (
+        <p className="text-slate-300">
+          <span aria-hidden>—</span>
+          <span className="sr-only">ยังไม่ได้รับ</span>
+        </p>
+      )}
+      {p.overpaidAmount > 0 && <p className="text-xs tabular-nums text-amber-700">เกิน {money(p.overpaidAmount)}</p>}
+      {(p.withheldAmount > 0 || p.retainedAmount > 0) && (
+        <p className="text-xs tabular-nums text-slate-400">เข้าบัญชี {money(p.receivedAmount)}</p>
+      )}
+    </td>
+  );
+}
+
+/** ช่อง "คงเหลือ" (จอแคบซ้อนสถานะไว้ใต้ตัวเลข) */
+function RemainingCell({ p, narrow }: Readonly<{ p: InstallmentWithPaymentsDto["progress"]; narrow: boolean }>) {
+  return (
+    <td className="py-2.5 pr-3 text-right">
+      {p.remaining > 0 ? (
+        <p className="font-semibold tabular-nums text-slate-900">{money(p.remaining)}</p>
+      ) : (
+        <p className="text-slate-300">
+          <span aria-hidden>—</span>
+          <span className="sr-only">ไม่มียอดคงเหลือ</span>
+        </p>
+      )}
+      {narrow && (
+        <span className={`mt-1 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[p.status]}`}>
+          {p.statusLabel}
+        </span>
+      )}
+      {narrow && p.daysOverdue != null && <p className="mt-0.5 text-xs text-amber-700">เกินกำหนด {p.daysOverdue} วัน</p>}
+    </td>
+  );
+}
+
+/** รายละเอียดหักของรายการรับเงิน — "(หัก ณ ที่จ่าย … · กันเงินประกัน … · เข้าบัญชี …)" */
+function deductionNote(pay: InstallmentPaymentDto) {
+  const wht = Number(pay.withholdingAmount);
+  const ret = Number(pay.retentionAmount);
+  return [
+    wht > 0 ? `หัก ณ ที่จ่าย ${money(wht)}` : null,
+    ret > 0 ? `กันเงินประกัน ${money(ret)}` : null,
+    `เข้าบัญชี ${money(Number(pay.amount) - wht - ret)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 
 /**
  * ติดตามการจ่ายเงินรายงวด — แทนที่ตัวแก้แผนงวดเมื่อสัญญาลงนามแล้ว
@@ -201,20 +344,6 @@ export function ContractPaymentsPanel({
    * เปิดฟอร์มโดยเติมค่าที่เดาได้ล่วงหน้า: ยอด = ที่ยังขาดอยู่ · ภาษีหัก ณ ที่จ่าย = ที่คาดว่า
    * จะถูกหักจากงวดนี้ · วันที่ = วันนี้ — กรณีปกติ (โอนเต็มงวดวันนี้) จึงเหลือแค่กดยืนยัน
    */
-  /**
-   * ยอดที่ตั้งต้นในฟอร์มรับเงิน (ชำระส่วนที่เหลือของงวด) — ใช้ทั้งฟอร์มและหน้าต่างตรวจสลิป
-   * "เข้าบัญชีจริง" = ยอด − หัก ณ ที่จ่าย − เงินประกัน คือตัวเลขที่ควรเห็นบนสลิป
-   */
-  function receiptDefaultsOf(item: InstallmentWithPaymentsDto, retentionPct: number | null) {
-    const amount = item.progress.remaining > 0 ? item.progress.remaining : Number(item.amount);
-    // เติมเฉพาะครั้งแรกของงวด — รับบางส่วนแล้วเดาสัดส่วนที่ถูกหักแทนกันไม่ได้
-    const withholding =
-      item.expectedWithholding != null && item.payments.length === 0 ? item.expectedWithholding : 0;
-    // เงินประกันคิดตาม % ของยอดที่ชำระครั้งนี้ — แก้เองได้ถ้าลูกค้ากันไว้ไม่ตรง
-    const retention = retentionOf(amount, retentionPct);
-    return { amount, withholding, retention, transfer: Math.round((amount - withholding - retention) * 100) / 100 };
-  }
-
   function openAdd(item: InstallmentWithPaymentsDto, notice: PaymentNoticeDto | null = null) {
     if (!view) return;
     setOpenFor(item.id);
@@ -252,10 +381,11 @@ export function ContractPaymentsPanel({
 
   async function verifyFor(item: InstallmentWithPaymentsDto, pay: InstallmentPaymentDto) {
     const net = Number(pay.amount) - Number(pay.withholdingAmount) - Number(pay.retentionAmount);
+    const refNote = pay.reference ? ` · อ้างอิง ${pay.reference}` : "";
     const ok = await confirm(
       `ยืนยันว่าเงินเข้าบัญชีบริษัทแล้ว ${money(net)} บาท?\n` +
         `งวดที่ ${item.seq} · ${thaiDate(pay.paidOn)} · ${PAYMENT_METHOD_LABELS[pay.method]}` +
-        `${pay.reference ? ` · อ้างอิง ${pay.reference}` : ""}\n\n` +
+        `${refNote}\n\n` +
         "เปิดแอปธนาคารหรือสเตทเมนต์เทียบยอดและวันที่ก่อนกด — ยืนยันแล้วลูกค้าจะได้รับแจ้งว่าบริษัทได้รับเงิน",
       { confirmLabel: "ตรงกับบัญชีแล้ว", variant: "brand" },
     );
@@ -293,10 +423,11 @@ export function ContractPaymentsPanel({
   async function confirmBySlip(item: InstallmentWithPaymentsDto, notice: PaymentNoticeDto) {
     const files = notice.slipCheck?.files.filter((f) => f.status === "PASSED") ?? [];
     const total = files.reduce((sum, f) => sum + Number(f.amount ?? 0), 0);
+    const refNote = files[0]?.transRef ? ` · อ้างอิง ${files.map((f) => f.transRef).join(", ")}` : "";
     const ok = await confirm(
       `ยืนยันรับเงินงวดที่ ${item.seq} ${money(total)} บาท และออกใบเสร็จ?\n` +
         `ธนาคารยืนยันรายการโอนแล้ว · เข้าบัญชีบริษัท · ยอดและวันที่ตรง` +
-        `${files[0]?.transRef ? ` · อ้างอิง ${files.map((f) => f.transRef).join(", ")}` : ""}\n\n` +
+        `${refNote}\n\n` +
         "ระบบจะบันทึกรับเงิน นับว่ายืนยันกับบัญชีแล้ว (ใช้ผลตรวจสลิปแทนการเปิดแอปธนาคาร) และออกใบเสร็จที่ลบไม่ได้ — ลูกค้าจะได้รับแจ้ง",
       { confirmLabel: "ยืนยัน & ออกใบเสร็จ", variant: "brand" },
     );
@@ -487,6 +618,97 @@ export function ContractPaymentsPanel({
 
   const { summary } = view;
   const docCtx = { projectId, contractId, onChange: setView };
+
+  // ออกใบเสร็จแล้วแก้/ลบไม่ได้ (เซิร์ฟเวอร์ก็ปฏิเสธ) — ต้องยกเลิกใบเสร็จก่อน
+  const canEditRow = (item: InstallmentWithPaymentsDto, payment: InstallmentPaymentDto) =>
+    (user?.role === "OWNER" || payment.recordedById === user?.id) && !hasActiveReceipt(item.documents, payment.id);
+
+  /** คำสั่งของรายการรับเงินหนึ่งรายการในเมนู ⋯ (ไม่ซ้ำกับปุ่มขั้นถัดไปที่เห็นในแถว) */
+  function paymentMenuOf(item: InstallmentWithPaymentsDto, pay: InstallmentPaymentDto, next: NextStep | null): RowMenuItem[] {
+    const menu: RowMenuItem[] = [];
+    const when = `${thaiDate(pay.paidOn)} · ${money(Number(pay.amount))}`;
+    const isNext = (kind: NextStep["kind"]) => next?.kind === kind && "paymentId" in next && next.paymentId === pay.id;
+    if (!pay.verifiedAt && canVerify(pay) && !isNext("verify")) {
+      menu.push({ key: `verify-${pay.id}`, label: `ยืนยันเงินเข้า (${when})`, onSelect: () => void verifyFor(item, pay) });
+    }
+    const rc = receiptOf(item, pay.id);
+    // ใบเสร็จออกได้หลังยืนยันกับบัญชีแล้วเท่านั้น (เซิร์ฟเวอร์ก็ปฏิเสธ)
+    if (pay.verifiedAt && !rc && !isNext("receipt")) {
+      menu.push({ key: `rc-${pay.id}`, label: `ออกใบเสร็จ (${when})`, onSelect: () => void issueReceiptFor(pay.id) });
+    }
+    if (canEditRow(item, pay)) {
+      menu.push(
+        { key: `edit-${pay.id}`, label: `แก้รายการรับเงิน ${when}`, onSelect: () => openEdit(item, pay) },
+        { key: `del-${pay.id}`, label: `ลบรายการรับเงิน ${when}`, danger: true, onSelect: () => void remove(pay) },
+      );
+    }
+    // ใบเสร็จคือหลักฐานว่าได้รับเงินแล้ว — ยกเลิกได้เฉพาะเจ้าของกิจการ
+    if (rc && user?.role === "OWNER") {
+      menu.push({ key: `void-${rc.id}`, label: `ยกเลิกใบเสร็จ ${rc.docNo}`, danger: true, onSelect: () => setVoiding(rc.id) });
+    }
+    return menu;
+  }
+
+  /** คำสั่งที่ใช้ไม่บ่อยอยู่ในเมนู ⋯ — ปุ่มที่เห็นในแถวมีแค่ "ขั้นถัดไป" ปุ่มเดียว */
+  function rowMenuOf(item: InstallmentWithPaymentsDto, next: NextStep | null, formOpen: boolean): RowMenuItem[] {
+    const invoice = item.documents.find((d) => d.type === "INVOICE" && !d.voidedAt);
+    const menu: RowMenuItem[] = [];
+    if (!formOpen && item.pendingNotices.length === 0 && next?.kind !== "pay") {
+      menu.push({ key: "pay", label: "บันทึกรับเงิน", onSelect: () => openAdd(item) });
+    }
+    if (!invoice && item.progress.remaining > 0 && next?.kind !== "bill") {
+      menu.push({ key: "bill", label: "วางบิล (ออกใบแจ้งหนี้)", onSelect: () => setInvoiceFor(item.id) });
+    }
+    for (const pay of item.payments) menu.push(...paymentMenuOf(item, pay, next));
+    if (invoice) {
+      menu.push({ key: `void-${invoice.id}`, label: `ยกเลิกใบแจ้งหนี้ ${invoice.docNo}`, danger: true, onSelect: () => setVoiding(invoice.id) });
+    }
+    return menu;
+  }
+
+  /** กดปุ่มขั้นถัดไปของงวด */
+  function runNext(item: InstallmentWithPaymentsDto, next: NextStep) {
+    if (next.kind === "bill") setInvoiceFor(item.id);
+    else if (next.kind === "pay") openAdd(item);
+    else if (next.kind === "verify") {
+      const pay = item.payments.find((x) => x.id === next.paymentId);
+      if (pay) void verifyFor(item, pay);
+    } else void issueReceiptFor(next.paymentId);
+  }
+
+  /** รายการรับเงินใต้เงื่อนไขของงวด — ข้อมูลเป็นสีเทา ของที่กดได้เป็นลิงก์/ปุ่มมีกรอบ */
+  function renderPayments(item: InstallmentWithPaymentsDto) {
+    if (item.payments.length === 0) return null;
+    return (
+      <ul className="mt-1 flex flex-col gap-1">
+        {item.payments.map((pay) => (
+          <li key={pay.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+            <span>
+              <span className="tabular-nums">{thaiDate(pay.paidOn)}</span> · รับ{" "}
+              <span className="tabular-nums text-slate-700">{money(Number(pay.amount))}</span> ·{" "}
+              {PAYMENT_METHOD_LABELS[pay.method]}
+              {(Number(pay.withholdingAmount) > 0 || Number(pay.retentionAmount) > 0) && (
+                <span className="text-slate-400"> ({deductionNote(pay)})</span>
+              )}
+              {pay.reference && <span className="text-slate-400"> · อ้างอิง {pay.reference}</span>}
+              {pay.receivedBy && <span className="text-slate-400"> · รับโดย {pay.receivedBy}</span>}
+            </span>
+            <PaymentEvidenceList
+              payment={pay}
+              urlOf={(evidenceId) => paymentEvidenceUrl(projectId, contractId, pay.id, evidenceId)}
+              canDelete={(uploadedById) => user?.role === "OWNER" || uploadedById === user?.id || pay.recordedById === user?.id}
+              busy={busy}
+              onAttach={(files) => void attachLater(pay.id, files)}
+              onDelete={(evidenceId, fileName) => void removeEvidence(pay.id, evidenceId, fileName)}
+              onError={(m) => toast.error(m)}
+            />
+            <PaymentReceipt payment={pay} docs={item.documents} ctx={docCtx} />
+            <VerifyBadge payment={pay} canVerify={canVerify(pay)} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
   // วางบิลทีละงวดตามลำดับ — ปุ่ม "วางบิล" ขึ้นเฉพาะงวดแรกที่ยังค้างและยังไม่มีใบ (งวดอื่นสั่งได้จากเมนู ⋯)
   const nextToBill =
     view.installments.find(
@@ -505,15 +727,12 @@ export function ContractPaymentsPanel({
     const net = amount - wht - ret;
     // ลูกค้านิติบุคคลเท่านั้นที่หัก ณ ที่จ่าย — บุคคลธรรมดาไม่ต้องเห็นช่องที่เป็น 0 ตลอด
     const showWithholding = item.expectedWithholding != null || wht > 0;
-    let amountLabel = "ยอดที่ชำระ";
-    if (amount === Number(item.amount)) amountLabel = "รับครบงวด";
-    else if (amount === item.progress.remaining) amountLabel = "รับส่วนที่เหลือของงวด";
     const label = "flex flex-col gap-1 text-xs text-slate-500";
 
     return (
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
         <p className="mb-2 text-xs font-medium text-slate-600">
-          {editing ? "แก้รายการรับเงิน" : form.notice ? "ยืนยันรับเงินตามที่ลูกค้าแจ้งโอน" : "บันทึกรับเงิน"} งวด{" "}
+          {formTitle(Boolean(editing), Boolean(form.notice))} งวด{" "}
           {item.seq}
           {invoiceNo && <span className="font-normal text-slate-500"> · ตามใบแจ้งหนี้ {invoiceNo}</span>}
         </p>
@@ -568,7 +787,64 @@ export function ContractPaymentsPanel({
           </div>
         </div>
 
-        {form.more && (
+        {form.more && renderMoreFields(showWithholding)}
+
+        <FormAmountSummary
+          amountLabel={amountLabelOf(amount, item)}
+          amount={amount}
+          wht={wht}
+          ret={ret}
+          net={net}
+          notice={form.notice}
+          more={form.more}
+        />
+        {form.reviewing && renderReview(item)}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          {editing ? (
+            <span />
+          ) : (
+            <button
+              type="button"
+              aria-expanded={form.more}
+              onClick={() => setForm({ ...form, more: !form.more })}
+              className="link-pill -ml-2.5 inline-flex items-center gap-1 text-xs font-medium text-brand"
+            >
+              <ChevronDown size={13} className={`transition-transform ${form.more ? "rotate-180" : ""}`} />
+              {moreToggleLabel(form.more, showWithholding)}
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            {form.reviewing ? (
+              <>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setForm({ ...form, reviewing: false })}>
+                  กลับไปแก้
+                </Button>
+                <Button size="sm" disabled={busy} onClick={() => void submit(item.id)}>
+                  <Check size={14} /> ยืนยันบันทึก
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={closeForm}>
+                  <X size={14} /> ยกเลิก
+                </Button>
+                <Button size="sm" disabled={busy} onClick={startReview}>
+                  <Check size={14} /> {editing ? "บันทึกการแก้ไข" : "บันทึกรับเงิน"}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /** รายละเอียดที่ใช้นาน ๆ ครั้ง — ยอดรับไม่ครบ · หัก ณ ที่จ่าย · เงินประกัน · อ้างอิง · หมายเหตุ */
+  function renderMoreFields(showWithholding: boolean) {
+    if (!form || !view) return null;
+    const label = "flex flex-col gap-1 text-xs text-slate-500";
+    return (
           <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
             <label className={label}>
               <span>ยอดที่ชำระ</span>
@@ -630,86 +906,6 @@ export function ContractPaymentsPanel({
               <input className={INPUT} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </label>
           </div>
-        )}
-
-        {/* ยอดเงินอ่านเป็นประโยคเดียว (มีลูกน้ำ) — เงินเข้าบัญชีจริงคิดสดให้ ไม่ต้องคำนวณเอง */}
-        <p className="mt-3 text-sm text-slate-600">
-          {amountLabel}{" "}
-          <span className="font-semibold tabular-nums text-slate-800">{money(amount)}</span> บาท
-          {(wht > 0 || ret > 0) && (
-            <span className="text-slate-500">
-              {wht > 0 && (
-                <>
-                  {" "}· หัก ณ ที่จ่าย <span className="tabular-nums">{money(wht)}</span>
-                </>
-              )}
-              {ret > 0 && (
-                <>
-                  {" "}· กันเงินประกัน <span className="tabular-nums">{money(ret)}</span>
-                </>
-              )}{" "}
-              · เข้าบัญชีจริง <span className="tabular-nums text-slate-700">{money(net)}</span>
-            </span>
-          )}
-        </p>
-        {form.notice && (
-          <p className="text-xs text-slate-500">
-            ลูกค้าแจ้งโอน{" "}
-            <span
-              className={`tabular-nums ${
-                Math.abs(net - Number(form.notice.amount)) > 0.009 ? "font-semibold text-amber-700" : "text-slate-700"
-              }`}
-            >
-              {money(Number(form.notice.amount))}
-            </span>{" "}
-            บาท{form.notice.evidence.length > 0 && " · สลิปของลูกค้าในช่องหลักฐานจะแนบให้เองตอนบันทึก"}
-            {Math.abs(net - Number(form.notice.amount)) > 0.009 && " — ไม่ตรงกับเงินเข้าบัญชีจริงด้านบน ตรวจยอดอีกครั้ง"}
-          </p>
-        )}
-        {ret > 0 && form.more && (
-          <p className="text-xs text-slate-400">ยอดที่ชำระทั้งหมดนับว่าจ่ายงวดนี้แล้ว ส่วนที่กันไว้ไปรอคืนท้ายสัญญา</p>
-        )}
-        {form.reviewing && renderReview(item)}
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          {editing ? (
-            <span />
-          ) : (
-            <button
-              type="button"
-              aria-expanded={form.more}
-              onClick={() => setForm({ ...form, more: !form.more })}
-              className="link-pill -ml-2.5 inline-flex items-center gap-1 text-xs font-medium text-brand"
-            >
-              <ChevronDown size={13} className={`transition-transform ${form.more ? "rotate-180" : ""}`} />
-              {form.more
-                ? "ซ่อนรายละเอียด"
-                : `รับไม่ครบ${showWithholding ? " / หัก ณ ที่จ่าย" : ""} / เลขอ้างอิง / หมายเหตุ`}
-            </button>
-          )}
-          <div className="flex items-center gap-2">
-            {form.reviewing ? (
-              <>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setForm({ ...form, reviewing: false })}>
-                  กลับไปแก้
-                </Button>
-                <Button size="sm" disabled={busy} onClick={() => void submit(item.id)}>
-                  <Check size={14} /> ยืนยันบันทึก
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={closeForm}>
-                  <X size={14} /> ยกเลิก
-                </Button>
-                <Button size="sm" disabled={busy} onClick={startReview}>
-                  <Check size={14} /> {editing ? "บันทึกการแก้ไข" : "บันทึกรับเงิน"}
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
     );
   }
 
@@ -847,48 +1043,11 @@ export function ContractPaymentsPanel({
           <tbody>
             {view.installments.map((item) => {
               const p = item.progress;
-              // ออกใบเสร็จแล้วแก้/ลบไม่ได้ (เซิร์ฟเวอร์ก็ปฏิเสธ) — ต้องยกเลิกใบเสร็จก่อน
-              const canEditRow = (payment: InstallmentPaymentDto) =>
-                (user?.role === "OWNER" || payment.recordedById === user?.id) &&
-                !hasActiveReceipt(item.documents, payment.id);
               const invoice = item.documents.find((d) => d.type === "INVOICE" && !d.voidedAt);
-              const receiptOf = (paymentId: string) =>
-                item.documents.find((d) => d.type === "RECEIPT" && d.paymentId === paymentId && !d.voidedAt);
-              const hasNotice = item.pendingNotices.length > 0;
               const formOpen = openFor === item.id && form != null;
               const next = nextStepOf(item, nextToBill, canVerify);
               const voidingDoc = voiding ? item.documents.find((d) => d.id === voiding) : undefined;
-
-              // คำสั่งที่ใช้ไม่บ่อยอยู่ในเมนู ⋯ — ปุ่มที่เห็นในแถวมีแค่ "ขั้นถัดไป" ปุ่มเดียว
-              const menu: RowMenuItem[] = [];
-              if (!formOpen && !hasNotice && next?.kind !== "pay") {
-                menu.push({ key: "pay", label: "บันทึกรับเงิน", onSelect: () => openAdd(item) });
-              }
-              if (!invoice && p.remaining > 0 && next?.kind !== "bill") {
-                menu.push({ key: "bill", label: "วางบิล (ออกใบแจ้งหนี้)", onSelect: () => setInvoiceFor(item.id) });
-              }
-              for (const pay of item.payments) {
-                const when = `${thaiDate(pay.paidOn)} · ${money(Number(pay.amount))}`;
-                if (!pay.verifiedAt && canVerify(pay) && !(next?.kind === "verify" && next.paymentId === pay.id)) {
-                  menu.push({ key: `verify-${pay.id}`, label: `ยืนยันเงินเข้า (${when})`, onSelect: () => void verifyFor(item, pay) });
-                }
-                // ใบเสร็จออกได้หลังยืนยันกับบัญชีแล้วเท่านั้น (เซิร์ฟเวอร์ก็ปฏิเสธ)
-                if (pay.verifiedAt && !receiptOf(pay.id) && !(next?.kind === "receipt" && next.paymentId === pay.id)) {
-                  menu.push({ key: `rc-${pay.id}`, label: `ออกใบเสร็จ (${when})`, onSelect: () => void issueReceiptFor(pay.id) });
-                }
-                if (canEditRow(pay)) {
-                  menu.push({ key: `edit-${pay.id}`, label: `แก้รายการรับเงิน ${when}`, onSelect: () => openEdit(item, pay) });
-                  menu.push({ key: `del-${pay.id}`, label: `ลบรายการรับเงิน ${when}`, danger: true, onSelect: () => void remove(pay) });
-                }
-                const rc = receiptOf(pay.id);
-                // ใบเสร็จคือหลักฐานว่าได้รับเงินแล้ว — ยกเลิกได้เฉพาะเจ้าของกิจการ
-                if (rc && user?.role === "OWNER") {
-                  menu.push({ key: `void-${rc.id}`, label: `ยกเลิกใบเสร็จ ${rc.docNo}`, danger: true, onSelect: () => setVoiding(rc.id) });
-                }
-              }
-              if (invoice) {
-                menu.push({ key: `void-${invoice.id}`, label: `ยกเลิกใบแจ้งหนี้ ${invoice.docNo}`, danger: true, onSelect: () => setVoiding(invoice.id) });
-              }
+              const menu = rowMenuOf(item, next, formOpen);
 
               return (
                 <Fragment key={item.id}>
@@ -915,54 +1074,7 @@ export function ContractPaymentsPanel({
                       formOpen={invoiceFor === item.id}
                       onFormClose={() => setInvoiceFor(null)}
                     />
-                    {/* รายการรับเงินอยู่ใต้เงื่อนไขของงวดตัวเอง — ข้อมูลเป็นสีเทา ของที่กดได้เป็นลิงก์/ปุ่มมีกรอบ */}
-                    {item.payments.length > 0 && (
-                      <ul className="mt-1 flex flex-col gap-1">
-                        {item.payments.map((pay) => (
-                          <li key={pay.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-                            <span>
-                              <span className="tabular-nums">{thaiDate(pay.paidOn)}</span> · รับ{" "}
-                              <span className="tabular-nums text-slate-700">{money(Number(pay.amount))}</span> ·{" "}
-                              {PAYMENT_METHOD_LABELS[pay.method]}
-                              {(Number(pay.withholdingAmount) > 0 || Number(pay.retentionAmount) > 0) && (
-                                <span className="text-slate-400">
-                                  {" "}(
-                                  {[
-                                    Number(pay.withholdingAmount) > 0
-                                      ? `หัก ณ ที่จ่าย ${money(Number(pay.withholdingAmount))}`
-                                      : null,
-                                    Number(pay.retentionAmount) > 0
-                                      ? `กันเงินประกัน ${money(Number(pay.retentionAmount))}`
-                                      : null,
-                                    `เข้าบัญชี ${money(
-                                      Number(pay.amount) - Number(pay.withholdingAmount) - Number(pay.retentionAmount),
-                                    )}`,
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" · ")}
-                                  )
-                                </span>
-                              )}
-                              {pay.reference && <span className="text-slate-400"> · อ้างอิง {pay.reference}</span>}
-                              {pay.receivedBy && <span className="text-slate-400"> · รับโดย {pay.receivedBy}</span>}
-                            </span>
-                            <PaymentEvidenceList
-                              payment={pay}
-                              urlOf={(evidenceId) => paymentEvidenceUrl(projectId, contractId, pay.id, evidenceId)}
-                              canDelete={(uploadedById) =>
-                                user?.role === "OWNER" || uploadedById === user?.id || pay.recordedById === user?.id
-                              }
-                              busy={busy}
-                              onAttach={(files) => void attachLater(pay.id, files)}
-                              onDelete={(evidenceId, fileName) => void removeEvidence(pay.id, evidenceId, fileName)}
-                              onError={(m) => toast.error(m)}
-                            />
-                            <PaymentReceipt payment={pay} docs={item.documents} ctx={docCtx} />
-                            <VerifyBadge payment={pay} canVerify={canVerify(pay)} />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    {renderPayments(item)}
                     <VoidedReceipts item={item} ctx={docCtx} />
                     {voidingDoc && (
                       <div className="mt-1.5">
@@ -1012,46 +1124,8 @@ export function ContractPaymentsPanel({
                       </span>
                     )}
                   </td>
-                  <td className={`py-2.5 pr-2 text-right ${narrow ? "hidden" : ""}`}>
-                    {p.paidAmount > 0 ? (
-                      <p className="tabular-nums text-slate-700">{money(p.paidAmount)}</p>
-                    ) : (
-                      <p className="text-slate-300">
-                        <span aria-hidden>—</span>
-                        <span className="sr-only">ยังไม่ได้รับ</span>
-                      </p>
-                    )}
-                    {p.overpaidAmount > 0 && (
-                      <p className="text-xs tabular-nums text-amber-700">
-                        เกิน {money(p.overpaidAmount)}
-                      </p>
-                    )}
-                    {(p.withheldAmount > 0 || p.retainedAmount > 0) && (
-                      <p className="text-xs tabular-nums text-slate-400">
-                        เข้าบัญชี {money(p.receivedAmount)}
-                      </p>
-                    )}
-                  </td>
-                  <td className="py-2.5 pr-3 text-right">
-                    {p.remaining > 0 ? (
-                      <p className="font-semibold tabular-nums text-slate-900">{money(p.remaining)}</p>
-                    ) : (
-                      <p className="text-slate-300">
-                        <span aria-hidden>—</span>
-                        <span className="sr-only">ไม่มียอดคงเหลือ</span>
-                      </p>
-                    )}
-                    {narrow && (
-                      <span
-                        className={`mt-1 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[p.status]}`}
-                      >
-                        {p.statusLabel}
-                      </span>
-                    )}
-                    {narrow && p.daysOverdue != null && (
-                      <p className="mt-0.5 text-xs text-amber-700">เกินกำหนด {p.daysOverdue} วัน</p>
-                    )}
-                  </td>
+                  <PaidCell p={p} narrow={narrow} />
+                  <RemainingCell p={p} narrow={narrow} />
                   <td className={`py-2.5 pr-2 ${narrow ? "hidden" : ""}`}>
                     <span
                       className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[p.status]}`}
@@ -1072,14 +1146,7 @@ export function ContractPaymentsPanel({
                           size="sm"
                           className="whitespace-nowrap"
                           disabled={busy}
-                          onClick={() => {
-                            if (next.kind === "bill") setInvoiceFor(item.id);
-                            else if (next.kind === "pay") openAdd(item);
-                            else if (next.kind === "verify") {
-                              const pay = item.payments.find((x) => x.id === next.paymentId);
-                              if (pay) void verifyFor(item, pay);
-                            } else void issueReceiptFor(next.paymentId);
-                          }}
+                          onClick={() => runNext(item, next)}
                         >
                           {next.label}
                         </Button>

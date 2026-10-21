@@ -203,6 +203,67 @@ function rejectNoteOf(reason: string, detail: string): string {
   return trimmed ? `${reason}: ${trimmed}` : reason;
 }
 
+type QuoteGroup = CustomerQuoteDetailDto["groups"][number];
+
+/** หมวดที่แสดง — ระหว่างค้น ยอดหัวหมวด = ผลรวมเฉพาะรายการที่เจอ (ยอดทั้งหมวดคู่กับ "พบ 3 รายการ" จะชวนเข้าใจผิด) */
+function groupsShown(groups: QuoteGroup[], searchQuery: string) {
+  if (searchQuery.length === 0) return groups.map((g) => ({ ...g, total: g.items.length }));
+  return groups
+    .map((g) => {
+      const items = g.items.filter((it) => itemMatches(it, searchQuery));
+      return { ...g, items, subtotal: String(items.reduce((sum, it) => sum + Number(it.lineTotal), 0)), total: g.items.length };
+    })
+    .filter((g) => g.items.length > 0);
+}
+
+/** ยืนราคาถึงเมื่อไร (เฉพาะใบที่ยังตอบได้) · ตอบกลับไปเมื่อไร */
+function QuoteDates({ quote, showValidity }: Readonly<{ quote: CustomerQuoteDetailDto; showValidity: boolean }>) {
+  const validUntil = showValidity ? quote.validUntil : null;
+  if (!validUntil && !quote.respondedAt) return null;
+  const validity = quote.expired
+    ? { className: "font-medium text-red-600", label: "พ้นกำหนดยืนราคาเมื่อ" }
+    : { className: "text-slate-500", label: "ยืนราคาถึง" };
+  return (
+    <p className="mt-2 flex flex-col items-end gap-0.5 text-xs">
+      {validUntil && (
+        <span className={validity.className}>
+          {validity.label} {formatDay(validUntil)}
+        </span>
+      )}
+      {quote.respondedAt && <span className="text-slate-500">คุณตอบกลับเมื่อ {formatDate(quote.respondedAt)}</span>}
+    </p>
+  );
+}
+
+/** ยอดก่อนลด + ส่วนลด + ส่วนลดปัดเศษ — ไม่มีส่วนลดเลยไม่แสดง (ใบธรรมดาไม่ต้องมีบรรทัดที่บวกแล้วได้เลขเดิม) */
+function ReductionLines({ quote, beforeDiscount }: Readonly<{ quote: CustomerQuoteDetailDto; beforeDiscount: number }>) {
+  const discountAmt = Number(quote.discountAmt);
+  const roundingAmt = Number(quote.roundingAmt);
+  if (discountAmt <= 0 && roundingAmt <= 0) return null;
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-3">
+        <dt>รวมมูลค่างาน</dt>
+        <dd className="tabular-nums">{money(beforeDiscount)}</dd>
+      </div>
+      {/* ส่วนลดเป็นสีเขียวเพราะเป็นข่าวดีของลูกค้า แยกจากบรรทัดยอดอื่นได้ทันที
+          (เขียวบนพื้นขาวต้องลงถึง 700 คอนทราสต์ถึงจะผ่าน) */}
+      {discountAmt > 0 && (
+        <div className="flex items-baseline justify-between gap-3 text-emerald-700">
+          <dt>{discountText(quote.discountPct, quote.discountNote)}</dt>
+          <dd className="tabular-nums">-{money(quote.discountAmt)}</dd>
+        </div>
+      )}
+      {roundingAmt > 0 && (
+        <div className="flex items-baseline justify-between gap-3 text-emerald-700">
+          <dt>ส่วนลดปัดเศษ</dt>
+          <dd className="tabular-nums">-{money(quote.roundingAmt)}</dd>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function MyQuoteDetailPage() {
   const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
@@ -315,7 +376,7 @@ export function MyQuoteDetailPage() {
     }
   }
 
-  usePageMeta(loading ? undefined : quote ? `ใบเสนอราคา ${quote.quoteNo}` : "ใบเสนอราคา");
+  usePageMeta(loading ? undefined : `ใบเสนอราคา ${quote?.quoteNo ?? ""}`.trim());
 
   if (loading) {
     return (
@@ -341,7 +402,6 @@ export function MyQuoteDetailPage() {
   // ไม่งั้นยอดก่อนลดจะไม่เท่ากับผลบวกราคาทุกบรรทัดในตาราง
   const roundingAmt = Number(quote.roundingAmt);
   const beforeDiscount = subtotalBeforeVat + discountAmt + roundingAmt;
-  const hasReduction = discountAmt > 0 || roundingAmt > 0;
   const canRespond = quote.status === "SENT";
   // พ้นกำหนดยืนราคา — เซิร์ฟเวอร์ปฏิเสธการยอมรับอยู่แล้ว ปุ่มจึงไม่ควรโผล่มาให้กดแล้วเด้ง error
   const canAccept = canRespond && !quote.expired;
@@ -349,22 +409,12 @@ export function MyQuoteDetailPage() {
   const badge = quote.expired
     ? { className: "border-slate-200 bg-slate-50 text-slate-600", label: "พ้นกำหนดยืนราคา" }
     : { className: STATUS_BADGE[quote.status], label: STATUS_LABEL[quote.status] };
-  const validity = quote.expired
-    ? { className: "font-medium text-red-600", label: "พ้นกำหนดยืนราคาเมื่อ" }
-    : { className: "text-slate-500", label: "ยืนราคาถึง" };
 
   const itemCount = quote.groups.reduce((sum, g) => sum + g.items.length, 0);
   const searchQuery = itemSearch.trim().toLowerCase();
   const searching = searchQuery.length > 0;
   // ระหว่างค้น ยอดหัวหมวด = ผลรวมเฉพาะรายการที่เจอ (ยอดทั้งหมวดคู่กับ "พบ 3 รายการ" จะชวนเข้าใจผิด)
-  const shownGroups = searching
-    ? quote.groups
-        .map((g) => {
-          const items = g.items.filter((it) => itemMatches(it, searchQuery));
-          return { ...g, items, subtotal: String(items.reduce((sum, it) => sum + Number(it.lineTotal), 0)), total: g.items.length };
-        })
-        .filter((g) => g.items.length > 0)
-    : quote.groups.map((g) => ({ ...g, total: g.items.length }));
+  const shownGroups = groupsShown(quote.groups, searchQuery);
   const foundCount = shownGroups.reduce((sum, g) => sum + g.items.length, 0);
   const formOpen = showRevisionForm || showRejectForm;
 
@@ -396,42 +446,10 @@ export function MyQuoteDetailPage() {
               </span>
               {quote.sentAt && <span className="text-xs text-slate-500">ส่งเมื่อ {formatDate(quote.sentAt)}</span>}
             </div>
-            {((canRespond && quote.validUntil) || quote.respondedAt) && (
-              <p className="mt-2 flex flex-col items-end gap-0.5 text-xs">
-                {canRespond && quote.validUntil && (
-                  <span className={validity.className}>
-                    {validity.label} {formatDay(quote.validUntil)}
-                  </span>
-                )}
-                {quote.respondedAt && (
-                  <span className="text-slate-500">คุณตอบกลับเมื่อ {formatDate(quote.respondedAt)}</span>
-                )}
-              </p>
-            )}
+            <QuoteDates quote={quote} showValidity={canRespond} />
 
             <dl className="mt-5 flex flex-col gap-1.5 text-sm text-slate-600">
-              {hasReduction && (
-                <>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt>รวมมูลค่างาน</dt>
-                    <dd className="tabular-nums">{money(beforeDiscount)}</dd>
-                  </div>
-                  {/* ส่วนลดเป็นสีเขียวเพราะเป็นข่าวดีของลูกค้า แยกจากบรรทัดยอดอื่นได้ทันที
-                      (เขียวบนพื้นขาวต้องลงถึง 700 คอนทราสต์ถึงจะผ่าน) */}
-                  {discountAmt > 0 && (
-                    <div className="flex items-baseline justify-between gap-3 text-emerald-700">
-                      <dt>{discountText(quote.discountPct, quote.discountNote)}</dt>
-                      <dd className="tabular-nums">-{money(quote.discountAmt)}</dd>
-                    </div>
-                  )}
-                  {roundingAmt > 0 && (
-                    <div className="flex items-baseline justify-between gap-3 text-emerald-700">
-                      <dt>ส่วนลดปัดเศษ</dt>
-                      <dd className="tabular-nums">-{money(quote.roundingAmt)}</dd>
-                    </div>
-                  )}
-                </>
-              )}
+              <ReductionLines quote={quote} beforeDiscount={beforeDiscount} />
               <div className="flex items-baseline justify-between gap-3">
                 <dt>รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม</dt>
                 <dd className="tabular-nums">{money(subtotalBeforeVat)}</dd>

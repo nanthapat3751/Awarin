@@ -95,6 +95,12 @@ export async function buildSalesTaxXlsx(month: string): Promise<Buffer> {
   return buildSalesTaxWorkbook({ report, company, exportedAt: new Date() });
 }
 
+/** หมายเหตุของใบที่ยกเลิก — ใบปกติว่าง */
+function voidNote(voidedAt: unknown, reason: string | null | undefined): string {
+  if (!voidedAt) return "";
+  return reason ? `ยกเลิก — ${reason}` : "ยกเลิก";
+}
+
 export async function buildSalesTaxCsv(month: string): Promise<string> {
   const report = await getSalesTaxReport(month);
   const rows = report.rows.map((r) => [
@@ -107,7 +113,7 @@ export async function buildSalesTaxCsv(month: string): Promise<string> {
     r.base,
     r.vat,
     r.total,
-    r.voidedAt ? `ยกเลิก${r.voidReason ? ` — ${r.voidReason}` : ""}` : "",
+    voidNote(r.voidedAt, r.voidReason),
   ]);
   // แถวรวมอยู่ท้ายไฟล์เหมือนรายงานภาษีขายที่ยื่นจริง — นับเฉพาะใบที่ไม่ถูกยกเลิก
   rows.push(["รวม", "", "", "", "", "", report.totals.base, report.totals.vat, report.totals.total, ""]);

@@ -105,8 +105,7 @@ export function AvatarCropDialog({
         onClick={() => !saving && onCancel()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-label="ปรับกรอบรูปโปรไฟล์"
         className="relative w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
@@ -171,7 +170,7 @@ export function AvatarCropDialog({
             {saving ? "กำลังบันทึก..." : "ใช้รูปนี้"}
           </Button>
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }

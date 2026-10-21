@@ -118,8 +118,8 @@ TC_STAFF_LOGIN_008 ออกจากระบบ
     [Tags]    priority:High
     Login As Staff Owner
     Click Button    ${LOGOUT_BUTTON}
-    ${confirm}=    Run Keyword And Return Status    Wait Until Element Is Visible    xpath=//div[@role="dialog" or @role="alertdialog"]//button[contains(., "ออกจากระบบ")]    3s
-    IF    ${confirm}    Click Button    xpath=//div[@role="dialog" or @role="alertdialog"]//button[contains(., "ออกจากระบบ")]
+    ${confirm}=    Run Keyword And Return Status    Wait Until Element Is Visible    xpath=//*[self::dialog or @role="dialog" or @role="alertdialog"]//button[contains(., "ออกจากระบบ")]    3s
+    IF    ${confirm}    Click Button    xpath=//*[self::dialog or @role="dialog" or @role="alertdialog"]//button[contains(., "ออกจากระบบ")]
     Staff Login Page Should Be Open
     Go To    ${STAFF_URL}/projects
     Staff Login Page Should Be Open

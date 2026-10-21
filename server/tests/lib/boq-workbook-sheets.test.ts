@@ -212,9 +212,9 @@ describe("ชื่อชีตที่ Excel รับได้", () => {
     const base = "ก".repeat(40);
     const a = safeSheetName(base, used);
     const b = safeSheetName(base, used);
-    expect(a.length).toBe(31);
+    expect(a).toHaveLength(31);
     expect(a.endsWith("…")).toBe(true);
-    expect(b.length).toBe(31);
+    expect(b).toHaveLength(31);
     expect(b.endsWith(" 2")).toBe(true);
     expect(a).not.toBe(b);
   });

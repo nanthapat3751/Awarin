@@ -29,10 +29,22 @@ const qty = (v: string | null) => (v == null ? "—" : Number(v).toLocaleString(
 const thaiDate = (iso: string) => new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 
 /** +1,234.00 สีนาวี · −1,234.00 สีแดง — ทิศของเงินต้องอ่านออกตั้งแต่แวบแรก */
+function rejectedNote(respondedAt: string, note: string | null) {
+  const quoted = note ? ` — “${note}”` : "";
+  return `ไม่อนุมัติเมื่อ ${thaiDate(respondedAt)}${quoted}`;
+}
+
 function Delta({ value, className = "" }: Readonly<{ value: string | number; className?: string }>) {
   const n = Number(value);
-  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
-  const color = n > 0 ? "text-brand" : n < 0 ? "text-red-700" : "text-slate-500";
+  let sign = "";
+  let color = "text-slate-500";
+  if (n > 0) {
+    sign = "+";
+    color = "text-brand";
+  } else if (n < 0) {
+    sign = "−";
+    color = "text-red-700";
+  }
   return <span className={`tabular-nums ${color} ${className}`}>{`${sign}${money(Math.abs(n))}`}</span>;
 }
 
@@ -129,7 +141,7 @@ function HeaderFields({ form, onChange }: Readonly<{ form: FormState; onChange: 
   return (
     <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
       <label className="flex flex-col gap-1 text-xs text-slate-700">
-        เรื่อง (พิมพ์ลงใบ)
+        <span>เรื่อง (พิมพ์ลงใบ)</span>
         <input
           value={form.title}
           onChange={(e) => onChange({ ...form, title: e.target.value })}
@@ -139,7 +151,7 @@ function HeaderFields({ form, onChange }: Readonly<{ form: FormState; onChange: 
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-slate-700">
-        ขยายเวลาก่อสร้าง
+        <span>ขยายเวลาก่อสร้าง</span>
         <span className="flex items-center gap-1">
           <input
             type="number"
@@ -154,7 +166,7 @@ function HeaderFields({ form, onChange }: Readonly<{ form: FormState; onChange: 
         </span>
       </label>
       <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
-        รายละเอียดเพิ่มเติม (ไม่บังคับ)
+        <span>รายละเอียดเพิ่มเติม (ไม่บังคับ)</span>
         <textarea value={form.note} onChange={(e) => onChange({ ...form, note: e.target.value })} rows={2} maxLength={2000} className={input} />
       </label>
     </div>
@@ -348,18 +360,18 @@ export function ChangeOrdersPanel({
           <ol className="grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
             <li className="rounded-md bg-slate-50 p-3">
               <span className="mb-1 block text-xs font-semibold text-brand">1 · แก้ BOQ</span>
-              แก้ตามที่ลูกค้าขอที่แท็บ BOQ — สัญญาเดิมไม่ขยับ ระบบแตกเวอร์ชันใหม่ให้เอง
+              <span>แก้ตามที่ลูกค้าขอที่แท็บ BOQ — สัญญาเดิมไม่ขยับ ระบบแตกเวอร์ชันใหม่ให้เอง</span>
               <button type="button" onClick={onGoToBoq} className="link-pill -ml-2.5 mt-1 block w-fit text-xs font-medium text-brand">
                 ไปแท็บ BOQ
               </button>
             </li>
             <li className="rounded-md bg-slate-50 p-3">
               <span className="mb-1 block text-xs font-semibold text-brand">2 · ออกใบ</span>
-              กด “ออกใบงานเพิ่ม-ลด” ระบบเทียบกับที่ตกลงไว้ ได้รายการเพิ่ม/ลดเป็นราคาขาย
+              <span>กด “ออกใบงานเพิ่ม-ลด” ระบบเทียบกับที่ตกลงไว้ ได้รายการเพิ่ม/ลดเป็นราคาขาย</span>
             </li>
             <li className="rounded-md bg-slate-50 p-3">
               <span className="mb-1 block text-xs font-semibold text-brand">3 · ให้ลูกค้าอนุมัติ</span>
-              ส่งให้กดในพอร์ทัล หรือพิมพ์ให้เซ็น — อนุมัติแล้วงวดเงินปรับให้อัตโนมัติ
+              <span>ส่งให้กดในพอร์ทัล หรือพิมพ์ให้เซ็น — อนุมัติแล้วงวดเงินปรับให้อัตโนมัติ</span>
             </li>
           </ol>
         )}
@@ -449,7 +461,7 @@ export function ChangeOrdersPanel({
                           .join(" · ")}`
                       : "")}
                 {co.status === "REJECTED" &&
-                  `ไม่อนุมัติเมื่อ ${thaiDate(co.respondedAt!)}${co.responseNote ? ` — “${co.responseNote}”` : ""}`}
+                  rejectedNote(co.respondedAt!, co.responseNote)}
                 {co.status === "CANCELLED" && "ยกเลิกแล้ว"}
                 {co.extensionDays ? ` · ขยายเวลา ${co.extensionDays} วัน` : ""}
               </div>
@@ -518,7 +530,7 @@ export function ChangeOrdersPanel({
               {rejectingId === co.id && (
                 <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 bg-slate-50 px-3 py-3">
                   <label className="flex min-w-60 flex-1 flex-col gap-1 text-xs text-slate-700">
-                    เหตุผลที่ลูกค้าไม่อนุมัติ
+                    <span>เหตุผลที่ลูกค้าไม่อนุมัติ</span>
                     <input
                       value={rejectNote}
                       onChange={(e) => setRejectNote(e.target.value)}

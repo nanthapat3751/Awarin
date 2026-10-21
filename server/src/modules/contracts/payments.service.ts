@@ -774,6 +774,37 @@ export async function deletePayment(
  * มีข้อนี้อยู่จริงแต่ในระบบยังไม่ได้ตั้ง · มีผลกับเงินที่รับหลังจากนี้เท่านั้น ยอดที่บันทึกไปแล้วไม่ถูกแก้ย้อนหลัง
  * วันครบกำหนดคืนเป็นงานติดตามเงิน ตั้งได้หลังลงนามเท่านั้น (ก่อนนั้นยังไม่มีอะไรให้คืน)
  */
+type RetentionChange = { retentionPct?: number | null; retentionSetAt?: Date; retentionDueOn?: Date | null };
+
+/** % เงินประกัน: 0 = ไม่มี · ค่าเดิม = ไม่แตะ · หลังลงนามเฉพาะ OWNER */
+function retentionPctChange(
+  sent: number | null | undefined,
+  current: number | null,
+  signedAt: Date | null,
+  role: string,
+): RetentionChange {
+  if (sent === undefined) return {};
+  const pct = sent === 0 ? null : sent;
+  if (pct === current) return {};
+  if (signedAt && role !== "OWNER") {
+    throw new ContractError(
+      "สัญญาลงนามแล้ว — เฉพาะเจ้าของกิจการที่ตั้งเงินประกันผลงานได้ (เมื่อสัญญาที่เซ็นมีข้อนี้จริง)",
+      403,
+    );
+  }
+  return { retentionPct: pct, retentionSetAt: new Date() };
+}
+
+/** วันครบกำหนดคืนเงินประกัน — ตั้งได้หลังลงนามเท่านั้น · null = ล้าง */
+function retentionDueChange(sent: string | null | undefined, signedAt: Date | null): RetentionChange {
+  if (sent === undefined) return {};
+  if (!signedAt) throw new ContractError("ตั้งวันคืนเงินประกันได้หลังลงนามสัญญาแล้ว", 409);
+  if (sent == null) return { retentionDueOn: null };
+  const parsed = parseIsoDate(sent);
+  if (!parsed) throw new ContractError("รูปแบบวันที่ไม่ถูกต้อง", 400);
+  return { retentionDueOn: parsed };
+}
+
 export async function setRetention(
   projectId: string,
   contractId: string,
@@ -783,36 +814,14 @@ export async function setRetention(
   const contract = await prisma.contract.findUnique({ where: { id: contractId } });
   if (contract?.projectId !== projectId) throw new ContractError("ไม่พบสัญญาที่ระบุ", 404);
 
-  const data: { retentionPct?: number | null; retentionSetAt?: Date; retentionDueOn?: Date | null } = {};
   const before = {
     pct: contract.retentionPct == null ? null : Number(contract.retentionPct),
     dueOn: toIsoDate(contract.retentionDueOn),
   };
-
-  if (input.pct !== undefined) {
-    const pct = input.pct === 0 ? null : input.pct;
-    if (pct !== before.pct) {
-      if (contract.signedAt && actor.role !== "OWNER") {
-        throw new ContractError(
-          "สัญญาลงนามแล้ว — เฉพาะเจ้าของกิจการที่ตั้งเงินประกันผลงานได้ (เมื่อสัญญาที่เซ็นมีข้อนี้จริง)",
-          403,
-        );
-      }
-      data.retentionPct = pct;
-      data.retentionSetAt = new Date();
-    }
-  }
-  if (input.dueOn !== undefined) {
-    if (!contract.signedAt) {
-      throw new ContractError("ตั้งวันคืนเงินประกันได้หลังลงนามสัญญาแล้ว", 409);
-    }
-    let parsed: Date | null = null;
-    if (input.dueOn != null) {
-      parsed = parseIsoDate(input.dueOn);
-      if (!parsed) throw new ContractError("รูปแบบวันที่ไม่ถูกต้อง", 400);
-    }
-    data.retentionDueOn = parsed;
-  }
+  const data: RetentionChange = {
+    ...retentionPctChange(input.pct, before.pct, contract.signedAt, actor.role),
+    ...retentionDueChange(input.dueOn, contract.signedAt),
+  };
 
   let updated = contract;
   if (Object.keys(data).length > 0) {

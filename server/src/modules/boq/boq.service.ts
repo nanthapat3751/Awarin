@@ -671,6 +671,25 @@ async function lineDefaultsFrom(input: CreateBoqItemInput) {
   };
 }
 
+/**
+ * ฐานคำนวณ + เผื่อเสียของบรรทัดใหม่ และตรวจว่าข้อมูลพอคิดปริมาณ
+ * ไม่กรอกเผื่อเสียมา: ฐานอ้างอิงค่าวัด/ใบถอดแบบใช้ค่าตั้งต้นของวัสดุ · ฐานกรอกเองไม่มีเผื่อเสีย
+ */
+function newLineBasis(input: CreateBoqItemInput, materialWaste: number | null) {
+  const qtyBasis = input.qtyBasis ?? "MANUAL";
+  const usesSheet = qtyBasis === "SHEET";
+  const usesDriver = qtyBasis !== "MANUAL" && !usesSheet;
+  const defaultWaste = usesDriver || usesSheet ? materialWaste : null;
+  const wasteFactorPct = input.wasteFactorPct === undefined ? defaultWaste : input.wasteFactorPct;
+  if (usesDriver && input.qtyCoefficient == null) {
+    throw new BoqError("ฐานคำนวณแบบอ้างอิงค่าวัดต้องระบุปริมาณต่อ 1 หน่วย");
+  }
+  if (qtyBasis === "MANUAL" && input.quantity == null) {
+    throw new BoqError("กรุณาระบุปริมาณ");
+  }
+  return { qtyBasis, usesSheet, wasteFactorPct };
+}
+
 export async function addBoqItem(projectId: string, input: CreateBoqItemInput, actorId: string) {
   assertNotCustom(await loadProjectOrThrow(projectId));
   await assertBoqItemCategory(input.categoryId);
@@ -698,18 +717,7 @@ export async function addBoqItem(projectId: string, input: CreateBoqItemInput, a
   }
   if (tileCalc) assertTileCalc(tileCalc, unit);
 
-  const qtyBasis = input.qtyBasis ?? "MANUAL";
-  const usesSheet = qtyBasis === "SHEET";
-  const usesDriver = qtyBasis !== "MANUAL" && !usesSheet;
-  // ไม่กรอกเผื่อเสียมา: ฐานอ้างอิงค่าวัด/ใบถอดแบบใช้ค่าตั้งต้นของวัสดุ · ฐานกรอกเองไม่มีเผื่อเสีย
-  const defaultWaste = usesDriver || usesSheet ? materialWaste : null;
-  const wasteFactorPct = input.wasteFactorPct === undefined ? defaultWaste : input.wasteFactorPct;
-  if (usesDriver && input.qtyCoefficient == null) {
-    throw new BoqError("ฐานคำนวณแบบอ้างอิงค่าวัดต้องระบุปริมาณต่อ 1 หน่วย");
-  }
-  if (qtyBasis === "MANUAL" && input.quantity == null) {
-    throw new BoqError("กรุณาระบุปริมาณ");
-  }
+  const { qtyBasis, usesSheet, wasteFactorPct } = newLineBasis(input, materialWaste);
 
   const projectForArea = await prisma.project.findUniqueOrThrow({
     where: { id: projectId },
@@ -808,6 +816,71 @@ export async function addBoqItems(projectId: string, inputs: CreateBoqItemInput[
   return { version: last!.version, created: inputs.length };
 }
 
+/** ถังขยะ: สลับไปวัสดุที่อยู่ในถังขยะ/ไม่มีอยู่จริงไม่ได้ (ไม่ส่ง/null = ไม่ได้สลับไปวัสดุ) */
+async function assertSwitchableMaterial(materialId: string | null | undefined): Promise<void> {
+  if (materialId && !(await prisma.material.findFirst({ where: { id: materialId, deletedAt: null } }))) {
+    throw new BoqError("ไม่พบรายการวัสดุ/ค่าแรงที่ระบุ", 404);
+  }
+}
+
+/**
+ * สูตรวัสดุย่อย: ไม่ส่ง (undefined) = คงของเดิม; null/[] = ล้างสูตร (กลับไปวัสดุก้อนเดียว);
+ * มีรายการ = แทนทั้งชุด. เมื่อมีสูตร ราคาวัสดุต่อหน่วยคิดจากผลรวมเสมอ (ทับค่าที่พิมพ์มา)
+ * ตรวจ ref วัสดุดิบเฉพาะเมื่อพนักงานส่งสูตรใหม่มา (ของเดิมผ่านการตรวจตอนสร้างแล้ว)
+ */
+async function componentsForUpdate(
+  sent: UpdateBoqItemInput["components"],
+  existing: Parameters<typeof componentsFromRows>[0],
+): Promise<{ willTouchComponents: boolean; nextComponents: NormalizedComponent[] }> {
+  if (sent === undefined) return { willTouchComponents: false, nextComponents: componentsFromRows(existing) };
+  const nextComponents = normalizeComponents(sent ?? []);
+  if (nextComponents.length > 0) await assertComponentRefsExist(nextComponents);
+  return { willTouchComponents: true, nextComponents };
+}
+
+/** ใบถอดแบบ: ส่งแถวมา = แทนทั้งชุด · ไม่ส่ง = ใช้แถวเดิม · ไม่ใช่ฐานใบถอดแบบ = ไม่มีแถว */
+function nextSheetRows(
+  usesSheet: boolean,
+  inputRows: UpdateBoqItemInput["takeoffRows"],
+  existingRows: Parameters<typeof takeoffRowsFromDb>[0],
+): NormalizedTakeoffRow[] {
+  if (!usesSheet) return [];
+  return inputRows === undefined ? takeoffRowsFromDb(existingRows) : normalizeTakeoffRows(inputRows);
+}
+
+/**
+ * วัสดุย่อยที่ตัวคิดกระเบื้องกำหนด (null = ตัวคิดไม่ได้แตะสูตร)
+ * - ตัวคิดตั้งราคา → คิดใหม่จากปริมาณล่าสุดเสมอ (สูตรที่ส่งมาพร้อมกันไม่ใช้)
+ * - เลิกให้ตัวคิดตั้งราคา → วัสดุย่อยที่ตัวคิดสร้างไว้ต้องออกไปด้วย ราคากลับเป็นค่าที่กรอก
+ */
+function tileDrivenComponents(
+  tileCalc: ReturnType<typeof tileCalcOf>,
+  existingTile: ReturnType<typeof tileCalcOf>,
+  tileSent: boolean,
+  ctx: Parameters<typeof tileComponentRows>[1],
+): NormalizedComponent[] | null {
+  if (tileCalc?.priced) return tileComponentRows(tileCalc, ctx);
+  if (existingTile?.priced && tileSent) return [];
+  return null;
+}
+
+/**
+ * หน้าแก้ไขส่งราคามาทุกครั้งแม้ไม่ได้แตะ — นับว่า "ตั้งราคาใหม่" เฉพาะเมื่อราคาหรือวัสดุเปลี่ยนจริง
+ * ไม่งั้นแก้แค่ปริมาณก็ลบคำเตือนราคาในคลังเปลี่ยนทิ้งไปเงียบ ๆ
+ */
+function isRepriced(
+  existing: { materialUnitPrice: unknown; laborUnitPrice: unknown; materialId: string | null },
+  materialUnitPrice: number,
+  laborUnitPrice: number,
+  materialId: string | null,
+): boolean {
+  return (
+    round2(materialUnitPrice) !== round2(Number(existing.materialUnitPrice)) ||
+    round2(laborUnitPrice) !== round2(Number(existing.laborUnitPrice)) ||
+    materialId !== existing.materialId
+  );
+}
+
 export async function updateBoqItem(
   projectId: string,
   itemId: string,
@@ -831,19 +904,8 @@ export async function updateBoqItem(
   // สลับวัสดุ: ถ้าส่ง materialId มา (ไม่ใช่ undefined) อัปเดตการอ้างอิง — ถ้าเป็นวัสดุจริงต้องมีอยู่
   // ในระบบ; ชื่อ/หน่วย/ราคาที่ผูกมากับวัสดุใหม่ ฝั่งเว็บส่งมาให้ครบใน input อยู่แล้ว (override ได้)
   const materialId = input.materialId === undefined ? existing.materialId : input.materialId;
-  // ถังขยะ: สลับไปวัสดุที่อยู่ในถังขยะไม่ได้
-  if (input.materialId && !(await prisma.material.findFirst({ where: { id: input.materialId, deletedAt: null } }))) {
-    throw new BoqError("ไม่พบรายการวัสดุ/ค่าแรงที่ระบุ", 404);
-  }
-
-  // สูตรวัสดุย่อย: ไม่ส่ง (undefined) = คงของเดิม; null/[] = ล้างสูตร (กลับไปวัสดุก้อนเดียว);
-  // มีรายการ = แทนทั้งชุด. เมื่อมีสูตร ราคาวัสดุต่อหน่วยคิดจากผลรวมเสมอ (ทับค่าที่พิมพ์มา)
-  let willTouchComponents = input.components !== undefined;
-  let nextComponents: NormalizedComponent[] = willTouchComponents
-    ? normalizeComponents(input.components ?? [])
-    : componentsFromRows(existing.components);
-  // ตรวจ ref วัสดุดิบเฉพาะเมื่อพนักงานส่งสูตรใหม่มา (ของเดิมผ่านการตรวจตอนสร้างแล้ว)
-  if (willTouchComponents && nextComponents.length > 0) await assertComponentRefsExist(nextComponents);
+  await assertSwitchableMaterial(input.materialId);
+  let { willTouchComponents, nextComponents } = await componentsForUpdate(input.components, existing.components);
 
   // ตัวคิดกระเบื้อง: ไม่ส่ง = ใช้ค่าเดิม · null = เลิกใช้ · ตรวจทุกครั้งที่ค่าหรือหน่วยอาจเปลี่ยน
   const existingTile = tileCalcOf(existing.tileCalc);
@@ -866,13 +928,7 @@ export async function updateBoqItem(
   // ใบถอดแบบ: ส่งแถวมา = แทนทั้งชุด · ไม่ส่ง = ใช้แถวเดิม (เช่น แก้แค่ราคาหรือเผื่อเสีย)
   // เปลี่ยนไปฐานอื่น = ลบแถวทิ้ง เพราะปริมาณไม่ได้มาจากแถวพวกนั้นแล้ว
   const usesSheet = qtyBasis === "SHEET";
-  let sheetRows: NormalizedTakeoffRow[] = [];
-  if (usesSheet) {
-    sheetRows =
-      input.takeoffRows === undefined
-        ? takeoffRowsFromDb(existing.takeoffRows)
-        : normalizeTakeoffRows(input.takeoffRows);
-  }
+  const sheetRows = nextSheetRows(usesSheet, input.takeoffRows, existing.takeoffRows);
   const touchSheet = input.takeoffRows !== undefined || (!usesSheet && existing.takeoffRows.length > 0);
   // MANUAL: ปริมาณที่กรอกมา (หรือค่าเดิม) · ใบถอดแบบ: ผลรวมแถว · ฐานอื่น: ค่าวัด × สัมประสิทธิ์ × เผื่อเสีย
   const quantity = usesSheet
@@ -884,13 +940,14 @@ export async function updateBoqItem(
         manualQuantity: input.quantity ?? Number(existing.quantity),
         drivers: resolveDrivers(projectForArea),
       });
-  if (tileCalc?.priced) {
-    // วัสดุย่อยเป็นผลของตัวคิด — คิดใหม่จากปริมาณล่าสุดเสมอ (สูตรที่ส่งมาพร้อมกันไม่ใช้)
-    nextComponents = tileComponentRows(tileCalc, { qtyBasis, quantity, wasteFactorPct, rows: sheetRows });
-    willTouchComponents = true;
-  } else if (existingTile?.priced && input.tileCalc !== undefined) {
-    // เลิกให้ตัวคิดตั้งราคา → วัสดุย่อยที่ตัวคิดสร้างไว้ต้องออกไปด้วย ราคากลับเป็นค่าที่กรอก
-    nextComponents = [];
+  const tileComponents = tileDrivenComponents(tileCalc, existingTile, input.tileCalc !== undefined, {
+    qtyBasis,
+    quantity,
+    wasteFactorPct,
+    rows: sheetRows,
+  });
+  if (tileComponents) {
+    nextComponents = tileComponents;
     willTouchComponents = true;
   }
   const materialUnitPrice =
@@ -898,12 +955,7 @@ export async function updateBoqItem(
       ? materialUnitPriceOf(nextComponents)
       : input.materialUnitPrice ?? Number(existing.materialUnitPrice);
   const amounts = calculateLineAmounts({ quantity, materialUnitPrice, laborUnitPrice });
-  // หน้าแก้ไขส่งราคามาทุกครั้งแม้ไม่ได้แตะ — นับว่า "ตั้งราคาใหม่" เฉพาะเมื่อราคาหรือวัสดุเปลี่ยนจริง
-  // ไม่งั้นแก้แค่ปริมาณก็ลบคำเตือนราคาในคลังเปลี่ยนทิ้งไปเงียบ ๆ
-  const repriced =
-    round2(materialUnitPrice) !== round2(Number(existing.materialUnitPrice)) ||
-    round2(laborUnitPrice) !== round2(Number(existing.laborUnitPrice)) ||
-    materialId !== existing.materialId;
+  const repriced = isRepriced(existing, materialUnitPrice, laborUnitPrice, materialId);
 
   const item = await prisma.boqItem.update({
     where: { id: itemId },
@@ -1136,55 +1188,87 @@ export async function recomputeStructuralMembers(
   const skipped: StructuralRecomputeDto["skipped"] = [];
   const plans: RecomputePlan[] = [];
   for (const member of members) {
-    const input: StructuralInput = {
-      ...member.input,
-      settings: settingsFromRuleSet(rules.tender, member.input.settings.cover),
-    };
-    const result = structuralTakeoff(input);
-    if (result.errors.length > 0) {
-      skipped.push({ label: member.label, reason: result.errors[0] });
-      continue;
-    }
-    const lineOfGroup = new Map<string, string>();
-    let split = false;
-    for (const line of member.lines) {
-      for (const g of memberGroupsOfLine(line)) {
-        if (lineOfGroup.has(g)) split = true;
-        lineOfGroup.set(g, line.itemId);
-      }
-    }
-    if (split) {
-      skipped.push({ label: member.label, reason: "แถวของก้อนเดียวกันแยกอยู่หลายบรรทัด — แก้ทีละชิ้นจากรายการชิ้นส่วน" });
-      continue;
-    }
-    const rowsByItem = new Map<string, TakeoffRowInputDto[]>();
-    for (const out of result.rows) {
-      const g = out.group === "REBAR" ? `REBAR-${out.row.barDia}` : out.group;
-      const itemId = lineOfGroup.get(g);
-      if (!itemId) continue; // ก้อนที่ตอนลงไม่ได้ลง
-      rowsByItem.set(itemId, [...(rowsByItem.get(itemId) ?? []), { ...out.row, memberKey: member.key }]);
-    }
-    plans.push({ member, input, rowsByItem });
+    const planned = recomputePlanOf(member, rules);
+    if ("reason" in planned) skipped.push({ label: member.label, reason: planned.reason });
+    else plans.push(planned);
   }
 
-  // จำลองบรรทัดหลังคิดใหม่: แถวของชิ้นที่คิดใหม่ถูกแทน แถวอื่น (ชิ้นที่ข้าม/ปริมาณเดิม/แถวกรอกเอง) คงเดิม
+  const { lines, changedKeys } = await recomputePreviewLines(latest.id, plans);
+  const costDelta = round2(lines.reduce((sum, l) => sum + l.costAfter - l.costBefore, 0));
+  const willBranch = await isVersionQuoted(latest.id);
+
+  const preview: StructuralRecomputeDto = {
+    members: members.length,
+    changedMembers: changedKeys.size,
+    skipped,
+    lines,
+    costDelta,
+    willBranch,
+    applied: false,
+    versionNo: latest.versionNo,
+  };
+  if (!apply || changedKeys.size === 0) return preview;
+
+  let versionNo = latest.versionNo;
+  for (const plan of plans) {
+    if (changedKeys.has(plan.member.key)) versionNo = await applyRecomputePlan(projectId, plan, actorId);
+  }
+
+  await writeAuditLog({
+    userId: actorId,
+    action: "RECOMPUTE_STRUCTURAL_MEMBERS",
+    entityType: "Project",
+    entityId: projectId,
+    details: { members: changedKeys.size, lines: lines.length, costDelta, branched: willBranch },
+  });
+  return { ...preview, applied: true, versionNo };
+}
+
+/** แผนคิดใหม่ของชิ้นหนึ่ง — คิดไม่ได้ / แถวของก้อนเดียวกันแยกหลายบรรทัด = ข้ามพร้อมเหตุผล */
+function recomputePlanOf(
+  member: StructuralMemberDto,
+  rules: Awaited<ReturnType<typeof getTakeoffRules>>,
+): RecomputePlan | { reason: string } {
+  const input: StructuralInput = {
+    ...member.input,
+    settings: settingsFromRuleSet(rules.tender, member.input.settings.cover),
+  };
+  const result = structuralTakeoff(input);
+  if (result.errors.length > 0) return { reason: result.errors[0] };
+  const lineOfGroup = new Map<string, string>();
+  let split = false;
+  for (const line of member.lines) {
+    for (const g of memberGroupsOfLine(line)) {
+      if (lineOfGroup.has(g)) split = true;
+      lineOfGroup.set(g, line.itemId);
+    }
+  }
+  if (split) return { reason: "แถวของก้อนเดียวกันแยกอยู่หลายบรรทัด — แก้ทีละชิ้นจากรายการชิ้นส่วน" };
+  const rowsByItem = new Map<string, TakeoffRowInputDto[]>();
+  for (const out of result.rows) {
+    const g = out.group === "REBAR" ? `REBAR-${out.row.barDia}` : out.group;
+    const itemId = lineOfGroup.get(g);
+    if (!itemId) continue; // ก้อนที่ตอนลงไม่ได้ลง
+    rowsByItem.set(itemId, [...(rowsByItem.get(itemId) ?? []), { ...out.row, memberKey: member.key }]);
+  }
+  return { member, input, rowsByItem };
+}
+
+/** จำลองบรรทัดหลังคิดใหม่: แถวของชิ้นที่คิดใหม่ถูกแทน แถวอื่น (ชิ้นที่ข้าม/ปริมาณเดิม/แถวกรอกเอง) คงเดิม */
+async function recomputePreviewLines(versionId: string, plans: RecomputePlan[]) {
   const planKeys = new Set(plans.map((p) => p.member.key));
   const touchedIds = [...new Set(plans.flatMap((p) => p.member.lines.map((l) => l.itemId)))];
   const items = await prisma.boqItem.findMany({
-    where: { id: { in: touchedIds }, projectVersionId: latest.id },
+    where: { id: { in: touchedIds }, projectVersionId: versionId },
     include: ITEM_INCLUDE,
   });
   const changedKeys = new Set<string>();
   const lines: StructuralRecomputeDto["lines"] = [];
   for (const item of items) {
     const oldRows = takeoffRowsFromDb(item.takeoffRows);
+    for (const key of changedMemberKeys(oldRows, item.id, plans)) changedKeys.add(key);
     const kept = oldRows.filter((r) => !r.memberKey || !planKeys.has(r.memberKey));
     const fresh = plans.flatMap((p) => normalizeTakeoffRows(p.rowsByItem.get(item.id) ?? []));
-    for (const p of plans) {
-      const before = oldRows.filter((r) => r.memberKey === p.member.key).map(rowSignature).join("\n");
-      const after = (p.rowsByItem.get(item.id) ?? []).map((r) => rowSignature({ ...r, barDia: r.barDia ?? null, length: r.length ?? null, width: r.width ?? null, height: r.height ?? null })).join("\n");
-      if (before !== after) changedKeys.add(p.member.key);
-    }
     const nextRows = [...kept, ...fresh];
     const qtyBefore = Number(item.quantity);
     const qtyAfter = nextRows.length === 0 ? 0 : sheetQuantity(nextRows, item.unit, decimalOrNull(item.wasteFactorPct));
@@ -1201,53 +1285,189 @@ export async function recomputeStructuralMembers(
     });
   }
   lines.sort((a, b) => a.name.localeCompare(b.name, "th"));
-  const costDelta = round2(lines.reduce((sum, l) => sum + l.costAfter - l.costBefore, 0));
-  const willBranch = await isVersionQuoted(latest.id);
+  return { lines, changedKeys };
+}
 
-  const preview: StructuralRecomputeDto = {
-    members: members.length,
-    changedMembers: changedKeys.size,
-    skipped,
-    lines,
-    costDelta,
-    willBranch,
-    applied: false,
-    versionNo: latest.versionNo,
-  };
-  if (!apply || changedKeys.size === 0) return preview;
+/** ชิ้นที่แถวในบรรทัดนี้จะเปลี่ยนจริงเมื่อคิดใหม่ */
+function changedMemberKeys(oldRows: NormalizedTakeoffRow[], itemId: string, plans: RecomputePlan[]): string[] {
+  return plans
+    .filter((p) => {
+      const before = oldRows.filter((r) => r.memberKey === p.member.key).map(rowSignature).join("\n");
+      const after = (p.rowsByItem.get(itemId) ?? [])
+        .map((r) => rowSignature({ ...r, barDia: r.barDia ?? null, length: r.length ?? null, width: r.width ?? null, height: r.height ?? null }))
+        .join("\n");
+      return before !== after;
+    })
+    .map((p) => p.member.key);
+}
 
-  // เขียนทีละชิ้น — ชิ้นแรกอาจแตกเวอร์ชัน (id บรรทัดเปลี่ยน) จึงแปลง id เดิม → บรรทัดในเวอร์ชันล่าสุดทุกรอบ
-  // (บรรทัดที่คัดลอกมาจำ id ต้นทางไว้ใน sourceItemId)
-  let versionNo = latest.versionNo;
-  for (const plan of plans) {
-    if (!changedKeys.has(plan.member.key)) continue;
-    const now = await getLatestVersion(projectId);
-    const rows = await prisma.boqItem.findMany({ where: { projectVersionId: now.id }, select: { id: true, sourceItemId: true } });
-    const idNow = (oldId: string) =>
-      rows.some((r) => r.id === oldId) ? oldId : rows.find((r) => r.sourceItemId === oldId)?.id;
-    const targets = [...plan.rowsByItem.entries()].flatMap(([oldId, rs]) => {
-      const itemId = idNow(oldId);
-      return itemId && rs.length > 0 ? [{ itemId, rows: rs }] : [];
-    });
-    const res = await writeTakeoffRows(
-      projectId,
-      targets.length > 0
-        ? { member: plan.input as unknown as ApplyTakeoffInput["member"], targets }
-        : { targets: [] },
-      actorId,
-      plan.member.key,
-    );
-    versionNo = res.version.versionNo;
-  }
-
-  await writeAuditLog({
-    userId: actorId,
-    action: "RECOMPUTE_STRUCTURAL_MEMBERS",
-    entityType: "Project",
-    entityId: projectId,
-    details: { members: changedKeys.size, lines: lines.length, costDelta, branched: willBranch },
+/**
+ * เขียนแผนของชิ้นหนึ่ง — ชิ้นแรกอาจแตกเวอร์ชัน (id บรรทัดเปลี่ยน) จึงแปลง id เดิม → บรรทัดในเวอร์ชันล่าสุดทุกรอบ
+ * (บรรทัดที่คัดลอกมาจำ id ต้นทางไว้ใน sourceItemId) · คืนเลขเวอร์ชันหลังเขียน
+ */
+async function applyRecomputePlan(projectId: string, plan: RecomputePlan, actorId: string): Promise<number> {
+  const now = await getLatestVersion(projectId);
+  const rows = await prisma.boqItem.findMany({ where: { projectVersionId: now.id }, select: { id: true, sourceItemId: true } });
+  const idNow = (oldId: string) =>
+    rows.some((r) => r.id === oldId) ? oldId : rows.find((r) => r.sourceItemId === oldId)?.id;
+  const targets = [...plan.rowsByItem.entries()].flatMap(([oldId, rs]) => {
+    const itemId = idNow(oldId);
+    return itemId && rs.length > 0 ? [{ itemId, rows: rs }] : [];
   });
-  return { ...preview, applied: true, versionNo };
+  const res = await writeTakeoffRows(
+    projectId,
+    targets.length > 0
+      ? { member: plan.input as unknown as ApplyTakeoffInput["member"], targets }
+      : { targets: [] },
+    actorId,
+    plan.member.key,
+  );
+  return res.version.versionNo;
+}
+
+type ItemWithRows = Prisma.BoqItemGetPayload<{ include: typeof ITEM_INCLUDE }>;
+type MergedLine = { item: ItemWithRows; rows: NormalizedTakeoffRow[]; waste: number | null };
+
+/**
+ * ชิ้นส่วนที่เป็นที่มาของแถว: ตัวคิดต้องรับข้อมูลนี้ได้จริง (กันเก็บขนาดที่คิดซ้ำไม่ได้) · แถวทุกแถวผูก key นี้
+ * คืน key ที่แถวผูก (ลงใหม่ = สร้าง key ใหม่ · ลงทับ = key เดิม · ไม่มีชิ้นส่วน = null)
+ */
+function tagMemberRows(input: ApplyTakeoffInput, member: StructuralInput | undefined, replaceKey: string | null): string | null {
+  const memberKey = replaceKey ?? (member ? randomUUID() : null);
+  if (member) {
+    const check = structuralTakeoff(member);
+    if (check.errors.length > 0) throw new BoqError(`ข้อมูลชิ้นส่วนไม่ครบ: ${check.errors[0]}`);
+    if (JSON.stringify(member).length > 8000) throw new BoqError("ข้อมูลชิ้นส่วนยาวเกินไป");
+    for (const t of input.targets) t.rows = t.rows.map((r) => ({ ...r, memberKey }));
+  }
+  return memberKey;
+}
+
+/** ปลายทางเดียวกันถูกส่งมาหลายก้อน (เช่น เหล็กสองแถวลงบรรทัดเดียว) → รวมเป็นก้อนเดียว */
+function groupTargets(targets: ApplyTakeoffInput["targets"]) {
+  const byItem = new Map<string, TakeoffRowInputDto[]>();
+  const newTargets: { newItem: NewSheetLine; rows: TakeoffRowInputDto[] }[] = [];
+  for (const t of targets) {
+    if (t.itemId) byItem.set(t.itemId, [...(byItem.get(t.itemId) ?? []), ...t.rows]);
+    else if (t.newItem) newTargets.push({ newItem: t.newItem, rows: t.rows });
+  }
+  return { byItem, newTargets };
+}
+
+/** แถวเดิมของบรรทัดที่พกต่อไป — บรรทัดกรอกเองกลายเป็นแถว "ปริมาณเดิม" หนึ่งแถว · ลงทับ = ถอดแถวของชิ้นเดิมออก */
+function carriedRows(item: ItemWithRows, replaceKey: string | null): NormalizedTakeoffRow[] {
+  if (item.qtyBasis === "SHEET") {
+    return takeoffRowsFromDb(item.takeoffRows).filter((r) => !replaceKey || r.memberKey !== replaceKey);
+  }
+  return [
+    {
+      label: "ปริมาณเดิม (กรอกเอง)",
+      count: Number(item.quantity),
+      length: null,
+      width: null,
+      height: null,
+      barDia: null,
+      deduct: false,
+      memberKey: null,
+    },
+  ];
+}
+
+/** รวมแถวเดิม+แถวใหม่ของทุกบรรทัดที่เกี่ยว · บรรทัดที่ไม่เหลือแถวเลย = ลบทั้งบรรทัด */
+function mergeLines(
+  items: ItemWithRows[],
+  byItem: Map<string, TakeoffRowInputDto[]>,
+  replaceKey: string | null,
+): { merged: MergedLine[]; toDelete: string[] } {
+  const toDelete: string[] = [];
+  const merged = items.flatMap((item) => {
+    if (byItem.has(item.id) && item.qtyBasis !== "MANUAL" && item.qtyBasis !== "SHEET") {
+      throw new BoqError(`บรรทัด "${item.name}" คิดปริมาณจากค่าวัดของโครงการ — เลือกบรรทัดอื่นหรือสร้างบรรทัดใหม่`, 409);
+    }
+    const rows = [...carriedRows(item, replaceKey), ...normalizeTakeoffRows(byItem.get(item.id) ?? [])];
+    // ไม่เหลือแถวเลย = บรรทัดนี้มีไว้เพื่อชิ้นส่วนที่ถอดออก — ลบทั้งบรรทัด (ปริมาณ 0 ค้างไว้ไม่มีประโยชน์)
+    if (rows.length === 0) {
+      toDelete.push(item.id);
+      return [];
+    }
+    // บรรทัดที่เคยกรอกเองไม่มีเผื่อเสียที่มีความหมาย — เริ่มที่ 0 ไม่งั้นปริมาณเดิมโดนเผื่อซ้ำ
+    const waste = item.qtyBasis === "SHEET" ? decimalOrNull(item.wasteFactorPct) : null;
+    sheetQuantity(rows, item.unit, waste);
+    return [{ item, rows, waste }];
+  });
+  return { merged, toDelete };
+}
+
+/** บันทึกชิ้นส่วน: ลงทับ = แก้ · ลบ = ลบ · ลงใหม่ = สร้าง (ที่เวอร์ชันที่แก้ได้ — แตกเวอร์ชันแล้วชิ้นส่วนถูกคัดลอกมาด้วย key เดิม) */
+async function saveStructuralMember(
+  versionId: string,
+  replaceKey: string | null,
+  member: StructuralInput | undefined,
+  memberKey: string | null,
+  actorId: string,
+): Promise<void> {
+  const memberWhere = replaceKey ? { projectVersionId_key: { projectVersionId: versionId, key: replaceKey } } : null;
+  if (memberWhere && member) {
+    await prisma.structuralMember.update({
+      where: memberWhere,
+      data: {
+        kind: member.kind,
+        label: member.label,
+        count: member.count,
+        input: member as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } else if (memberWhere) {
+    await prisma.structuralMember.delete({ where: memberWhere });
+  } else if (member && memberKey) {
+    await prisma.structuralMember.create({
+      data: {
+        projectVersionId: versionId,
+        key: memberKey,
+        kind: member.kind,
+        label: member.label,
+        count: member.count,
+        input: member as unknown as Prisma.InputJsonValue,
+        createdById: actorId,
+      },
+    });
+  }
+}
+
+/** id บรรทัดของเวอร์ชันเดิม → บรรทัดในเวอร์ชันที่แก้ได้ (แตกเวอร์ชันใหม่ = แปลงผ่าน sourceItemId) */
+async function idMapperFor(versionId: string, latestId: string): Promise<(id: string) => string> {
+  if (versionId === latestId) return (id) => id;
+  const cloned = await prisma.boqItem.findMany({
+    where: { projectVersionId: versionId },
+    select: { id: true, sourceItemId: true },
+  });
+  const bySource = new Map(cloned.map((c) => [c.sourceItemId, c.id]));
+  return (id) => bySource.get(id)!;
+}
+
+/** บรรทัดใหม่ของตัวคิดโครงสร้าง — เผื่อเสียตั้งต้นของบรรทัดเหล็กตามขนาด (ชุดเสนอราคา) เมื่อวัสดุไม่ได้กำหนดไว้เอง */
+async function addSheetLine(
+  projectId: string,
+  t: { newItem: NewSheetLine; rows: TakeoffRowInputDto[] },
+  rules: Awaited<ReturnType<typeof getTakeoffRules>>,
+  actorId: string,
+) {
+  const dias = new Set(t.rows.map((r) => r.barDia ?? null));
+  const dia = dias.size === 1 ? [...dias][0] : null;
+  const presetWaste = dia != null ? rules.tender.wastePct[String(dia)] ?? null : null;
+  const materialWaste = t.newItem.materialId
+    ? (await lineDefaultsFrom({ ...t.newItem, qtyBasis: "SHEET", takeoffRows: t.rows })).materialWaste
+    : null;
+  return addBoqItem(
+    projectId,
+    {
+      ...t.newItem,
+      qtyBasis: "SHEET",
+      takeoffRows: t.rows,
+      ...(presetWaste != null && materialWaste == null ? { wasteFactorPct: presetWaste } : {}),
+    },
+    actorId,
+  );
 }
 
 /**
@@ -1264,23 +1484,9 @@ async function writeTakeoffRows(projectId: string, input: ApplyTakeoffInput, act
     if (!found) throw new BoqError("ไม่พบชิ้นส่วนนี้ในเวอร์ชันล่าสุด กรุณาโหลดหน้านี้ใหม่", 404);
   }
 
-  // ชิ้นส่วนที่เป็นที่มาของแถว: ตัวคิดต้องรับข้อมูลนี้ได้จริง (กันเก็บขนาดที่คิดซ้ำไม่ได้) · แถวทุกแถวผูก key นี้
   const member = input.member as unknown as StructuralInput | undefined;
-  const memberKey = replaceKey ?? (member ? randomUUID() : null);
-  if (member) {
-    const check = structuralTakeoff(member);
-    if (check.errors.length > 0) throw new BoqError(`ข้อมูลชิ้นส่วนไม่ครบ: ${check.errors[0]}`);
-    if (JSON.stringify(member).length > 8000) throw new BoqError("ข้อมูลชิ้นส่วนยาวเกินไป");
-    for (const t of input.targets) t.rows = t.rows.map((r) => ({ ...r, memberKey }));
-  }
-
-  // ปลายทางเดียวกันถูกส่งมาหลายก้อน (เช่น เหล็กสองแถวลงบรรทัดเดียว) → รวมเป็นก้อนเดียว
-  const byItem = new Map<string, TakeoffRowInputDto[]>();
-  const newTargets: { newItem: NewSheetLine; rows: TakeoffRowInputDto[] }[] = [];
-  for (const t of input.targets) {
-    if (t.itemId) byItem.set(t.itemId, [...(byItem.get(t.itemId) ?? []), ...t.rows]);
-    else if (t.newItem) newTargets.push({ newItem: t.newItem, rows: t.rows });
-  }
+  const memberKey = tagMemberRows(input, member, replaceKey);
+  const { byItem, newTargets } = groupTargets(input.targets);
 
   const existing = await prisma.boqItem.findMany({
     where: { id: { in: [...byItem.keys()] }, projectVersionId: latest.id },
@@ -1300,39 +1506,7 @@ async function writeTakeoffRows(projectId: string, input: ApplyTakeoffInput, act
         include: ITEM_INCLUDE,
       })
     : [];
-
-  const toDelete: string[] = [];
-  const merged = [...existing, ...affected].flatMap((item) => {
-    const targeted = byItem.has(item.id);
-    if (targeted && item.qtyBasis !== "MANUAL" && item.qtyBasis !== "SHEET") {
-      throw new BoqError(`บรรทัด "${item.name}" คิดปริมาณจากค่าวัดของโครงการ — เลือกบรรทัดอื่นหรือสร้างบรรทัดใหม่`, 409);
-    }
-    const carried: NormalizedTakeoffRow[] =
-      item.qtyBasis === "SHEET"
-        ? takeoffRowsFromDb(item.takeoffRows).filter((r) => !replaceKey || r.memberKey !== replaceKey)
-        : [
-            {
-              label: "ปริมาณเดิม (กรอกเอง)",
-              count: Number(item.quantity),
-              length: null,
-              width: null,
-              height: null,
-              barDia: null,
-              deduct: false,
-              memberKey: null,
-            },
-          ];
-    const rows = [...carried, ...normalizeTakeoffRows(byItem.get(item.id) ?? [])];
-    // ไม่เหลือแถวเลย = บรรทัดนี้มีไว้เพื่อชิ้นส่วนที่ถอดออก — ลบทั้งบรรทัด (ปริมาณ 0 ค้างไว้ไม่มีประโยชน์)
-    if (rows.length === 0) {
-      toDelete.push(item.id);
-      return [];
-    }
-    // บรรทัดที่เคยกรอกเองไม่มีเผื่อเสียที่มีความหมาย — เริ่มที่ 0 ไม่งั้นปริมาณเดิมโดนเผื่อซ้ำ
-    const waste = item.qtyBasis === "SHEET" ? decimalOrNull(item.wasteFactorPct) : null;
-    sheetQuantity(rows, item.unit, waste);
-    return [{ item, rows, waste }];
-  });
+  const { merged, toDelete } = mergeLines([...existing, ...affected], byItem, replaceKey);
 
   // บรรทัดใหม่: ตรวจหมวด/วัสดุ/หน่วยก่อนเขียนอะไร
   for (const t of newTargets) {
@@ -1346,44 +1520,9 @@ async function writeTakeoffRows(projectId: string, input: ApplyTakeoffInput, act
 
   // แตกเวอร์ชันใหม่ (ถ้าเวอร์ชันนี้ส่งใบเสนอราคาแล้ว) ครั้งเดียว แล้วแปลง id ไปบรรทัดในเวอร์ชันใหม่
   const version = await getOrCreateEditableVersion(projectId, actorId);
-  // แตกเวอร์ชันแล้วชิ้นส่วนถูกคัดลอกมาด้วย key เดิม — แก้/ลบที่เวอร์ชันที่แก้ได้
-  const memberWhere = replaceKey ? { projectVersionId_key: { projectVersionId: version.id, key: replaceKey } } : null;
-  if (memberWhere && member) {
-    await prisma.structuralMember.update({
-      where: memberWhere,
-      data: {
-        kind: member.kind,
-        label: member.label,
-        count: member.count,
-        input: member as unknown as Prisma.InputJsonValue,
-      },
-    });
-  } else if (memberWhere) {
-    await prisma.structuralMember.delete({ where: memberWhere });
-  } else if (member && memberKey) {
-    await prisma.structuralMember.create({
-      data: {
-        projectVersionId: version.id,
-        key: memberKey,
-        kind: member.kind,
-        label: member.label,
-        count: member.count,
-        input: member as unknown as Prisma.InputJsonValue,
-        createdById: actorId,
-      },
-    });
-  }
-  // เผื่อเสียตั้งต้นของบรรทัดเหล็กใหม่ตามขนาด (ชุดเสนอราคา) — เฉพาะเมื่อวัสดุไม่ได้กำหนดไว้เอง
+  await saveStructuralMember(version.id, replaceKey, member, memberKey, actorId);
   const rules = await getTakeoffRules();
-  let idOf = (id: string) => id;
-  if (version.id !== latest.id) {
-    const cloned = await prisma.boqItem.findMany({
-      where: { projectVersionId: version.id },
-      select: { id: true, sourceItemId: true },
-    });
-    const bySource = new Map(cloned.map((c) => [c.sourceItemId, c.id]));
-    idOf = (id) => bySource.get(id)!;
-  }
+  const idOf = await idMapperFor(version.id, latest.id);
 
   let finalVersion = version;
   for (const m of merged) {
@@ -1399,23 +1538,7 @@ async function writeTakeoffRows(projectId: string, input: ApplyTakeoffInput, act
     finalVersion = (await deleteBoqItem(projectId, idOf(id), actorId)).version;
   }
   for (const t of newTargets) {
-    const dias = new Set(t.rows.map((r) => r.barDia ?? null));
-    const dia = dias.size === 1 ? [...dias][0] : null;
-    const presetWaste = dia != null ? rules.tender.wastePct[String(dia)] ?? null : null;
-    const materialWaste = t.newItem.materialId
-      ? (await lineDefaultsFrom({ ...t.newItem, qtyBasis: "SHEET", takeoffRows: t.rows })).materialWaste
-      : null;
-    const r = await addBoqItem(
-      projectId,
-      {
-        ...t.newItem,
-        qtyBasis: "SHEET",
-        takeoffRows: t.rows,
-        ...(presetWaste != null && materialWaste == null ? { wasteFactorPct: presetWaste } : {}),
-      },
-      actorId,
-    );
-    finalVersion = r.version;
+    finalVersion = (await addSheetLine(projectId, t, rules, actorId)).version;
   }
 
   const rowCount = input.targets.reduce((n, t) => n + t.rows.length, 0);

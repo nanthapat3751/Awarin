@@ -67,10 +67,11 @@ async function importMaterials(): Promise<ImportMaterial[]> {
 // ─────────────── ไฟล์ส่งออกที่ถูกแก้ข้างนอกแล้วนำกลับ (แก้ / เพิ่ม / ลบ) ───────────────
 
 type SyncField = "name" | "quantity" | "unit" | "materialUnitPrice" | "laborUnitPrice" | "note" | "category";
+type SyncValue = string | number | null;
 export interface SyncChange {
   field: SyncField;
-  before: string | number | null;
-  after: string | number | null;
+  before: SyncValue;
+  after: SyncValue;
 }
 export interface SyncRowInfo {
   /** changed = จะแก้บรรทัดเดิม · unchanged = เหมือนเดิม · added = เพิ่มเป็นบรรทัดใหม่ · error = ข้อมูลเสีย (บรรทัดเดิมไม่ถูกแตะ) */
@@ -137,21 +138,11 @@ function diffLine(row: ImportPreview["rows"][number], line: LatestLine) {
   const changes: SyncChange[] = [];
   const warnings: string[] = [];
   const locks = lineLocks(line);
-  const push = (field: SyncField, before: string | number | null, after: string | number | null) => {
+  const push = (field: SyncField, before: SyncValue, after: SyncValue) => {
     if (before !== after) changes.push({ field, before, after });
   };
   push("name", line.name.trim(), row.name.trim());
-  const qtyBefore = r3(Number(line.quantity));
-  const qtyAfter = r3(row.quantity ?? 0);
-  if (qtyBefore !== qtyAfter) {
-    if (locks.qtyLocked) warnings.push("ปริมาณบรรทัดนี้ระบบคิดจากสูตรวัสดุย่อย/ตัวคิดกระเบื้อง — แก้ในไฟล์ไม่มีผล ให้แก้ในระบบ");
-    else {
-      push("quantity", qtyBefore, qtyAfter);
-      if (line.qtyBasis !== "MANUAL") {
-        warnings.push(`ปริมาณเดิมคิดจาก${BASIS_LABEL[line.qtyBasis] ?? "ค่าวัดของโครงการ"} — จะเปลี่ยนเป็นกรอกปริมาณเอง`);
-      }
-    }
-  }
+  diffQuantity(row, line, locks.qtyLocked, push, warnings);
   if (line.unit.trim() !== row.unit.trim()) {
     if (locks.unitLocked) warnings.push("หน่วยของบรรทัดที่ใช้ตัวคิดกระเบื้องแก้จากไฟล์ไม่ได้");
     else push("unit", line.unit.trim(), row.unit.trim());
@@ -168,6 +159,88 @@ function diffLine(row: ImportPreview["rows"][number], line: LatestLine) {
     warnings.push(`รหัส ${row.code} ไม่มีในระบบ — คงรหัสงานเดิม ${line.category.code ?? ""}`.trim());
   }
   return { changes, warnings };
+}
+
+/** ปริมาณ: บรรทัดที่ระบบคิดปริมาณเองแก้จากไฟล์ไม่ได้ · บรรทัดที่คิดจากค่าวัดจะกลายเป็นกรอกเอง */
+function diffQuantity(
+  row: ImportPreview["rows"][number],
+  line: LatestLine,
+  qtyLocked: boolean,
+  push: (field: SyncField, before: SyncValue, after: SyncValue) => void,
+  warnings: string[],
+): void {
+  const qtyBefore = r3(Number(line.quantity));
+  const qtyAfter = r3(row.quantity ?? 0);
+  if (qtyBefore === qtyAfter) return;
+  if (qtyLocked) {
+    warnings.push("ปริมาณบรรทัดนี้ระบบคิดจากสูตรวัสดุย่อย/ตัวคิดกระเบื้อง — แก้ในไฟล์ไม่มีผล ให้แก้ในระบบ");
+    return;
+  }
+  push("quantity", qtyBefore, qtyAfter);
+  if (line.qtyBasis !== "MANUAL") {
+    warnings.push(`ปริมาณเดิมคิดจาก${BASIS_LABEL[line.qtyBasis] ?? "ค่าวัดของโครงการ"} — จะเปลี่ยนเป็นกรอกปริมาณเอง`);
+  }
+}
+
+type PreviewRow = BoqImportPreviewDto["rows"][number];
+
+/** แถวที่ชี้บรรทัดเดิม: แก้ / เหมือนเดิม / ข้อมูลเสีย (ไม่แตะบรรทัดเดิม) */
+function syncExistingRow(row: PreviewRow, line: LatestLine, currentId: string): void {
+  if (row.errors.length > 0) {
+    row.sync = { status: "error", lineId: currentId, changes: [] };
+    row.warnings.push("ข้อมูลในไฟล์ไม่ครบ — บรรทัดเดิมในระบบจะไม่ถูกแก้");
+    return;
+  }
+  const { changes, warnings } = diffLine(row, line);
+  row.warnings.push(...warnings);
+  // บรรทัดเดิมคงรหัสงาน/วัสดุของมัน — ข้อเสนอสำหรับแถวใหม่ไม่ใช้กับแถวนี้
+  const categoryChanged = changes.some((c) => c.field === "category");
+  if (!categoryChanged) {
+    row.categoryId = line.categoryId;
+    row.categoryName = `${line.category.code ?? ""} ${line.category.name}`.trim();
+  }
+  row.newCode = null;
+  row.needsCategory = false;
+  row.materialMatch = null;
+  row.sync = { status: changes.length > 0 ? "changed" : "unchanged", lineId: currentId, changes };
+}
+
+/** ไฟล์ส่งออกจากโครงการนี้: จับคู่แถวกับบรรทัดในเวอร์ชันล่าสุด แล้วสรุปแก้/เพิ่ม/ลบ */
+async function syncWithLatest(projectId: string, rows: PreviewRow[], fileVersionNo: number): Promise<SyncSummary> {
+  const { latest, lines } = await latestLines(projectId);
+  const byId = new Map(lines.map((l) => [l.id, l]));
+  const toCurrent = await lineageMap(projectId, lines.map((l) => l.id));
+  const used = new Set<string>();
+  for (const row of rows) {
+    const currentId = row.lineId ? toCurrent.get(row.lineId) : undefined;
+    if (row.lineId && currentId && !used.has(currentId)) {
+      // แถวเดิม — แม้ข้อมูลเสียก็นับว่า "ยังอยู่" (ห้ามตีความเป็นการลบบรรทัดเดิม)
+      used.add(currentId);
+      syncExistingRow(row, byId.get(currentId)!, currentId);
+      continue;
+    }
+    if (row.lineId) {
+      row.warnings.push(
+        currentId ? "แถวนี้ซ้ำกับบรรทัดเดิมอีกแถว (คัดลอกแถวมา) — จะเพิ่มเป็นบรรทัดใหม่" : "ไม่พบบรรทัดเดิมในระบบ (อาจถูกลบไปแล้ว) — จะเพิ่มเป็นบรรทัดใหม่",
+      );
+    }
+    row.sync = { status: row.errors.length > 0 ? "error" : "added", lineId: null, changes: [] };
+  }
+  const removed = lines.filter((l) => !used.has(l.id));
+  const countOf = (status: SyncRowInfo["status"]) => rows.filter((r) => r.sync?.status === status).length;
+  return {
+    fileVersionNo,
+    currentVersionNo: latest.versionNo,
+    counts: { changed: countOf("changed"), unchanged: countOf("unchanged"), added: countOf("added"), removed: removed.length },
+    removed: removed.map((l) => ({
+      lineId: l.id,
+      code: l.category.code,
+      name: l.name,
+      quantity: Number(l.quantity),
+      unit: l.unit,
+      lineTotal: Number(l.lineTotal),
+    })),
+  };
 }
 
 export interface BoqImportPreviewDto extends ImportPreview {
@@ -200,65 +273,8 @@ export async function previewBoqImport(
   assertNotCustom(await loadProjectOrThrow(projectId));
   const preview = await parseBoqImport(buffer, await importCategories(), defaultCategoryId, await importMaterials(), options);
   const sameProject = preview.source?.projectId === projectId;
-  let sync: SyncSummary | null = null;
   const rows: BoqImportPreviewDto["rows"] = preview.rows.map((r) => ({ ...r, sync: null }));
-
-  if (sameProject) {
-    const { latest, lines } = await latestLines(projectId);
-    const byId = new Map(lines.map((l) => [l.id, l]));
-    const toCurrent = await lineageMap(projectId, lines.map((l) => l.id));
-    const used = new Set<string>();
-    for (const row of rows) {
-      const currentId = row.lineId ? toCurrent.get(row.lineId) : undefined;
-      if (row.lineId && currentId && !used.has(currentId)) {
-        // แถวเดิม — แม้ข้อมูลเสียก็นับว่า "ยังอยู่" (ห้ามตีความเป็นการลบบรรทัดเดิม)
-        used.add(currentId);
-        const line = byId.get(currentId)!;
-        if (row.errors.length > 0) {
-          row.sync = { status: "error", lineId: currentId, changes: [] };
-          row.warnings.push("ข้อมูลในไฟล์ไม่ครบ — บรรทัดเดิมในระบบจะไม่ถูกแก้");
-          continue;
-        }
-        const { changes, warnings } = diffLine(row, line);
-        row.warnings.push(...warnings);
-        // บรรทัดเดิมคงรหัสงาน/วัสดุของมัน — ข้อเสนอสำหรับแถวใหม่ไม่ใช้กับแถวนี้
-        row.categoryId = changes.some((c) => c.field === "category") ? row.categoryId : line.categoryId;
-        row.categoryName = changes.some((c) => c.field === "category")
-          ? row.categoryName
-          : `${line.category.code ?? ""} ${line.category.name}`.trim();
-        row.newCode = null;
-        row.needsCategory = false;
-        row.materialMatch = null;
-        row.sync = { status: changes.length > 0 ? "changed" : "unchanged", lineId: currentId, changes };
-      } else {
-        if (row.lineId) {
-          row.warnings.push(
-            currentId ? "แถวนี้ซ้ำกับบรรทัดเดิมอีกแถว (คัดลอกแถวมา) — จะเพิ่มเป็นบรรทัดใหม่" : "ไม่พบบรรทัดเดิมในระบบ (อาจถูกลบไปแล้ว) — จะเพิ่มเป็นบรรทัดใหม่",
-          );
-        }
-        row.sync = { status: row.errors.length > 0 ? "error" : "added", lineId: null, changes: [] };
-      }
-    }
-    const removed = lines.filter((l) => !used.has(l.id));
-    sync = {
-      fileVersionNo: preview.source!.versionNo,
-      currentVersionNo: latest.versionNo,
-      counts: {
-        changed: rows.filter((r) => r.sync?.status === "changed").length,
-        unchanged: rows.filter((r) => r.sync?.status === "unchanged").length,
-        added: rows.filter((r) => r.sync?.status === "added").length,
-        removed: removed.length,
-      },
-      removed: removed.map((l) => ({
-        lineId: l.id,
-        code: l.category.code,
-        name: l.name,
-        quantity: Number(l.quantity),
-        unit: l.unit,
-        lineTotal: Number(l.lineTotal),
-      })),
-    };
-  }
+  const sync = sameProject ? await syncWithLatest(projectId, rows, preview.source!.versionNo) : null;
 
   const valid = rows.filter((r) => r.errors.length === 0);
   const ready = valid.filter((r) => !r.needsCategory);
@@ -360,18 +376,15 @@ function allocateMaterialCode(taken: Set<string>): string {
   return code;
 }
 
-export async function commitBoqImport(projectId: string, input: CommitBoqImportInput, actorId: string) {
-  assertNotCustom(await loadProjectOrThrow(projectId));
+type ImportCategoryRow = Awaited<ReturnType<typeof importCategories>>[number];
 
-  const categories = await importCategories();
-  const catById = new Map(categories.map((c) => [c.id, c]));
+/** รหัสงานในคำขอยังใช้ได้ · รหัสใหม่: แม่ต้องเป็นหมวดย่อยที่ใช้งานได้ และรหัสที่ระบุต้องยังว่าง */
+function assertImportCategories(input: CommitBoqImportInput, catById: Map<string, ImportCategoryRow>, takenCodes: Set<string>): void {
   const badCategory = input.rows.find((r) => r.categoryId && !catById.get(r.categoryId)?.usable);
   if (badCategory) {
     throw new BoqError(`หมวดงานของ "${badCategory.name}" ไม่มีแล้วหรือถูกปิดใช้งาน — กรุณาพรีวิวไฟล์ใหม่`, 409);
   }
-
-  // รหัสงานใหม่: แม่ต้องเป็นหมวดย่อยที่ใช้งานได้ · รหัสที่ระบุต้องยังว่าง (มีคนสร้างระหว่างพรีวิว = ให้พรีวิวใหม่)
-  const takenCodes = new Set(categories.map((c) => c.code).filter((c): c is string => !!c));
+  // มีคนสร้างรหัสระหว่างพรีวิว = ให้พรีวิวใหม่
   for (const r of input.rows) {
     if (!r.newCategory) continue;
     const parent = catById.get(r.newCategory.parentId);
@@ -382,6 +395,11 @@ export async function commitBoqImport(projectId: string, input: CommitBoqImportI
       throw new BoqError(`หมวดย่อย "${parent.name}" ไม่มีรหัส จึงต่อเลขรหัสงานใหม่ให้ "${r.name}" ไม่ได้ — ใส่รหัสในไฟล์หรือเลือกรหัสที่มีอยู่`, 400);
     }
   }
+  assertNewCodesFree(input, takenCodes);
+}
+
+/** รหัสที่ขอสร้างต้องยังว่าง และรหัสเดียวกันต้องอยู่ใต้หมวดย่อยเดียวกันทั้งไฟล์ */
+function assertNewCodesFree(input: CommitBoqImportInput, takenCodes: Set<string>): void {
   const codeOwners = new Map<string, string>();
   for (const r of input.rows) {
     const code = r.newCategory?.code?.toUpperCase();
@@ -393,6 +411,15 @@ export async function commitBoqImport(projectId: string, input: CommitBoqImportI
     }
     codeOwners.set(code, key);
   }
+}
+
+export async function commitBoqImport(projectId: string, input: CommitBoqImportInput, actorId: string) {
+  assertNotCustom(await loadProjectOrThrow(projectId));
+
+  const categories = await importCategories();
+  const catById = new Map(categories.map((c) => [c.id, c]));
+  const takenCodes = new Set(categories.map((c) => c.code).filter((c): c is string => !!c));
+  assertImportCategories(input, catById, takenCodes);
 
   const linkIds = [...new Set(input.rows.map((r) => r.materialId).filter((id): id is string => !!id))];
   const linkable = new Set(
@@ -421,8 +448,7 @@ export async function commitBoqImport(projectId: string, input: CommitBoqImportI
     lineFor.set(version.id === latestBefore?.id ? l.id : (l.sourceItemId ?? l.id), l);
   }
   const wantedIds = [...input.rows.map((r) => r.lineId).filter((id): id is string => !!id), ...(input.removeLineIds ?? [])];
-  const missing = wantedIds.find((id) => !lineFor.has(id));
-  if (missing) throw new BoqError("บรรทัด BOQ เปลี่ยนไปหลังพรีวิว (มีคนแก้/ลบระหว่างนั้น) — กรุณาพรีวิวไฟล์ใหม่", 409);
+  if (wantedIds.some((id) => !lineFor.has(id))) throw new BoqError("บรรทัด BOQ เปลี่ยนไปหลังพรีวิว (มีคนแก้/ลบระหว่างนั้น) — กรุณาพรีวิวไฟล์ใหม่", 409);
   if (new Set(wantedIds).size !== wantedIds.length) throw new BoqError("บรรทัดเดิมเดียวกันถูกแก้/ลบซ้ำในคำขอเดียว", 400);
 
   const now = new Date();
@@ -486,37 +512,7 @@ export async function commitBoqImport(projectId: string, input: CommitBoqImportI
 
     // sync: แก้บรรทัดเดิมตามไฟล์ — กฎเดียวกับพรีวิว (ตัวเลขที่ระบบคิดเองไม่ถูกทับ) คิดซ้ำที่นี่ ไม่เชื่อหน้าจอ
     for (const r of input.rows.filter((row) => row.lineId)) {
-      const line = lineFor.get(r.lineId!)!;
-      const locks = lineLocks(line);
-      const qtyIn = r3(r.quantity);
-      const qtyChanged = qtyIn !== r3(Number(line.quantity));
-      const quantity = qtyChanged && !locks.qtyLocked ? qtyIn : Number(line.quantity);
-      const toManual = qtyChanged && !locks.qtyLocked && line.qtyBasis !== "MANUAL";
-      const materialUnitPrice = locks.priceLocked ? Number(line.materialUnitPrice) : r2(r.materialUnitPrice);
-      const laborUnitPrice = r2(r.laborUnitPrice);
-      const amounts = calculateLineAmounts({ quantity, materialUnitPrice, laborUnitPrice });
-      const repriced =
-        materialUnitPrice !== r2(Number(line.materialUnitPrice)) || laborUnitPrice !== r2(Number(line.laborUnitPrice));
-      await tx.boqItem.update({
-        where: { id: line.id },
-        data: {
-          categoryId: r.categoryId,
-          name: r.name,
-          unit: locks.unitLocked ? line.unit : r.unit,
-          quantity,
-          qtyBasis: toManual ? "MANUAL" : undefined,
-          qtyCoefficient: toManual ? null : undefined,
-          materialUnitPrice,
-          materialTotal: amounts.materialTotal,
-          laborUnitPrice,
-          laborTotal: amounts.laborTotal,
-          lineTotal: amounts.lineTotal,
-          note: r.note || null,
-          pricedAt: repriced ? now : undefined,
-          // ปริมาณไม่ได้มาจากใบถอดแบบแล้ว — แถวถอดแบบเดิมต้องออกไปด้วย (เหมือนเปลี่ยนฐานในหน้าแก้ไข)
-          takeoffRows: toManual ? { deleteMany: {} } : undefined,
-        },
-      });
+      await tx.boqItem.update(syncedLineUpdate(r, lineFor.get(r.lineId!)!, now));
     }
     const removeIds = (input.removeLineIds ?? []).map((id) => lineFor.get(id)!.id);
     const removedCount = removeIds.length ? (await tx.boqItem.deleteMany({ where: { id: { in: removeIds } } })).count : 0;
@@ -597,6 +593,44 @@ export async function commitBoqImport(projectId: string, input: CommitBoqImportI
   };
 }
 
+/** คำสั่งแก้บรรทัดเดิมตามไฟล์ — ตัวเลขที่ระบบคิดเอง (สูตรวัสดุย่อย/ตัวคิดกระเบื้อง) ไม่ถูกทับ */
+function syncedLineUpdate(
+  r: CommitBoqImportInput["rows"][number],
+  line: { id: string; quantity: unknown; qtyBasis: string; unit: string; materialUnitPrice: unknown; laborUnitPrice: unknown; tileCalc: unknown; _count: { components: number } },
+  now: Date,
+) {
+  const locks = lineLocks(line);
+  const qtyIn = r3(r.quantity);
+  const qtyChanged = qtyIn !== r3(Number(line.quantity));
+  const quantity = qtyChanged && !locks.qtyLocked ? qtyIn : Number(line.quantity);
+  const toManual = qtyChanged && !locks.qtyLocked && line.qtyBasis !== "MANUAL";
+  const materialUnitPrice = locks.priceLocked ? Number(line.materialUnitPrice) : r2(r.materialUnitPrice);
+  const laborUnitPrice = r2(r.laborUnitPrice);
+  const amounts = calculateLineAmounts({ quantity, materialUnitPrice, laborUnitPrice });
+  const repriced =
+    materialUnitPrice !== r2(Number(line.materialUnitPrice)) || laborUnitPrice !== r2(Number(line.laborUnitPrice));
+  return {
+    where: { id: line.id },
+    data: {
+      categoryId: r.categoryId,
+      name: r.name,
+      unit: locks.unitLocked ? line.unit : r.unit,
+      quantity,
+      qtyBasis: toManual ? ("MANUAL" as const) : undefined,
+      qtyCoefficient: toManual ? null : undefined,
+      materialUnitPrice,
+      materialTotal: amounts.materialTotal,
+      laborUnitPrice,
+      laborTotal: amounts.laborTotal,
+      lineTotal: amounts.lineTotal,
+      note: r.note || null,
+      pricedAt: repriced ? now : undefined,
+      // ปริมาณไม่ได้มาจากใบถอดแบบแล้ว — แถวถอดแบบเดิมต้องออกไปด้วย (เหมือนเปลี่ยนฐานในหน้าแก้ไข)
+      takeoffRows: toManual ? { deleteMany: {} } : undefined,
+    },
+  };
+}
+
 /**
  * แม่แบบนำเข้า: คำอธิบาย + หัวตารางที่ระบบอ่านได้ + ชีตรหัสหมวดงานที่ใช้ได้
  *
@@ -630,7 +664,8 @@ export async function buildImportTemplate(): Promise<Buffer> {
   const ref = wb.addWorksheet("รหัสหมวดงาน");
   ref.columns = [{ width: 14 }, { width: 50 }];
   ref.addRow(["รหัส", "หมวดงาน"]).font = { name: "Tahoma", bold: true };
-  for (const c of categories.sort((a, b) => (a.code ?? "").localeCompare(b.code ?? "", "en", { numeric: true }))) {
+  categories.sort((a, b) => (a.code ?? "").localeCompare(b.code ?? "", "en", { numeric: true }));
+  for (const c of categories) {
     ref.addRow([c.code, c.name]);
   }
   return Buffer.from(await wb.xlsx.writeBuffer());

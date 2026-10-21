@@ -27,7 +27,8 @@ function designSummary(d: HouseDesignDto): string {
   ]
     .filter(Boolean)
     .join(" ");
-  return `${d.name}${spec ? ` · ${spec}` : ""} ดูภาพและแปลน ปรับแบบได้ และขอประเมินราคาก่อสร้างฟรี`;
+  const specNote = spec ? ` · ${spec}` : "";
+  return `${d.name}${specNote} ดูภาพและแปลน ปรับแบบได้ และขอประเมินราคาก่อสร้างฟรี`;
 }
 
 export function HouseDesignDetailPage() {

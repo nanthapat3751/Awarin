@@ -361,6 +361,92 @@ describe("ตรวจสลิปอัตโนมัติตอนแจ้�
     expect(res.status).toBe(409);
   });
 
+  it("แจ้งโอนที่ใช้ไม่ได้ถูกปฏิเสธพร้อมเหตุผล: ไม่แนบสลิป · วันที่ผิด/อนาคต · งวดไม่ใช่ของสัญญา · งวดยังไม่ถึงกำหนด · แจ้งซ้ำ", async () => {
+    const c = await billedContract("[ชั่วคราว] แจ้งโอนผิดรูป");
+    const url = `/api/my/contracts/${c.contractId}/payment-notices`;
+    const noFile = await customer.agent
+      .post(url)
+      .field("installmentId", c.first.id)
+      .field("paidOn", todayIso())
+      .field("amount", "1000.00");
+    expect(noFile.status).toBe(400);
+
+    const badDate = await notify(c.contractId, { installmentId: c.first.id, amount: 1000, paidOn: "2026-02-31" }, "สลิป.png");
+    expect(badDate.status).toBe(400);
+    const future = await notify(c.contractId, { installmentId: c.first.id, amount: 1000, paidOn: "2999-01-01" }, "สลิป.png");
+    expect(future.status).toBe(400);
+    expect(future.body.error).toBe("วันที่โอนเป็นวันในอนาคตไม่ได้");
+
+    const other = await billedContract("[ชั่วคราว] สัญญาอื่น");
+    const wrongInstallment = await notify(c.contractId, { installmentId: other.first.id, amount: 1000 }, "สลิป.png");
+    expect(wrongInstallment.status).toBe(404);
+    expect(wrongInstallment.body.error).toBe("ไม่พบงวดที่ระบุ");
+
+    // งวดที่ 3 ยังไม่ได้วางบิล/ไม่ถึงกำหนด
+    const third = (await owner.agent.get(`${c.base}/payments`)).body.installments[2] as { id: string };
+    const notDue = await notify(c.contractId, { installmentId: third.id, amount: 1000 }, "สลิป.png");
+    expect(notDue.status).toBe(409);
+    expect(notDue.body.error).toBe("งวดนี้ยังไม่ถึงกำหนดชำระ หรือชำระครบแล้ว");
+
+    expect((await notify(c.contractId, { installmentId: c.first.id, amount: c.first.net }, "สลิป.png")).status).toBe(200);
+    const again = await notify(c.contractId, { installmentId: c.first.id, amount: c.first.net }, "สลิป.png");
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe("งวดนี้แจ้งโอนไว้แล้ว รอบริษัทตรวจสอบ");
+  });
+
+  it("ลูกค้าแจ้งโอนในสัญญาที่ยังไม่ลงนามหรือของคนอื่นไม่ได้", async () => {
+    const stranger = await createCustomerDirect("test-slip-stranger");
+    userIds.push(stranger.userId);
+    const c = await billedContract("[ชั่วคราว] ของคนอื่น");
+    const res = await stranger.agent
+      .post(`/api/my/contracts/${c.contractId}/payment-notices`)
+      .field("installmentId", c.first.id)
+      .field("paidOn", todayIso())
+      .field("amount", "1000.00")
+      .attach("files", png, { filename: "สลิป.png", contentType: "image/png" });
+    expect(res.status).toBe(404);
+
+    const unsigned = await owner.agent.post(`/api/projects/${c.projectId}/contracts`).send({});
+    const draftInstallment = (await prisma.contractInstallment.findFirstOrThrow({ where: { contractId: unsigned.body.contract.id } })).id;
+    const early = await notify(unsigned.body.contract.id, { installmentId: draftInstallment, amount: 1000 }, "สลิป.png");
+    expect(early.status).toBe(409);
+    expect(early.body.error).toBe("สัญญายังไม่ได้ลงนาม");
+  });
+
+  it("พนักงานกดซ้ำ/ผิดลำดับไม่ได้: ยืนยันคลิกเดียวเฉพาะสลิปที่ผ่าน · ตรวจซ้ำเฉพาะที่ยังตรวจไม่ได้ · การแจ้งที่ปิดแล้วทำอะไรต่อไม่ได้", async () => {
+    const c = await billedContract("[ชั่วคราว] กดผิดลำดับ");
+    await notify(c.contractId, { installmentId: c.first.id, amount: c.first.net }, "สลิป.png");
+    const unchecked = (await staffInstallment(c.base, c.first.id)).pendingNotices[0];
+    const oneClick = await admin.agent.post(`${c.base}/payment-notices/${unchecked.id}/confirm-slip`);
+    expect(oneClick.status).toBe(409);
+    expect(oneClick.body.error).toContain("เฉพาะสลิปที่ระบบตรวจผ่าน");
+
+    setSlipProviderForTests(null);
+    try {
+      const off = await admin.agent.post(`${c.base}/payment-notices/${unchecked.id}/recheck-slip`);
+      expect(off.status).toBe(409);
+      expect(off.body.error).toBe("ยังไม่ได้เปิดระบบตรวจสลิปอัตโนมัติ");
+    } finally {
+      setSlipProviderForTests(mockSlipProvider);
+    }
+
+    await notify(c.contractId, { installmentId: c.second.id, amount: c.second.net }, slip(c.second.net, `OR${Date.now()}`));
+    const passed = (await staffInstallment(c.base, c.second.id)).pendingNotices[0];
+    expect(passed.slipCheck.status).toBe("PASSED");
+    const recheckPassed = await admin.agent.post(`${c.base}/payment-notices/${passed.id}/recheck-slip`);
+    expect(recheckPassed.status).toBe(409);
+    expect(recheckPassed.body.error).toBe("ตรวจสลิปซ้ำได้เฉพาะการแจ้งที่ยังตรวจไม่ได้");
+
+    const rejected = await admin.agent.post(`${c.base}/payment-notices/${unchecked.id}/reject`).send({ reason: "สลิปไม่ชัด" });
+    expect(rejected.status).toBe(200);
+    for (const action of ["reject", "confirm-slip", "recheck-slip"]) {
+      const res = await admin.agent.post(`${c.base}/payment-notices/${unchecked.id}/${action}`).send({ reason: "ซ้ำ" });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("การแจ้งโอนนี้ถูกตรวจไปแล้ว");
+    }
+    expect((await admin.agent.post(`${c.base}/payment-notices/no-such-notice/confirm-slip`)).status).toBe(404);
+  });
+
   it("ตรวจไม่ได้ (ไม่มี QR) = ทางเดิม · ปิดระบบตรวจ = ไม่มีผลตรวจเลย", async () => {
     const c = await billedContract("[ชั่วคราว] ตรวจไม่ได้");
     expect((await notify(c.contractId, { installmentId: c.first.id, amount: c.first.net }, "สลิป.png")).status).toBe(200);

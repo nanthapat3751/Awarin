@@ -137,6 +137,45 @@ async function dueItemOf(
   return { item, amounts, progress };
 }
 
+type MyContract = Awaited<ReturnType<typeof loadContracts>>[number];
+
+/** เงินประกันผลงานของสัญญาหนึ่งฉบับ (null = สัญญานี้ไม่มีเงินประกัน) */
+function contractRetentionOf(contract: MyContract, today: string): CustomerContractRetentionDto | null {
+  const retention = toCustomerRetention(
+    contract.installments,
+    {
+      pct: contract.retentionPct,
+      dueOn: contract.retentionDueOn,
+      releases: contract.retentionReleases,
+      documents: contract.billingDocuments,
+    },
+    today,
+  );
+  return retention ? { contractId: contract.id, contractNo: contract.contractNo, projectName: contract.project.name, retention } : null;
+}
+
+/** ประวัติการชำระของงวดหนึ่ง — แต่ละรายการพร้อมใบเสร็จของมันและใบแจ้งหนี้ของงวด */
+function paymentHistoryOf(contract: MyContract, row: MyContract["installments"][number]): CustomerPaymentHistoryDto[] {
+  const receipts = row.billingDocuments.filter((d) => d.type === "RECEIPT");
+  const invoice = row.billingDocuments.find((d) => d.type === "INVOICE");
+  return row.payments.map((pay) => {
+    const receipt = receipts.find((d) => d.paymentId === pay.id);
+    return {
+      id: pay.id,
+      installmentId: row.id,
+      contractId: contract.id,
+      contractNo: contract.contractNo,
+      projectName: contract.project.name,
+      seq: row.seq,
+      milestone: row.milestone,
+      paidOn: toIsoDate(pay.paidOn)!,
+      amount: Number(pay.amount),
+      receipt: receipt ? toDoc(receipt) : null,
+      invoice: invoice ? toDoc(invoice) : null,
+    };
+  });
+}
+
 export async function listMyPayments(customerId: string): Promise<CustomerPaymentsDto> {
   const today = todayIso();
   const contracts = await loadContracts(customerId);
@@ -147,19 +186,8 @@ export async function listMyPayments(customerId: string): Promise<CustomerPaymen
   const retentions: CustomerContractRetentionDto[] = [];
 
   for (const contract of contracts) {
-    const retention = toCustomerRetention(
-      contract.installments,
-      {
-        pct: contract.retentionPct,
-        dueOn: contract.retentionDueOn,
-        releases: contract.retentionReleases,
-        documents: contract.billingDocuments,
-      },
-      today,
-    );
-    if (retention) {
-      retentions.push({ contractId: contract.id, contractNo: contract.contractNo, projectName: contract.project.name, retention });
-    }
+    const retention = contractRetentionOf(contract, today);
+    if (retention) retentions.push(retention);
     schedules.push({
       contractId: contract.id,
       contractNo: contract.contractNo,
@@ -169,24 +197,7 @@ export async function listMyPayments(customerId: string): Promise<CustomerPaymen
     const signed = await getSignedContractOrThrow(contract.projectId, contract.id);
     const notBilled: InstallmentRow[] = [];
     for (const row of contract.installments) {
-      const receipts = row.billingDocuments.filter((d) => d.type === "RECEIPT");
-      const invoice = row.billingDocuments.find((d) => d.type === "INVOICE");
-      for (const pay of row.payments) {
-        const receipt = receipts.find((d) => d.paymentId === pay.id);
-        history.push({
-          id: pay.id,
-          installmentId: row.id,
-          contractId: contract.id,
-          contractNo: contract.contractNo,
-          projectName: contract.project.name,
-          seq: row.seq,
-          milestone: row.milestone,
-          paidOn: toIsoDate(pay.paidOn)!,
-          amount: Number(pay.amount),
-          receipt: receipt ? toDoc(receipt) : null,
-          invoice: invoice ? toDoc(invoice) : null,
-        });
-      }
+      history.push(...paymentHistoryOf(contract, row));
       if (progressOf(row, today).remaining <= 0) continue;
       if (isBilled(row)) due.push((await dueItemOf(contract, row, today, signed)).item);
       else notBilled.push(row);

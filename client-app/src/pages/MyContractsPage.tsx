@@ -69,7 +69,7 @@ export function MyContractsPage() {
               title={contract.project.name}
               meta={`เลขที่ ${contract.contractNo} · ${
                 signed ? `ลงนามเมื่อ ${formatDate(contract.signedAt)}` : "ยังไม่ลงนาม"
-              }${waiting > 0 ? ` · มีงานเพิ่ม-ลดรอคุณอนุมัติ ${waiting} ใบ` : ""}`}
+              }${waitingNote(waiting)}`}
               badge={{
                 label: signed ? "ลงนามแล้ว" : "ยังไม่ลงนาม",
                 className: signed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
@@ -116,4 +116,8 @@ export function MyContractsPage() {
       </div>
     </PortalPage>
   );
+}
+
+function waitingNote(waiting: number) {
+  return waiting > 0 ? ` · มีงานเพิ่ม-ลดรอคุณอนุมัติ ${waiting} ใบ` : "";
 }

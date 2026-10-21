@@ -146,7 +146,18 @@ export async function buildRebarBbsWorkbook(input: {
   s2.addRow([]);
   totalRow(s2, ["รวมทั้งโครงการ", null, null, null, null, null, null, null, Math.round(grand * 100) / 100], { 9: KG });
 
-  // ---------- 3. แผนตัด ----------
+  cuttingPlanSheet(wb, meta, versionNo, schedule);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/** เศษต่อเส้น: ไม่มี / ยาวพอเก็บไว้ใช้ / ทิ้ง */
+function leftoverLabel(leftover: number): string {
+  if (leftover === 0) return "—";
+  return leftover >= OFFCUT_KEEP_MIN ? "เก็บไว้ใช้" : "ทิ้ง";
+}
+
+/** ชีต 3 แผนตัดให้ช่าง — ตัดตามแบบนี้แล้วเศษน้อยที่สุด */
+function cuttingPlanSheet(wb: ExcelJS.Workbook, meta: WorkbookMeta, versionNo: number, schedule: RebarSchedule): void {
   const s3 = sheet(wb, "แผนตัด", [12, 60, 14, 16], meta);
   title(s3, meta, versionNo, "แผนตัดเหล็ก — ตัดตามแบบนี้แล้วเศษน้อยที่สุด");
   header(s3, ["จำนวนเส้น", "ตัดเป็น (ความยาว × จำนวนชิ้นต่อเส้น)", "เศษต่อเส้น (ม.)", "เศษ"], 3);
@@ -156,10 +167,8 @@ export async function buildRebarBbsWorkbook(input: {
     groupRow(s3, `${d.code} · เส้นยาว ${rec.stock} ม. · ${rec.bars} เส้น · เหลือรวม ${rec.leftoverPct}% (ทิ้ง ${rec.scrapPct}%)`);
     for (const p of rec.patterns) {
       const cuts = p.cuts.map((c) => `${c.length.toFixed(3)} × ${c.count}`).join(" + ");
-      const row = s3.addRow([p.bars, cuts, p.leftover, p.leftover === 0 ? "—" : p.leftover >= OFFCUT_KEEP_MIN ? "เก็บไว้ใช้" : "ทิ้ง"]);
+      const row = s3.addRow([p.bars, cuts, p.leftover, leftoverLabel(p.leftover)]);
       fmt(row, { 1: INT, 3: LEN });
     }
   }
-
-  return Buffer.from(await wb.xlsx.writeBuffer());
 }

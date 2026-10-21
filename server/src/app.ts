@@ -165,10 +165,12 @@ const CLIENT_ERROR_MESSAGES: Record<string, string> = {
   "charset.unsupported": "รูปแบบการเข้ารหัสข้อมูลไม่รองรับ",
 };
 
+const numberOrNull = (v: unknown): number | null => (typeof v === "number" ? v : null);
+
 function clientErrorOf(err: unknown): { status: number; message: string } | null {
   if (typeof err !== "object" || err === null) return null;
   const e = err as { status?: unknown; statusCode?: unknown; expose?: unknown; type?: unknown };
-  const status = typeof e.status === "number" ? e.status : typeof e.statusCode === "number" ? e.statusCode : null;
+  const status = numberOrNull(e.status) ?? numberOrNull(e.statusCode);
   if (status === null || status < 400 || status >= 500 || e.expose !== true) return null;
   const message = (typeof e.type === "string" && CLIENT_ERROR_MESSAGES[e.type]) || "คำขอไม่ถูกต้อง";
   return { status, message };

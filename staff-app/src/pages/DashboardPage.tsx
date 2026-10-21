@@ -258,13 +258,13 @@ function KpiRow({
       />
       {/* ไม่มีค้าง = เขียว + เครื่องหมายถูก · มีค้างจริงเท่านั้นถึงเป็นแดง (สีเตือนตลอดเวลาจะหมดความหมาย) */}
       <KpiCard
-        icon={cash && cash.totals.overdueAmount === 0 ? CircleCheckBig : AlertTriangle}
+        icon={cash?.totals.overdueAmount === 0 ? CircleCheckBig : AlertTriangle}
         tone={overdueTone(cash)}
         label="ค้างชำระเกินกำหนด"
         value={cash ? cash.totals.overdueAmount : null}
         format={(v) => `${money(v)} บาท`}
         sub={
-          cash && cash.totals.overdueAmount === 0
+          cash?.totals.overdueAmount === 0
             ? "ยังไม่มีงวดที่เลยกำหนด"
             : "ทวงถามแล้วบันทึกเมื่อได้รับเงิน"
         }

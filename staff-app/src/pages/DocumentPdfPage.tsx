@@ -83,11 +83,7 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: ViewerKind }>) {
           getProject(id),
           loadDocTitle(kind, id, contractId, docId),
           fetchPdfObjectUrl(
-            kind === "billing"
-              ? billingDocApiPath(id, contractId, docId)
-              : kind === "changeOrder"
-                ? changeOrderApiPath(id, contractId, docId)
-                : pdfApiPath(kind, id, docId),
+            docApiPath(kind, id, contractId, docId),
           ),
         ]);
 
@@ -154,4 +150,10 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: ViewerKind }>) {
       {pdfUrl && <iframe src={pdfUrl} title={title ?? "เอกสาร PDF"} className="h-full w-full border-0" />}
     </div>
   );
+}
+
+function docApiPath(kind: ViewerKind, projectId: string, contractId: string, docId: string) {
+  if (kind === "billing") return billingDocApiPath(projectId, contractId, docId);
+  if (kind === "changeOrder") return changeOrderApiPath(projectId, contractId, docId);
+  return pdfApiPath(kind, projectId, docId);
 }

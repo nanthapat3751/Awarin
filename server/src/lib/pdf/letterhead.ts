@@ -80,6 +80,13 @@ export interface DocumentTitleData {
   meta: string[];
 }
 
+/** "เลขประจำตัวผู้เสียภาษี … · สาขา" — ไม่มีเลขผู้เสียภาษี = ไม่พิมพ์บรรทัดนี้ */
+function taxIdLine(taxId: string | null | undefined, branch: string | null | undefined): string {
+  if (!taxId) return "";
+  const branchText = branch ? ` · ${escapeHtml(branch)}` : "";
+  return `<div>เลขประจำตัวผู้เสียภาษี ${escapeHtml(taxId)}${branchText}</div>`;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -108,13 +115,7 @@ export function renderLetterhead(company: CompanyLetterheadData, doc: DocumentTi
           <div class="letterhead-name">${escapeHtml(company.companyName)}</div>
           ${company.companyAddress ? `<div>${escapeHtml(company.companyAddress)}</div>` : ""}
           ${contactLine(company.companyPhone, company.companyEmail)}
-          ${
-            company.companyTaxId
-              ? `<div>เลขประจำตัวผู้เสียภาษี ${escapeHtml(company.companyTaxId)}${
-                  company.companyBranch ? ` · ${escapeHtml(company.companyBranch)}` : ""
-                }</div>`
-              : ""
-          }
+          ${taxIdLine(company.companyTaxId, company.companyBranch)}
         </div>
       </div>
       <div class="letterhead-doc">

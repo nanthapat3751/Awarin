@@ -494,19 +494,36 @@ function rebarRow(label: string, totalBars: number, barLength: number, dia: numb
   return { group: "REBAR", row, value: totalBars * round3(barLength) * kgPerMetre(dia), explain };
 }
 
-function validate(input: StructuralInput): string[] {
-  const errors: string[] = [];
-  const positive = (v: number | undefined | null) => v != null && Number.isFinite(v) && v > 0;
-  if (!positive(input.count) || !Number.isInteger(input.count)) errors.push("จำนวนชิ้นต้องเป็นจำนวนเต็มมากกว่า 0");
+const positive = (v: number | undefined | null) => v != null && Number.isFinite(v) && v > 0;
+const posInt = (v: number | undefined | null) => positive(v) && Number.isInteger(v);
+/** ≥ 0 — ค่าที่ไม่ใช่ตัวเลข (NaN) ไม่ผ่าน เหมือนการเขียน !(v >= 0) แบบเดิม */
+const atLeastZero = (v: number) => v >= 0;
+
+/** ขนาดชิ้นส่วน · ค่ามาตรฐาน · เหล็กเส้น/เหล็กมีระยะ · ระยะทาบ — กลุ่มที่ตรวจได้โดยไม่ขึ้นกับชนิดชิ้นส่วน */
+function validateBasics(input: StructuralInput, errors: string[]): void {
+  if (!posInt(input.count)) errors.push("จำนวนชิ้นต้องเป็นจำนวนเต็มมากกว่า 0");
   if (!positive(input.width) || !positive(input.depth) || !positive(input.length)) {
     errors.push("กรอกขนาดให้ครบ (มากกว่า 0)");
   }
   const s = input.settings;
-  if (!(s.cover >= 0) || !positive(s.lapFactor) || !positive(s.stockLength) || !(s.hookFactor >= 0)) {
+  if (!atLeastZero(s.cover) || !positive(s.lapFactor) || !positive(s.stockLength) || !atLeastZero(s.hookFactor)) {
     errors.push("ค่ามาตรฐานไม่ถูกต้อง");
   }
+  validateBarSets(input, errors);
+  if (!atLeastZero(s.bendFactor)) errors.push("ค่ามาตรฐานไม่ถูกต้อง");
+  // ระยะทาบยาวเท่าเหล็กทั้งเส้น = ต่อกี่เส้นก็ไม่ยาวขึ้น (สูตรจุดต่อหารด้วยศูนย์/ติดลบ)
+  const dias = [input.mainBars, input.topBars, input.bottomBars, input.mesh, input.meshTop]
+    .map((b) => b?.dia)
+    .filter((d): d is number => d != null && Number.isFinite(d));
+  if (positive(s.lapFactor) && positive(s.stockLength) && dias.some((d) => (s.lapFactor * d) / 1000 >= s.stockLength)) {
+    errors.push("ระยะทาบยาวเท่ากับหรือเกินความยาวเหล็กต่อเส้น — ตรวจค่าระยะทาบหรือเหล็กยาวต่อเส้น");
+  }
+}
+
+/** เหล็กเส้น (จำนวนเส้น) และเหล็กที่วางเป็นระยะ (ปลอก/ตะแกรง) */
+function validateBarSets(input: StructuralInput, errors: string[]): void {
   for (const bars of [input.mainBars, input.topBars, input.bottomBars]) {
-    if (bars && (!positive(bars.count) || !Number.isInteger(bars.count) || !positive(bars.dia))) {
+    if (bars && (!posInt(bars.count) || !positive(bars.dia))) {
       errors.push("จำนวนเส้นเหล็กต้องเป็นจำนวนเต็มมากกว่า 0");
     }
   }
@@ -515,15 +532,10 @@ function validate(input: StructuralInput): string[] {
       errors.push("ระยะห่างเหล็กต้องมากกว่า 0");
     }
   }
-  if (!(s.bendFactor >= 0)) errors.push("ค่ามาตรฐานไม่ถูกต้อง");
-  // ระยะทาบยาวเท่าเหล็กทั้งเส้น = ต่อกี่เส้นก็ไม่ยาวขึ้น (สูตรจุดต่อหารด้วยศูนย์/ติดลบ)
-  const dias = [input.mainBars, input.topBars, input.bottomBars, input.mesh, input.meshTop]
-    .map((b) => b?.dia)
-    .filter((d): d is number => d != null && Number.isFinite(d));
-  if (positive(s.lapFactor) && positive(s.stockLength) && dias.some((d) => (s.lapFactor * d) / 1000 >= s.stockLength)) {
-    errors.push("ระยะทาบยาวเท่ากับหรือเกินความยาวเหล็กต่อเส้น — ตรวจค่าระยะทาบหรือเหล็กยาวต่อเส้น");
-  }
-  const posInt = (v: number | undefined | null) => positive(v) && Number.isInteger(v);
+}
+
+/** เหล็กเดือยฐานราก · เหล็กพิเศษบน/ล่างของคาน */
+function validateExtraBars(input: StructuralInput, errors: string[]): void {
   if (input.dowels && (!posInt(input.dowels.count) || !positive(input.dowels.dia) || !positive(input.dowels.length))) {
     errors.push("เหล็กเดือย: กรอกจำนวน (จำนวนเต็ม) ขนาด และความยาวต่อเส้นให้ครบ");
   }
@@ -532,15 +544,14 @@ function validate(input: StructuralInput): string[] {
       errors.push(`เหล็กพิเศษ${name}: กรอกจำนวน (จำนวนเต็ม) ขนาด และสัดส่วนความยาว (น้อยกว่าครึ่งช่วง) ให้ครบ`);
     }
   }
-  if (input.kind === "STAIR") {
-    const st = input.stair;
-    if (!st || !positive(st.rise) || !posInt(st.steps)) errors.push("บันได: กรอกความสูงรวมและจำนวนลูกตั้ง (จำนวนเต็ม) ให้ครบ");
-    for (const bars of [st?.main, st?.distribution]) {
-      if (bars && (!positive(bars.spacing) || !positive(bars.dia))) errors.push("ระยะห่างเหล็กต้องมากกว่า 0");
-    }
-  }
+}
+
+/** บันได · ตะแกรงตามแบบ · ขอบพื้น · ปลอกช่วงปลาย · ความหนาฐานราก */
+function validateOptionalParts(input: StructuralInput, errors: string[]): void {
+  validateExtraBars(input, errors);
+  if (input.kind === "STAIR") validateStair(input.stair, errors);
   const mc = input.meshCount;
-  if (mc && (!positive(mc.long) || !positive(mc.short) || !Number.isInteger(mc.long) || !Number.isInteger(mc.short))) {
+  if (mc && (!posInt(mc.long) || !posInt(mc.short))) {
     errors.push("จำนวนเส้นตะแกรงต้องเป็นจำนวนเต็มมากกว่า 0 ทั้งสองแนว");
   }
   if (input.edgeForm?.length != null && !positive(input.edgeForm.length)) {
@@ -555,16 +566,43 @@ function validate(input: StructuralInput): string[] {
   } else if (input.footingDepth != null && input.footingDepth <= DEFAULT_COVER.FOOTING) {
     errors.push(`ความหนาฐานรากต้องมากกว่าระยะหุ้มฐานราก ${DEFAULT_COVER.FOOTING * 100} ซม.`);
   }
-  // ระยะหุ้มกินหน้าตัดจนไม่เหลือที่วางเหล็ก
-  if (errors.length === 0 && (input.ties || input.mesh || input.mainBars)) {
-    const clearW = input.width - 2 * s.cover;
-    const clearD = input.kind === "FOOTING" || input.kind === "SLAB" ? input.length - 2 * s.cover : input.depth - 2 * s.cover;
-    // หัวเสาเข็ม: เหล็กยืน/ปลอกอยู่ในความหนาที่หักระยะหุ้มบน-ล่างแล้ว
-    const clearH = input.kind === "FOOTING" ? input.depth - 2 * s.cover : 1;
-    if (clearW <= 0 || clearD <= 0 || clearH <= 0) errors.push("ระยะหุ้มมากกว่าขนาดชิ้นส่วน");
+}
+
+function validateStair(st: StructuralInput["stair"], errors: string[]): void {
+  if (!st || !positive(st.rise) || !posInt(st.steps)) errors.push("บันได: กรอกความสูงรวมและจำนวนลูกตั้ง (จำนวนเต็ม) ให้ครบ");
+  for (const bars of [st?.main, st?.distribution]) {
+    if (bars && (!positive(bars.spacing) || !positive(bars.dia))) errors.push("ระยะห่างเหล็กต้องมากกว่า 0");
   }
+}
+
+/** ขนาดที่ขัดกันเอง (ระยะหุ้มกินหน้าตัด · เสา/พื้นกินคาน) — ตรวจเมื่อค่ารายช่องผ่านหมดแล้วเท่านั้น */
+function validateGeometry(input: StructuralInput, errors: string[]): void {
+  const s = input.settings;
+  // ระยะหุ้มกินหน้าตัดจนไม่เหลือที่วางเหล็ก
+  if (errors.length === 0 && (input.ties || input.mesh || input.mainBars) && coverEatsSection(input)) {
+    errors.push("ระยะหุ้มมากกว่าขนาดชิ้นส่วน");
+  }
+  validateBeamSeat(input, errors);
+  // คาน: เหล็กบน/ล่างหักระยะหุ้มปลายสองข้างจากยาวรวม — สั้นกว่านั้นไม่เหลือเหล็ก
+  if (errors.length === 0 && input.kind === "BEAM" && (input.topBars || input.bottomBars) && input.length <= 2 * s.cover) {
+    errors.push("ยาวรวมของคานต้องมากกว่าระยะหุ้มปลายสองข้าง");
+  }
+}
+
+/** ระยะหุ้มสองข้างกินหน้าตัดจนไม่เหลือที่วางเหล็ก */
+function coverEatsSection(input: StructuralInput): boolean {
+  const s = input.settings;
+  const clearW = input.width - 2 * s.cover;
+  const clearD = input.kind === "FOOTING" || input.kind === "SLAB" ? input.length - 2 * s.cover : input.depth - 2 * s.cover;
+  // หัวเสาเข็ม: เหล็กยืน/ปลอกอยู่ในความหนาที่หักระยะหุ้มบน-ล่างแล้ว
+  const clearH = input.kind === "FOOTING" ? input.depth - 2 * s.cover : 1;
+  return clearW <= 0 || clearD <= 0 || clearH <= 0;
+}
+
+/** เสาที่คานพาดผ่าน · พื้นที่วางบนคาน — ช่องต้องครบ และต้องไม่กินความยาว/ความลึกคานจนหมด */
+function validateBeamSeat(input: StructuralInput, errors: string[]): void {
   const sup = input.supports;
-  if (sup && (!positive(sup.count) || !Number.isInteger(sup.count) || !positive(sup.width))) {
+  if (sup && (!posInt(sup.count) || !positive(sup.width))) {
     errors.push("เสาที่คานพาดผ่าน: กรอกจำนวนต้น (จำนวนเต็ม) และความกว้างเสาให้ครบ");
   } else if (sup && errors.length === 0 && sup.count * sup.width >= input.length - 1e-9) {
     errors.push("ความกว้างเสารวมกันเท่ากับหรือยาวกว่าคาน — ตรวจยาวรวมหรือจำนวนเสา");
@@ -575,10 +613,13 @@ function validate(input: StructuralInput): string[] {
   } else if (slab && errors.length === 0 && slab.thickness >= input.depth - 1e-9) {
     errors.push("พื้นบนคานหนาเท่ากับหรือมากกว่าความลึกคาน");
   }
-  // คาน: เหล็กบน/ล่างหักระยะหุ้มปลายสองข้างจากยาวรวม — สั้นกว่านั้นไม่เหลือเหล็ก
-  if (errors.length === 0 && input.kind === "BEAM" && (input.topBars || input.bottomBars) && input.length <= 2 * s.cover) {
-    errors.push("ยาวรวมของคานต้องมากกว่าระยะหุ้มปลายสองข้าง");
-  }
+}
+
+function validate(input: StructuralInput): string[] {
+  const errors: string[] = [];
+  validateBasics(input, errors);
+  validateOptionalParts(input, errors);
+  validateGeometry(input, errors);
   return errors;
 }
 
@@ -639,6 +680,7 @@ function tieRows(input: StructuralInput, along: number, alongLabel: string): Str
   const loop = inner + hooks;
   const total = perPiece * input.count;
   const spacingLabel = zone ? `${fmt(zone.spacing, 3)}/${fmt(spacing, 3)}` : fmt(spacing, 3);
+  const hookNote = hooks > 0 ? ` + ขอ 2×${s.hookFactor}d` : "";
   return [
     rebarRow(
       `${input.label} ปลอก ${barCode(dia)}@${spacingLabel}`,
@@ -647,7 +689,7 @@ function tieRows(input: StructuralInput, along: number, alongLabel: string): Str
       dia,
       `${alongLabel} ${countExplain}/ชิ้น × ${input.count} ชิ้น = ${total} วง · ` +
         `ยาววงละ ${c > 0 ? "" : "รอบนอก "}2×(${fmt(input.width - 2 * c)}+${fmt(input.depth - 2 * c)})` +
-        `${hooks > 0 ? ` + ขอ 2×${s.hookFactor}d` : ""} = ${fmt(loop)} ม.`,
+        `${hookNote} = ${fmt(loop)} ม.`,
     ),
   ];
 }
@@ -690,12 +732,14 @@ function meshLayerRows(input: StructuralInput, mesh: SpacedBars, layer: string):
       d.fixed != null
         ? `${d.fixed} เส้นตามแบบ/ชิ้น × ${input.count} = ${total} เส้น`
         : `${fmt(d.across)} ÷ ${fmt(spacing)} ปัดขึ้น + 1 = ${perPiece} เส้น/ชิ้น × ${input.count} = ${total} เส้น`;
+    const barSpec = d.fixed != null ? `${d.fixed}-${barCode(dia)}` : `${barCode(dia)}@${fmt(spacing, 3)}`;
+    const extraNote = notes.length ? ` + ${notes.join(" + ")}` : "";
     return rebarRow(
-      `${input.label} ตะแกรง${layer}${d.name} ${d.fixed != null ? `${d.fixed}-${barCode(dia)}` : `${barCode(dia)}@${fmt(spacing, 3)}`}`,
+      `${input.label} ตะแกรง${layer}${d.name} ${barSpec}`,
       total,
       lapped.length,
       dia,
-      `${countExplain} · ยาวเส้นละ ${fmt(d.barLen)}${notes.length ? ` + ${notes.join(" + ")}` : ""} = ${fmt(lapped.length)} ม.`,
+      `${countExplain} · ยาวเส้นละ ${fmt(d.barLen)}${extraNote} = ${fmt(lapped.length)} ม.`,
     );
   });
 }
@@ -705,58 +749,65 @@ function meshLayerRows(input: StructuralInput, mesh: SpacedBars, layer: string):
  * และปลอกรัดรอบเป็นชั้นตามความหนา (ชุดสี่เหลี่ยม + ข้าวหลามตัดถ้าแบบเขียน "2ป")
  */
 function pileCapRows(input: StructuralInput): StructuralOutputRow[] {
+  return [...pileCapVerticalRows(input), ...pileCapTieRows(input)];
+}
+
+/** หัวเสาเข็ม: เหล็กยืนรอบฐาน */
+function pileCapVerticalRows(input: StructuralInput): StructuralOutputRow[] {
+  if (!input.mainBars) return [];
   const s = input.settings;
-  const rows: StructuralOutputRow[] = [];
+  const c = rebarCover(s);
+  const { count, dia } = input.mainBars;
+  const bend = flagsOf(s).bends ? (s.bendFactor * dia) / 1000 : 0;
+  const barLen = input.depth - 2 * c + 2 * bend;
+  const total = count * input.count;
+  const coverNote = c > 0 ? ` − หุ้มบนล่าง 2×${fmt(c)}` : "";
+  const bendNote = bend > 0 ? ` + งอบนล่าง 2×${s.bendFactor}d` : "";
+  return [
+    rebarRow(
+      `${input.label} เหล็กยืนรอบฐาน ${count}-${barCode(dia)}`,
+      total,
+      barLen,
+      dia,
+      `${count} เส้น × ${input.count} ชิ้น = ${total} เส้น · ยาวเส้นละ หนา ${fmt(input.depth)}` +
+        `${coverNote}${bendNote} = ${fmt(barLen)} ม.`,
+    ),
+  ];
+}
+
+/** หัวเสาเข็ม: ปลอกรัดรอบเป็นชั้น (+ ข้าวหลามตัดถ้าแบบเขียน "2ป") */
+function pileCapTieRows(input: StructuralInput): StructuralOutputRow[] {
+  if (!input.ties) return [];
+  const s = input.settings;
   const f = flagsOf(s);
   const c = rebarCover(s);
   const clearW = input.width - 2 * c;
   const clearL = input.length - 2 * c;
-  const clearH = input.depth - 2 * c;
-  if (input.mainBars) {
-    const { count, dia } = input.mainBars;
-    const bend = f.bends ? (s.bendFactor * dia) / 1000 : 0;
-    const barLen = clearH + 2 * bend;
-    const total = count * input.count;
-    rows.push(
-      rebarRow(
-        `${input.label} เหล็กยืนรอบฐาน ${count}-${barCode(dia)}`,
-        total,
-        barLen,
-        dia,
-        `${count} เส้น × ${input.count} ชิ้น = ${total} เส้น · ยาวเส้นละ หนา ${fmt(input.depth)}` +
-          `${c > 0 ? ` − หุ้มบนล่าง 2×${fmt(c)}` : ""}${bend > 0 ? ` + งอบนล่าง 2×${s.bendFactor}d` : ""} = ${fmt(barLen)} ม.`,
-      ),
-    );
+  const { dia, spacing } = input.ties;
+  const hooks = f.hooks ? (2 * s.hookFactor * dia) / 1000 : 0;
+  const hookNote = hooks > 0 ? ` + ขอ 2×${s.hookFactor}d` : "";
+  // ชั้นปลอกนับในความหนาที่หักระยะหุ้ม หรือเต็มความหนา (ตามชุดกฎ)
+  const layerSpan = f.fullDepthLayers ? input.depth : input.depth - 2 * s.cover;
+  const layers = barsAlong(layerSpan, spacing);
+  const total = layers * input.count;
+  const loops: [string, number, string][] = [
+    ["ปลอกรัดรอบ", 2 * (clearW + clearL) + hooks, `2×(${fmt(clearW)}+${fmt(clearL)})`],
+  ];
+  if (input.diamondTies) {
+    // ข้าวหลามตัดเชื่อมกึ่งกลางด้านของปลอกสี่เหลี่ยม — ด้านละ √((กว้าง/2)² + (ยาว/2)²)
+    const side = Math.hypot(clearW / 2, clearL / 2);
+    loops.push(["ปลอกข้าวหลามตัด", 4 * side + hooks, `4×${fmt(side)}`]);
   }
-  if (input.ties) {
-    const { dia, spacing } = input.ties;
-    const hooks = f.hooks ? (2 * s.hookFactor * dia) / 1000 : 0;
-    // ชั้นปลอกนับในความหนาที่หักระยะหุ้ม หรือเต็มความหนา (ตามชุดกฎ)
-    const layerSpan = f.fullDepthLayers ? input.depth : input.depth - 2 * s.cover;
-    const layers = barsAlong(layerSpan, spacing);
-    const total = layers * input.count;
-    const loops: [string, number, string][] = [
-      ["ปลอกรัดรอบ", 2 * (clearW + clearL) + hooks, `2×(${fmt(clearW)}+${fmt(clearL)})`],
-    ];
-    if (input.diamondTies) {
-      // ข้าวหลามตัดเชื่อมกึ่งกลางด้านของปลอกสี่เหลี่ยม — ด้านละ √((กว้าง/2)² + (ยาว/2)²)
-      const side = Math.hypot(clearW / 2, clearL / 2);
-      loops.push(["ปลอกข้าวหลามตัด", 4 * side + hooks, `4×${fmt(side)}`]);
-    }
-    for (const [name, loop, shape] of loops) {
-      rows.push(
-        rebarRow(
-          `${input.label} ${name} ${barCode(dia)}@${fmt(spacing, 3)}`,
-          total,
-          loop,
-          dia,
-          `${f.fullDepthLayers ? "หนาเต็ม" : "สูงในหุ้ม"} ${fmt(layerSpan)} ÷ ${fmt(spacing)} ปัดขึ้น + 1 = ${layers} ชั้น/ชิ้น × ${input.count} = ${total} วง · ` +
-            `ยาววงละ ${shape}${hooks > 0 ? ` + ขอ 2×${s.hookFactor}d` : ""} = ${fmt(loop)} ม.`,
-        ),
-      );
-    }
-  }
-  return rows;
+  return loops.map(([name, loop, shape]) =>
+    rebarRow(
+      `${input.label} ${name} ${barCode(dia)}@${fmt(spacing, 3)}`,
+      total,
+      loop,
+      dia,
+      `${f.fullDepthLayers ? "หนาเต็ม" : "สูงในหุ้ม"} ${fmt(layerSpan)} ÷ ${fmt(spacing)} ปัดขึ้น + 1 = ${layers} ชั้น/ชิ้น × ${input.count} = ${total} วง · ` +
+        `ยาววงละ ${shape}${hookNote} = ${fmt(loop)} ม.`,
+    ),
+  );
 }
 
 /** เหล็กยาวตามชิ้นส่วน (เหล็กยืนเสา / เหล็กบน-ล่างคาน) */
@@ -770,27 +821,15 @@ function longBarRows(input: StructuralInput, bars: BarSet | null | undefined, na
   // จึงหักระยะหุ้มปลายทั้งสองข้างก่อนบวกส่วนงอ เดิมไม่หัก เหล็กยาวเกินคอนกรีตเส้นละ 2 × ระยะหุ้ม
   const coverCut = input.kind === "BEAM" ? 2 * rebarCover(s) : 0;
   // ส่วนที่ต่อจากความยาวชิ้นส่วน — แต่ละรายการคือ [ความยาว (ม.), คำอธิบาย]
-  const extras: [number, string][] = [];
-  if (input.kind === "COLUMN") {
-    if (input.footingDepth != null && f.bends) {
-      // ฝังลงฐานรากถึงตะแกรงล่าง (หักระยะหุ้มฐานราก) แล้วงอวางบนตะแกรง
-      const embed = input.footingDepth - DEFAULT_COVER.FOOTING;
-      extras.push([embed, `ฝังฐานราก ${fmt(embed)}`], [bend, `งอในฐานราก ${s.bendFactor}d`]);
-    }
-    // ชั้นบนสุดงอเข้าคานหลังคา · ชั้นอื่นเผื่อระยะทาบกับเสาชั้นถัดไป (ชุดเสนอราคาไม่บวกทั้งคู่)
-    if (input.topFloor) {
-      if (f.bends) extras.push([bend, `งอเข้าคาน ${s.bendFactor}d`]);
-    } else if (f.laps) {
-      extras.push([lap, `ทาบต่อชั้น ${s.lapFactor}d`]);
-    }
-  } else if (input.endBends && f.bends) {
-    extras.push([2 * bend, `งอปลาย 2×${s.bendFactor}d`]);
-  }
+  const extras = longBarExtras(input, f, bend, lap);
   const lapped = withStockLaps(input.length - coverCut + extras.reduce((n, [len]) => n + len, 0), bars.dia, s);
   if (lapped.laps > 0) extras.push([0, `ทาบ ${lapped.laps}×${s.lapFactor}d`]);
   const barLen = lapped.length;
   const total = bars.count * input.count;
   const notes = extras.map(([, note]) => note);
+  const coverNote = coverCut > 0 ? ` − หุ้มปลาย 2×${fmt(s.cover)}` : "";
+  const asDrawn = extras.length === 0 && coverCut === 0 ? " (ยาวตามแบบ)" : "";
+  const extraNote = notes.length ? ` + ${notes.join(" + ")}` : "";
   return [
     rebarRow(
       `${input.label} ${name} ${bars.count}-${barCode(bars.dia)}`,
@@ -798,11 +837,36 @@ function longBarRows(input: StructuralInput, bars: BarSet | null | undefined, na
       barLen,
       bars.dia,
       `${bars.count} เส้น × ${input.count} ชิ้น = ${total} เส้น · ยาวเส้นละ ${fmt(input.length)}` +
-        `${coverCut > 0 ? ` − หุ้มปลาย 2×${fmt(s.cover)}` : ""}` +
-        `${extras.length === 0 && coverCut === 0 ? " (ยาวตามแบบ)" : ""}` +
-        `${notes.length ? ` + ${notes.join(" + ")}` : ""} = ${fmt(barLen)} ม.`,
+        `${coverNote}${asDrawn}${extraNote} = ${fmt(barLen)} ม.`,
     ),
   ];
+}
+
+/** ส่วนที่ต่อจากความยาวชิ้นส่วนของเหล็กยาว — [ความยาว (ม.), คำอธิบาย] */
+function longBarExtras(
+  input: StructuralInput,
+  f: ReturnType<typeof flagsOf>,
+  bend: number,
+  lap: number,
+): [number, string][] {
+  const s = input.settings;
+  const extras: [number, string][] = [];
+  if (input.kind !== "COLUMN") {
+    if (input.endBends && f.bends) extras.push([2 * bend, `งอปลาย 2×${s.bendFactor}d`]);
+    return extras;
+  }
+  if (input.footingDepth != null && f.bends) {
+    // ฝังลงฐานรากถึงตะแกรงล่าง (หักระยะหุ้มฐานราก) แล้วงอวางบนตะแกรง
+    const embed = input.footingDepth - DEFAULT_COVER.FOOTING;
+    extras.push([embed, `ฝังฐานราก ${fmt(embed)}`], [bend, `งอในฐานราก ${s.bendFactor}d`]);
+  }
+  // ชั้นบนสุดงอเข้าคานหลังคา · ชั้นอื่นเผื่อระยะทาบกับเสาชั้นถัดไป (ชุดเสนอราคาไม่บวกทั้งคู่)
+  if (input.topFloor) {
+    if (f.bends) extras.push([bend, `งอเข้าคาน ${s.bendFactor}d`]);
+  } else if (f.laps) {
+    extras.push([lap, `ทาบต่อชั้น ${s.lapFactor}d`]);
+  }
+  return extras;
 }
 
 function formworkRow(label: string, count: number, length: number, width: number, explainWidth: string): StructuralOutputRow {
@@ -896,26 +960,27 @@ function stairRows(input: StructuralInput): StructuralOutputRow[] {
   const slope = Math.hypot(run, st.rise);
   const tread = run / st.steps;
   const riser = st.rise / st.steps;
-  const rows: StructuralOutputRow[] = [];
   const waist = count * w * t * slope;
   const stepsVol = count * st.steps * 0.5 * tread * riser * w;
-  rows.push({
-    group: "CONCRETE",
-    row: { label: `${label} ท้องบันได`, count, length: round3(slope), width: w, height: t },
-    value: waist,
-    explain: `${count} × กว้าง ${fmt(w)} × หนา ${fmt(t)} × ยาวเอียง √(${fmt(run)}²+${fmt(st.rise)}²) = ${fmt(slope)} → ${fmt(waist)} ลบ.ม.`,
-  });
-  rows.push({
-    // ขั้นสามเหลี่ยม: ½ × ลูกนอน × ลูกตั้ง × กว้าง (เก็บเป็นแถวปริมาตรที่ height = ครึ่งลูกตั้ง)
-    group: "CONCRETE",
-    row: { label: `${label} ขั้นบันได`, count: count * st.steps, length: round3(tread), width: w, height: round3(riser / 2) },
-    value: stepsVol,
-    explain: `${st.steps} ขั้น × ${count} × ½ × ลูกนอน ${fmt(tread)} × ลูกตั้ง ${fmt(riser)} × กว้าง ${fmt(w)} = ${fmt(stepsVol)} ลบ.ม.`,
-  });
-  rows.push(formworkRow(`${label} แบบท้องบันได`, count, slope, w, `กว้าง ${fmt(w)} (ยาวเอียง ${fmt(slope)})`));
-  rows.push(formworkRow(`${label} แบบลูกตั้ง`, count * st.steps, w, riser, `สูงลูกตั้ง ${fmt(riser)} (${st.steps} ขั้น)`));
   const sideArea = t * slope + st.steps * 0.5 * tread * riser;
-  rows.push(formworkRow(`${label} แบบข้างบันได 2 ข้าง`, count * 2, 1, sideArea, `พื้นที่ข้าง ${fmt(t)}×${fmt(slope)} + ขั้น ${st.steps}×½×${fmt(tread)}×${fmt(riser)} = ${fmt(sideArea)}`));
+  const rows: StructuralOutputRow[] = [
+    {
+      group: "CONCRETE",
+      row: { label: `${label} ท้องบันได`, count, length: round3(slope), width: w, height: t },
+      value: waist,
+      explain: `${count} × กว้าง ${fmt(w)} × หนา ${fmt(t)} × ยาวเอียง √(${fmt(run)}²+${fmt(st.rise)}²) = ${fmt(slope)} → ${fmt(waist)} ลบ.ม.`,
+    },
+    {
+      // ขั้นสามเหลี่ยม: ½ × ลูกนอน × ลูกตั้ง × กว้าง (เก็บเป็นแถวปริมาตรที่ height = ครึ่งลูกตั้ง)
+      group: "CONCRETE",
+      row: { label: `${label} ขั้นบันได`, count: count * st.steps, length: round3(tread), width: w, height: round3(riser / 2) },
+      value: stepsVol,
+      explain: `${st.steps} ขั้น × ${count} × ½ × ลูกนอน ${fmt(tread)} × ลูกตั้ง ${fmt(riser)} × กว้าง ${fmt(w)} = ${fmt(stepsVol)} ลบ.ม.`,
+    },
+    formworkRow(`${label} แบบท้องบันได`, count, slope, w, `กว้าง ${fmt(w)} (ยาวเอียง ${fmt(slope)})`),
+    formworkRow(`${label} แบบลูกตั้ง`, count * st.steps, w, riser, `สูงลูกตั้ง ${fmt(riser)} (${st.steps} ขั้น)`),
+    formworkRow(`${label} แบบข้างบันได 2 ข้าง`, count * 2, 1, sideArea, `พื้นที่ข้าง ${fmt(t)}×${fmt(slope)} + ขั้น ${st.steps}×½×${fmt(tread)}×${fmt(riser)} = ${fmt(sideArea)}`),
+  ];
   const c = rebarCover(s);
   const f = flagsOf(s);
   if (st.main) {
@@ -925,13 +990,14 @@ function stairRows(input: StructuralInput): StructuralOutputRow[] {
     const bends = f.bends ? (2 * s.bendFactor * dia) / 1000 : 0;
     const lapped = withStockLaps(slope - 2 * c + bends, dia, s);
     const notes = [c > 0 ? `− หุ้ม 2×${fmt(c)}` : null, bends > 0 ? `+ งอปลาย 2×${s.bendFactor}d` : null, lapped.laps > 0 ? `+ ทาบ ${lapped.laps}×${s.lapFactor}d` : null].filter(Boolean);
+    const noteText = notes.length ? ` ${notes.join(" ")}` : "";
     rows.push(
       rebarRow(
         `${label} เหล็กหลัก ${barCode(dia)}@${fmt(spacing, 3)}`,
         total,
         lapped.length,
         dia,
-        `${fmt(w - 2 * c)} ÷ ${fmt(spacing)} ปัดขึ้น + 1 = ${per} เส้น × ${count} = ${total} เส้น · ยาวเอียง ${fmt(slope)}${notes.length ? ` ${notes.join(" ")}` : ""} = ${fmt(lapped.length)} ม.`,
+        `${fmt(w - 2 * c)} ÷ ${fmt(spacing)} ปัดขึ้น + 1 = ${per} เส้น × ${count} = ${total} เส้น · ยาวเอียง ${fmt(slope)}${noteText} = ${fmt(lapped.length)} ม.`,
       ),
     );
   }
@@ -957,59 +1023,84 @@ export function structuralTakeoff(input: StructuralInput): StructuralTakeoff {
   const errors = validate(input);
   if (errors.length > 0) return { rows: [], errors };
 
-  const { kind, count, width: w, depth: d, length: l, label } = input;
-  const rows: StructuralOutputRow[] = [];
+  const rowsOf: Record<StructuralInput["kind"], (i: StructuralInput) => StructuralOutputRow[]> = {
+    FOOTING: footingRows,
+    COLUMN: columnRows,
+    BEAM: beamRows,
+    STAIR: stairRows,
+    SLAB: slabRows,
+  };
+  return { rows: (rowsOf[input.kind] ?? slabRows)(input), errors: [] };
+}
 
-  if (kind === "FOOTING") {
-    rows.push(concreteRow(input, "ฐานราก"));
-    rows.push(formworkRow(`${label} แบบข้างฐานราก`, count, 2 * (w + l), d, `สูง ${fmt(d)} (รอบรูป 2×(${fmt(w)}+${fmt(l)}))`));
-    rows.push(...(input.footingType === "PILE_CAP" ? pileCapRows(input) : meshRows(input)));
-    rows.push(...dowelRows(input));
-  } else if (kind === "COLUMN") {
-    rows.push(concreteRow(input, "เสา"));
-    rows.push(formworkRow(`${label} แบบเสา 4 ด้าน`, count, l, 2 * (w + d), `รอบเสา 2×(${fmt(w)}+${fmt(d)})`));
-    rows.push(...longBarRows(input, input.mainBars, "เหล็กยืน"));
-    rows.push(...tieRows(input, l, "สูง"));
-  } else if (kind === "BEAM") {
-    // ช่วงสุทธิระหว่างหน้าเสา + ความลึกใต้ท้องพื้น — ส่วนที่ซ้อนคิดไปกับเสา/พื้นแล้ว ไม่นับซ้ำ
-    const sup = input.supports;
-    const slab = input.slabOnTop;
-    const clear = sup ? l - sup.count * sup.width : l;
-    const below = slab ? d - slab.thickness : d;
-    const notes = [
-      sup ? `ช่วงสุทธิ ${fmt(l)} − เสา ${sup.count}×${fmt(sup.width)} = ${fmt(clear)}` : null,
-      slab ? `ใต้ท้องพื้น ${fmt(d)} − พื้น ${fmt(slab.thickness)} = ${fmt(below)}` : null,
-    ].filter(Boolean);
-    rows.push(concreteRow(input, "คาน", clear, below, notes.length ? ` (${notes.join(" · ")})` : ""));
-    // ข้างที่มีพื้นวาง ไม้แบบสูงแค่ใต้ท้องพื้น · ข้างที่ไม่มี (ขอบนอกของคานขอบ) สูงเต็มความลึก
-    const slabSides = slab?.sides ?? 0;
-    const sideHeight = slabSides * below + (2 - slabSides) * d;
-    const sideExplain =
-      slabSides === 2 ? `ข้าง 2×${fmt(below)}` : slabSides === 1 ? `ข้าง ${fmt(below)} + ${fmt(d)}` : `ข้าง 2×${fmt(d)}`;
-    // คานคอดินเทบนดิน/คอนกรีตหยาบ — ไม่ตั้งแบบท้องคาน
-    if (input.onGround) {
-      rows.push(formworkRow(`${label} แบบข้างคาน`, count, clear, sideHeight, `(${sideExplain} · เทบนดิน ไม่มีท้อง)`));
-    } else {
-      rows.push(formworkRow(`${label} แบบข้าง+ท้องคาน`, count, clear, sideHeight + w, `(${sideExplain} + ท้อง ${fmt(w)})`));
-    }
-    rows.push(...longBarRows(input, input.topBars, "เหล็กบน"));
-    rows.push(...longBarRows(input, input.bottomBars, "เหล็กล่าง"));
-    rows.push(...beamExtraRows(input, clear));
+function footingRows(input: StructuralInput): StructuralOutputRow[] {
+  const { count, width: w, depth: d, length: l, label } = input;
+  return [
+    concreteRow(input, "ฐานราก"),
+    formworkRow(`${label} แบบข้างฐานราก`, count, 2 * (w + l), d, `สูง ${fmt(d)} (รอบรูป 2×(${fmt(w)}+${fmt(l)}))`),
+    ...(input.footingType === "PILE_CAP" ? pileCapRows(input) : meshRows(input)),
+    ...dowelRows(input),
+  ];
+}
+
+function columnRows(input: StructuralInput): StructuralOutputRow[] {
+  const { count, width: w, depth: d, length: l, label } = input;
+  return [
+    concreteRow(input, "เสา"),
+    formworkRow(`${label} แบบเสา 4 ด้าน`, count, l, 2 * (w + d), `รอบเสา 2×(${fmt(w)}+${fmt(d)})`),
+    ...longBarRows(input, input.mainBars, "เหล็กยืน"),
+    ...tieRows(input, l, "สูง"),
+  ];
+}
+
+/** "ข้าง 2×…" — คำอธิบายความสูงไม้แบบข้างคาน ตามจำนวนข้างที่มีพื้นวาง */
+function beamSideExplain(slabSides: number, below: number, depth: number): string {
+  if (slabSides === 2) return `ข้าง 2×${fmt(below)}`;
+  if (slabSides === 1) return `ข้าง ${fmt(below)} + ${fmt(depth)}`;
+  return `ข้าง 2×${fmt(depth)}`;
+}
+
+function beamRows(input: StructuralInput): StructuralOutputRow[] {
+  const { count, width: w, depth: d, length: l, label } = input;
+  // ช่วงสุทธิระหว่างหน้าเสา + ความลึกใต้ท้องพื้น — ส่วนที่ซ้อนคิดไปกับเสา/พื้นแล้ว ไม่นับซ้ำ
+  const sup = input.supports;
+  const slab = input.slabOnTop;
+  const clear = sup ? l - sup.count * sup.width : l;
+  const below = slab ? d - slab.thickness : d;
+  const notes = [
+    sup ? `ช่วงสุทธิ ${fmt(l)} − เสา ${sup.count}×${fmt(sup.width)} = ${fmt(clear)}` : null,
+    slab ? `ใต้ท้องพื้น ${fmt(d)} − พื้น ${fmt(slab.thickness)} = ${fmt(below)}` : null,
+  ].filter(Boolean);
+  // ข้างที่มีพื้นวาง ไม้แบบสูงแค่ใต้ท้องพื้น · ข้างที่ไม่มี (ขอบนอกของคานขอบ) สูงเต็มความลึก
+  const slabSides = slab?.sides ?? 0;
+  const sideHeight = slabSides * below + (2 - slabSides) * d;
+  const sideExplain = beamSideExplain(slabSides, below, d);
+  // คานคอดินเทบนดิน/คอนกรีตหยาบ — ไม่ตั้งแบบท้องคาน
+  const formwork = input.onGround
+    ? formworkRow(`${label} แบบข้างคาน`, count, clear, sideHeight, `(${sideExplain} · เทบนดิน ไม่มีท้อง)`)
+    : formworkRow(`${label} แบบข้าง+ท้องคาน`, count, clear, sideHeight + w, `(${sideExplain} + ท้อง ${fmt(w)})`);
+  return [
+    concreteRow(input, "คาน", clear, below, notes.length ? ` (${notes.join(" · ")})` : ""),
+    formwork,
+    ...longBarRows(input, input.topBars, "เหล็กบน"),
+    ...longBarRows(input, input.bottomBars, "เหล็กล่าง"),
+    ...beamExtraRows(input, clear),
     // ปลอกในช่วงที่อยู่ในเสาเป็นปลอกของเสา — คานนับเฉพาะช่วงสุทธิ (ช่วงปลายถี่วัดจากหน้าเสา)
-    rows.push(...tieRows(input, clear, sup ? "ช่วงสุทธิ" : "ยาว"));
-  } else if (kind === "STAIR") {
-    rows.push(...stairRows(input));
-  } else {
-    rows.push(concreteRow(input, "พื้น"));
-    if (!input.onGround) {
-      rows.push(formworkRow(`${label} แบบท้องพื้น`, count, l, w, `กว้าง ${fmt(w)}`));
-    }
-    if (input.edgeForm) {
-      const edge = input.edgeForm.length ?? 2 * (w + l);
-      const edgeExplain = input.edgeForm.length == null ? ` (รอบรูป 2×(${fmt(w)}+${fmt(l)}))` : "";
-      rows.push(formworkRow(`${label} แบบขอบพื้น`, count, edge, d, `สูง ${fmt(d)}${edgeExplain}`));
-    }
-    rows.push(...meshRows(input));
+    ...tieRows(input, clear, sup ? "ช่วงสุทธิ" : "ยาว"),
+  ];
+}
+
+function slabRows(input: StructuralInput): StructuralOutputRow[] {
+  const { count, width: w, depth: d, length: l, label } = input;
+  const rows: StructuralOutputRow[] = [concreteRow(input, "พื้น")];
+  if (!input.onGround) {
+    rows.push(formworkRow(`${label} แบบท้องพื้น`, count, l, w, `กว้าง ${fmt(w)}`));
   }
-  return { rows, errors: [] };
+  if (input.edgeForm) {
+    const edge = input.edgeForm.length ?? 2 * (w + l);
+    const edgeExplain = input.edgeForm.length == null ? ` (รอบรูป 2×(${fmt(w)}+${fmt(l)}))` : "";
+    rows.push(formworkRow(`${label} แบบขอบพื้น`, count, edge, d, `สูง ${fmt(d)}${edgeExplain}`));
+  }
+  rows.push(...meshRows(input));
+  return rows;
 }

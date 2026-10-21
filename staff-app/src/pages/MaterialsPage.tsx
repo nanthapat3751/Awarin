@@ -548,7 +548,7 @@ export function MaterialsPage() {
       }
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : editor.mode === "add" ? "เพิ่มรายการไม่สำเร็จ" : "แก้ไขไม่สำเร็จ",
+        err instanceof ApiError ? err.message : saveFailedText(editor.mode),
       );
     } finally {
       setSaving(false);
@@ -589,11 +589,7 @@ export function MaterialsPage() {
     const errors = attempted ? formErrors(state) : {};
     // ตัวเลือกหมวด = หมวดที่ใช้งานอยู่ + หมวดที่เลือกอยู่ปัจจุบัน (เผื่อกำลังแก้วัสดุที่หมวดถูก
     // เก็บเข้ากรุไปแล้ว จะได้ยังเห็นค่าเดิม)
-    const catOptions = [...activeItemCategories];
-    if (state.categoryId && !catOptions.some((c) => c.id === state.categoryId)) {
-      const cur = categoryById.get(state.categoryId);
-      if (cur) catOptions.push(cur);
-    }
+    const catOptions = categoryChoices(activeItemCategories, categoryById, state.categoryId);
     // แปลงเป็นตัวเลือกแบบค้นหาได้ 2 บรรทัด: บรรทัดบน = รหัส + ชื่องานย่อย, บรรทัดล่าง = path หมวดแม่
     // (keywords รวม path เต็ม จึงพิมพ์ค้นได้ทั้งชื่อหมวดใหญ่/ย่อย/รหัส)
     const catSelectOptions = catOptions.map((c) => ({
@@ -615,22 +611,11 @@ export function MaterialsPage() {
     const laborPrice = Number(state.laborUnitPrice || 0);
 
     // บรรทัดสรุปตอนหัวข้อพับอยู่ — บอกค่าที่ตั้งไว้จริง ไม่ต้องกางดู
-    const detailSummary = [
-      state.spec.trim(),
-      state.supplier.trim() && `ผู้จำหน่าย ${state.supplier.trim()}`,
-      state.wasteFactorPct.trim() && `เผื่อเสีย ${Number(state.wasteFactorPct)}%`,
-    ]
-      .filter(Boolean)
-      .join(" · ");
+    const detailSummary = detailSummaryOf(state);
     const tileFilled = [state.tileWidthMm, state.tileLengthMm, state.tileThicknessMm, state.tilePiecesPerBox].some(
       (v) => v.trim() !== "",
     );
-    const tileSummary = [
-      state.tileWidthMm.trim() && state.tileLengthMm.trim() && `${state.tileWidthMm}×${state.tileLengthMm} มม.`,
-      state.tilePiecesPerBox.trim() && `กล่องละ ${state.tilePiecesPerBox} แผ่น`,
-    ]
-      .filter(Boolean)
-      .join(" · ");
+    const tileSummary = tileSummaryOf(state);
     const recipeSummary = hasRecipe ? `${validRows.length} วัสดุ · ${money(derived)} บาท/${unitLabel}` : "";
 
     return (
@@ -681,35 +666,14 @@ export function MaterialsPage() {
               </label>
               {errors.unit && <p className="mt-1 text-xs text-red-600">{errors.unit}</p>}
             </div>
-            <div data-invalid={errors.materialUnitPrice ? "" : undefined}>
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>
-                  ราคาวัสดุ / {unitLabel} {!hasRecipe && <span className="text-red-500">*</span>}
-                </span>
-                {hasRecipe ? (
-                  <input
-                    type="text"
-                    readOnly
-                    value={money(derived)}
-                    title="คิดจากผลรวมของสูตรวัสดุย่อย"
-                    className={`${INPUT} border-slate-200 bg-slate-100 text-right tabular-nums text-slate-600`}
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={state.materialUnitPrice}
-                    onChange={(e) => set({ materialUnitPrice: e.target.value })}
-                    placeholder="0.00"
-                    aria-invalid={errors.materialUnitPrice ? true : undefined}
-                    className={`${INPUT} text-right tabular-nums ${errors.materialUnitPrice ? INPUT_INVALID : ""}`}
-                  />
-                )}
-              </label>
-              {hasRecipe && <p className="mt-1 text-xs text-slate-500">คิดจากสูตรวัสดุย่อยด้านล่าง</p>}
-              {errors.materialUnitPrice && <p className="mt-1 text-xs text-red-600">{errors.materialUnitPrice}</p>}
-            </div>
+            <MaterialPriceField
+              state={state}
+              set={set}
+              error={errors.materialUnitPrice}
+              hasRecipe={hasRecipe}
+              derived={derived}
+              unitLabel={unitLabel}
+            />
             <label className="flex flex-col gap-1 text-xs text-slate-700">
               <span>ค่าแรง / {unitLabel}</span>
               <input
@@ -811,6 +775,121 @@ export function MaterialsPage() {
           </FormSection>
         </div>
       </>
+    );
+  }
+
+  /** แถวที่กำลังแก้ — ฟอร์มกางในแถว */
+  function renderEditorRow(m: MaterialDto) {
+    return (
+      <tr key={m.id} data-material-row={m.id} className="border-t border-slate-100 bg-slate-50">
+        <td colSpan={8} className="px-3 py-4" data-material-editor>
+      {materialFields(form, patchForm)}
+      <div className="mt-4 flex items-center gap-2 border-t border-slate-200 pt-3">
+      <Button onClick={saveEditor}>
+        <Check size={14} /> {saving ? "กำลังบันทึก…" : "บันทึก"}
+      </Button>
+      <Button variant="ghost" onClick={cancelEditor}>
+        <X size={14} /> ยกเลิก
+      </Button>
+      <span className="ml-auto text-xs text-slate-400">
+        <span className="text-red-500">*</span> ต้องกรอก
+      </span>
+      </div>
+        </td>
+      </tr>
+    );
+  }
+
+  function renderMaterialRow(m: MaterialDto) {
+    return (
+      <tr
+        key={m.id}
+        data-material-row={m.id}
+        className={`border-t border-slate-100 transition-colors duration-700 ${rowTone(m, flashId)}`}
+      >
+        <td className="px-3 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
+          {m.code ?? "—"}
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span className={`font-medium ${m.active ? "text-slate-800" : "text-slate-500"}`}>{m.name}</span>
+            {!m.active && (
+              <span className="text-xs font-medium text-slate-500 bg-slate-200 rounded-full px-2 py-0.5 whitespace-nowrap">
+                ปิดใช้งาน
+              </span>
+            )}
+          </div>
+          {m.spec && <span className="block text-xs text-slate-500">{m.spec}</span>}
+          {m.tileWidthMm != null && m.tileLengthMm != null && (
+            <span className="block text-xs text-slate-400">
+              แผ่น {m.tileWidthMm}×{m.tileLengthMm} มม.
+              {m.tilePiecesPerBox != null && ` · กล่องละ ${m.tilePiecesPerBox} แผ่น`}
+            </span>
+          )}
+          {m.supplier && (
+            <span className="block text-xs text-slate-400">ผู้จำหน่าย: {m.supplier}</span>
+          )}
+          {/* iPad: หมวดงานกับเผื่อเสียย้ายมาใต้ชื่อ (คอลัมน์ของมันซ่อนไว้) */}
+          <div className="mt-1 xl:hidden">
+            <CategoryCell categoryId={m.categoryId} byId={categoryById} />
+            {m.wasteFactorPct !== null && (
+              <span className="block pl-4 text-xs text-slate-500">เผื่อเสีย {Number(m.wasteFactorPct)}%</span>
+            )}
+          </div>
+          {m.components.length > 0 && (
+            <span
+              className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-brand bg-brand/5 rounded-md px-1.5 py-0.5"
+              title={`ราคาวัสดุคิดจากสูตรวัสดุย่อย ${m.components.length} รายการ`}
+            >
+              <Layers size={11} /> สูตร {m.components.length} วัสดุ
+            </span>
+          )}
+        </td>
+        <td className="hidden px-3 py-2 xl:table-cell">
+          <CategoryCell categoryId={m.categoryId} byId={categoryById} />
+        </td>
+        <td className="px-3 py-2 text-slate-700">{m.unit}</td>
+        <td className="px-3 py-2 text-right text-slate-800">{money(m.materialUnitPrice)}</td>
+        <td className="px-3 py-2 text-right text-slate-800">{money(m.laborUnitPrice)}</td>
+        <td className="hidden px-3 py-2 text-right text-slate-500 xl:table-cell">
+          {m.wasteFactorPct === null ? "—" : `${Number(m.wasteFactorPct)}%`}
+        </td>
+        <td className="px-3 py-2 whitespace-nowrap">
+          <div className="xl:hidden">
+            <RowMenu
+              label={`คำสั่งของ ${m.name}`}
+              items={[
+                { key: "edit", label: "แก้ไข", onSelect: () => openEditor({ mode: "edit", material: m }, formFromMaterial(m)) },
+                { key: "active", label: m.active ? "ปิดใช้งาน" : "เปิดใช้งาน", onSelect: () => void toggleActive(m) },
+                { key: "delete", label: "ลบ", danger: true, onSelect: () => void handleDelete(m.id) },
+              ]}
+            />
+          </div>
+          <div className="hidden gap-2 xl:flex">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openEditor({ mode: "edit", material: m }, formFromMaterial(m))}
+            >
+              <Pencil size={14} /> แก้ไข
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => toggleActive(m)}>
+              {m.active ? (
+                <>
+                  <PowerOff size={14} /> ปิดใช้งาน
+                </>
+              ) : (
+                <>
+                  <Power size={14} /> เปิดใช้งาน
+                </>
+              )}
+            </Button>
+            <Button variant="dangerQuiet" size="sm" onClick={() => handleDelete(m.id)}>
+              <Trash2 size={14} /> ลบ
+            </Button>
+          </div>
+        </td>
+      </tr>
     );
   }
 
@@ -922,115 +1001,7 @@ export function MaterialsPage() {
           </thead>
           <tbody>
             {pageMaterials.map((m) =>
-              editor?.mode === "edit" && editor.material.id === m.id ? (
-                <tr key={m.id} data-material-row={m.id} className="border-t border-slate-100 bg-slate-50">
-                  <td colSpan={8} className="px-3 py-4" data-material-editor>
-              {materialFields(form, patchForm)}
-              <div className="mt-4 flex items-center gap-2 border-t border-slate-200 pt-3">
-                <Button onClick={saveEditor}>
-                  <Check size={14} /> {saving ? "กำลังบันทึก…" : "บันทึก"}
-                </Button>
-                <Button variant="ghost" onClick={cancelEditor}>
-                  <X size={14} /> ยกเลิก
-                </Button>
-                <span className="ml-auto text-xs text-slate-400">
-                  <span className="text-red-500">*</span> ต้องกรอก
-                </span>
-              </div>
-                  </td>
-                </tr>
-              ) : (
-                <tr
-                  key={m.id}
-                  data-material-row={m.id}
-                  className={`border-t border-slate-100 transition-colors duration-700 ${
-                    flashId === m.id ? "bg-amber-50" : m.active ? "" : "bg-slate-50/60"
-                  }`}
-                >
-                  <td className="px-3 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
-                    {m.code ?? "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`font-medium ${m.active ? "text-slate-800" : "text-slate-500"}`}>{m.name}</span>
-                      {!m.active && (
-                        <span className="text-xs font-medium text-slate-500 bg-slate-200 rounded-full px-2 py-0.5 whitespace-nowrap">
-                          ปิดใช้งาน
-                        </span>
-                      )}
-                    </div>
-                    {m.spec && <span className="block text-xs text-slate-500">{m.spec}</span>}
-                    {m.tileWidthMm != null && m.tileLengthMm != null && (
-                      <span className="block text-xs text-slate-400">
-                        แผ่น {m.tileWidthMm}×{m.tileLengthMm} มม.
-                        {m.tilePiecesPerBox != null && ` · กล่องละ ${m.tilePiecesPerBox} แผ่น`}
-                      </span>
-                    )}
-                    {m.supplier && (
-                      <span className="block text-xs text-slate-400">ผู้จำหน่าย: {m.supplier}</span>
-                    )}
-                    {/* iPad: หมวดงานกับเผื่อเสียย้ายมาใต้ชื่อ (คอลัมน์ของมันซ่อนไว้) */}
-                    <div className="mt-1 xl:hidden">
-                      <CategoryCell categoryId={m.categoryId} byId={categoryById} />
-                      {m.wasteFactorPct !== null && (
-                        <span className="block pl-4 text-xs text-slate-500">เผื่อเสีย {Number(m.wasteFactorPct)}%</span>
-                      )}
-                    </div>
-                    {m.components.length > 0 && (
-                      <span
-                        className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-brand bg-brand/5 rounded-md px-1.5 py-0.5"
-                        title={`ราคาวัสดุคิดจากสูตรวัสดุย่อย ${m.components.length} รายการ`}
-                      >
-                        <Layers size={11} /> สูตร {m.components.length} วัสดุ
-                      </span>
-                    )}
-                  </td>
-                  <td className="hidden px-3 py-2 xl:table-cell">
-                    <CategoryCell categoryId={m.categoryId} byId={categoryById} />
-                  </td>
-                  <td className="px-3 py-2 text-slate-700">{m.unit}</td>
-                  <td className="px-3 py-2 text-right text-slate-800">{money(m.materialUnitPrice)}</td>
-                  <td className="px-3 py-2 text-right text-slate-800">{money(m.laborUnitPrice)}</td>
-                  <td className="hidden px-3 py-2 text-right text-slate-500 xl:table-cell">
-                    {m.wasteFactorPct === null ? "—" : `${Number(m.wasteFactorPct)}%`}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <div className="xl:hidden">
-                      <RowMenu
-                        label={`คำสั่งของ ${m.name}`}
-                        items={[
-                          { key: "edit", label: "แก้ไข", onSelect: () => openEditor({ mode: "edit", material: m }, formFromMaterial(m)) },
-                          { key: "active", label: m.active ? "ปิดใช้งาน" : "เปิดใช้งาน", onSelect: () => void toggleActive(m) },
-                          { key: "delete", label: "ลบ", danger: true, onSelect: () => void handleDelete(m.id) },
-                        ]}
-                      />
-                    </div>
-                    <div className="hidden gap-2 xl:flex">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditor({ mode: "edit", material: m }, formFromMaterial(m))}
-                      >
-                        <Pencil size={14} /> แก้ไข
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => toggleActive(m)}>
-                        {m.active ? (
-                          <>
-                            <PowerOff size={14} /> ปิดใช้งาน
-                          </>
-                        ) : (
-                          <>
-                            <Power size={14} /> เปิดใช้งาน
-                          </>
-                        )}
-                      </Button>
-                      <Button variant="dangerQuiet" size="sm" onClick={() => handleDelete(m.id)}>
-                        <Trash2 size={14} /> ลบ
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ),
+              editor?.mode === "edit" && editor.material.id === m.id ? renderEditorRow(m) : renderMaterialRow(m),
             )}
           </tbody>
         </table>
@@ -1039,6 +1010,95 @@ export function MaterialsPage() {
 
       <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
     </Layout>
+  );
+}
+
+function saveFailedText(mode: "add" | "edit") {
+  return mode === "add" ? "เพิ่มรายการไม่สำเร็จ" : "แก้ไขไม่สำเร็จ";
+}
+
+/** สีพื้นของแถว: เพิ่งบันทึก = กะพริบเหลือง · ปิดใช้งาน = เทาจาง */
+function rowTone(m: MaterialDto, flashId: string | null) {
+  if (flashId === m.id) return "bg-amber-50";
+  return m.active ? "" : "bg-slate-50/60";
+}
+
+/**
+ * ตัวเลือกหมวด = หมวดที่ใช้งานอยู่ + หมวดที่เลือกอยู่ปัจจุบัน (เผื่อกำลังแก้วัสดุที่หมวดถูก
+ * เก็บเข้ากรุไปแล้ว จะได้ยังเห็นค่าเดิม)
+ */
+function categoryChoices(active: WorkCategoryDto[], byId: Map<string, WorkCategoryDto>, currentId: string): WorkCategoryDto[] {
+  if (!currentId || active.some((c) => c.id === currentId)) return [...active];
+  const cur = byId.get(currentId);
+  return cur ? [...active, cur] : [...active];
+}
+
+function detailSummaryOf(state: MaterialFormState) {
+  const supplier = state.supplier.trim();
+  return [
+    state.spec.trim(),
+    supplier && `ผู้จำหน่าย ${supplier}`,
+    state.wasteFactorPct.trim() && `เผื่อเสีย ${Number(state.wasteFactorPct)}%`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function tileSummaryOf(state: MaterialFormState) {
+  return [
+    state.tileWidthMm.trim() && state.tileLengthMm.trim() && `${state.tileWidthMm}×${state.tileLengthMm} มม.`,
+    state.tilePiecesPerBox.trim() && `กล่องละ ${state.tilePiecesPerBox} แผ่น`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** ราคาวัสดุ/หน่วย — มีสูตรวัสดุย่อย = ช่องอ่านอย่างเดียว (คิดจากผลรวมสูตร) · ไม่มี = กรอกเอง */
+function MaterialPriceField({
+  state,
+  set,
+  error,
+  hasRecipe,
+  derived,
+  unitLabel,
+}: Readonly<{
+  state: MaterialFormState;
+  set: (patch: Partial<MaterialFormState>) => void;
+  error: string | undefined;
+  hasRecipe: boolean;
+  derived: number;
+  unitLabel: string;
+}>) {
+  return (
+    <div data-invalid={error ? "" : undefined}>
+      <label className="flex flex-col gap-1 text-xs text-slate-700">
+        <span>
+          ราคาวัสดุ / {unitLabel} {!hasRecipe && <span className="text-red-500">*</span>}
+        </span>
+        {hasRecipe ? (
+          <input
+            type="text"
+            readOnly
+            value={money(derived)}
+            title="คิดจากผลรวมของสูตรวัสดุย่อย"
+            className={`${INPUT} border-slate-200 bg-slate-100 text-right tabular-nums text-slate-600`}
+          />
+        ) : (
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={state.materialUnitPrice}
+            onChange={(e) => set({ materialUnitPrice: e.target.value })}
+            placeholder="0.00"
+            aria-invalid={error ? true : undefined}
+            className={`${INPUT} text-right tabular-nums ${error ? INPUT_INVALID : ""}`}
+          />
+        )}
+      </label>
+      {hasRecipe && <p className="mt-1 text-xs text-slate-500">คิดจากสูตรวัสดุย่อยด้านล่าง</p>}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
   );
 }
 

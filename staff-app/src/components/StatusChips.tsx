@@ -23,7 +23,7 @@ export function StatusChips<S extends string>({
     ...statuses.map((s) => ({ key: s, label: labels[s], count: counts?.[s] })),
   ];
   return (
-    <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="กรองตามสถานะ">
+    <fieldset className="mb-3 flex flex-wrap gap-1.5 min-w-0" aria-label="กรองตามสถานะ">
       {chips.map((chip) => {
         const active = value === chip.key;
         return (
@@ -44,6 +44,6 @@ export function StatusChips<S extends string>({
           </button>
         );
       })}
-    </div>
+    </fieldset>
   );
 }

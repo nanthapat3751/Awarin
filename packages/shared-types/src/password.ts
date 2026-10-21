@@ -46,7 +46,7 @@ export type PasswordClass = "lower" | "upper" | "digit" | "other";
 const CLASS_PATTERNS: ReadonlyArray<readonly [PasswordClass, RegExp]> = [
   ["lower", /[a-z]/],
   ["upper", /[A-Z]/],
-  ["digit", /[0-9]/],
+  ["digit", /\d/],
   ["other", /[^a-zA-Z0-9]/],
 ];
 
@@ -231,27 +231,25 @@ function containsPersonalInfo(
 ): boolean {
   const lower = value.toLowerCase();
   const valueDigits = value.replace(/\D/g, "");
+  return personal.some((raw) => personalEntryFound(lower, valueDigits, raw));
+}
 
-  for (const raw of personal) {
-    if (!raw) continue;
-    const trimmed = raw.trim().toLowerCase();
-    if (trimmed === "") continue;
+/** ข้อมูลตัวเองหนึ่งช่อง (ชื่อ/อีเมล/ชื่อผู้ใช้/เบอร์) โผล่อยู่ในรหัสผ่านไหม */
+function personalEntryFound(lower: string, valueDigits: string, raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === "") return false;
 
-    // อีเมลใช้แค่ส่วนหน้า @ — โดเมน gmail.com ซ้ำกันทุกคน ไม่ใช่ข้อมูลเฉพาะตัว
-    const withoutDomain = trimmed.includes("@") ? trimmed.slice(0, trimmed.indexOf("@")) : trimmed;
+  // อีเมลใช้แค่ส่วนหน้า @ — โดเมน gmail.com ซ้ำกันทุกคน ไม่ใช่ข้อมูลเฉพาะตัว
+  const withoutDomain = trimmed.includes("@") ? trimmed.slice(0, trimmed.indexOf("@")) : trimmed;
 
-    // ตัดเป็นคำ ๆ แล้วดูเฉพาะคำยาว 4 ตัวขึ้นไป — คำสั้นอย่าง "ใจ" หรือ "ดี" ไปโผล่ในรหัสที่ดีได้ง่าย
-    for (const token of withoutDomain.split(/[\s._@+-]+/)) {
-      if (token.length >= 4 && lower.includes(token)) return true;
-    }
+  // ตัดเป็นคำ ๆ แล้วดูเฉพาะคำยาว 4 ตัวขึ้นไป — คำสั้นอย่าง "ใจ" หรือ "ดี" ไปโผล่ในรหัสที่ดีได้ง่าย
+  if (withoutDomain.split(/[\s._@+-]+/).some((token) => token.length >= 4 && lower.includes(token))) return true;
 
-    // เบอร์โทรเทียบแยก: คนกรอกมาได้หลายรูปแบบ (081-234-5678 / +6681...) เทียบเฉพาะตัวเลข
-    // และเอาแค่ 6 หลักท้าย เพราะ 08x ขึ้นต้นเหมือนกันแทบทุกเบอร์
-    const digits = trimmed.replace(/\D/g, "");
-    if (digits.length >= 6 && valueDigits.includes(digits.slice(-6))) return true;
-  }
-
-  return false;
+  // เบอร์โทรเทียบแยก: คนกรอกมาได้หลายรูปแบบ (081-234-5678 / +6681...) เทียบเฉพาะตัวเลข
+  // และเอาแค่ 6 หลักท้าย เพราะ 08x ขึ้นต้นเหมือนกันแทบทุกเบอร์
+  const digits = trimmed.replace(/\D/g, "");
+  return digits.length >= 6 && valueDigits.includes(digits.slice(-6));
 }
 
 /** เหตุผลที่รหัสผ่านใช้ไม่ได้ — ไว้ให้เทสต์และหน้าเว็บแยกแยะได้ ไม่ต้องจับคู่ข้อความ */

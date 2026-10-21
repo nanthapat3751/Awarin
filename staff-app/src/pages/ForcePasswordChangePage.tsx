@@ -90,7 +90,7 @@ export function ForcePasswordChangePage() {
 
         <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs text-slate-700">
-            รหัสผ่านที่ได้รับมา
+            <span>รหัสผ่านที่ได้รับมา</span>
             <input
               type="password"
               required
@@ -132,7 +132,7 @@ export function ForcePasswordChangePage() {
           </label>
 
           <label className="flex flex-col gap-1 text-xs text-slate-700">
-            ยืนยันรหัสผ่านใหม่
+            <span>ยืนยันรหัสผ่านใหม่</span>
             <input
               type={show ? "text" : "password"}
               required

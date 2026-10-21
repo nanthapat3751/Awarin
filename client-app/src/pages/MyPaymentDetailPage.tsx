@@ -216,14 +216,55 @@ function PayMethods({ p, method, onMethod }: Readonly<{ p: CustomerPaymentDetail
 }
 
 /** สรุปงวด (บนสุดของการ์ดขวา) — ยอดตัวใหญ่ + ที่มาของยอดแบบใบเสร็จ + วันครบกำหนด + ใบแจ้งหนี้ */
-function Summary({ p }: Readonly<{ p: CustomerPaymentDetailDto }>) {
-  const rows: [string, string][] = [[p.notBilledYet || p.paid ? "ยอดงวด" : `ยอดงวดที่ ${p.seq}`, money(p.installmentAmount)]];
-  if (!p.notBilledYet && !p.paid) {
-    if (p.breakdown.paidBefore > 0) rows.push(["หัก ชำระแล้ว", `−${money(p.breakdown.paidBefore)}`]);
-    if (p.breakdown.retention) rows.push(["หัก เงินประกันผลงาน (คืนเมื่อพ้นระยะประกัน)", `−${money(p.breakdown.retention)}`]);
-    if (p.breakdown.withholding) rows.push(["หัก ภาษี ณ ที่จ่าย", `−${money(p.breakdown.withholding)}`]);
+/** แถวรายละเอียดใต้ยอด — ยอดงวด · หักที่ชำระแล้ว/เงินประกัน/ภาษี ณ ที่จ่าย (เฉพาะงวดที่ต้องจ่าย) · วันครบกำหนด */
+function summaryRows(p: CustomerPaymentDetailDto): [string, string][] {
+  const billed = !p.notBilledYet && !p.paid;
+  const rows: [string, string][] = [[billed ? `ยอดงวดที่ ${p.seq}` : "ยอดงวด", money(p.installmentAmount)]];
+  if (billed) {
+    const minus = (n: number) => `−${money(n)}`;
+    if (p.breakdown.paidBefore > 0) rows.push(["หัก ชำระแล้ว", minus(p.breakdown.paidBefore)]);
+    if (p.breakdown.retention) rows.push(["หัก เงินประกันผลงาน (คืนเมื่อพ้นระยะประกัน)", minus(p.breakdown.retention)]);
+    if (p.breakdown.withholding) rows.push(["หัก ภาษี ณ ที่จ่าย", minus(p.breakdown.withholding)]);
   }
   if (p.dueOn && !p.paid) rows.push(["ครบกำหนด", thaiDate(p.dueOn)]);
+  return rows;
+}
+
+/** รับเงินแล้ว (บางส่วนหรือครบ) + ใบเสร็จ */
+function PaidLines({ p }: Readonly<{ p: CustomerPaymentDetailDto }>) {
+  if (p.payments.length === 0 && p.receipts.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-4">
+      <p className="text-sm font-medium text-slate-900">บริษัทได้รับเงินแล้ว</p>
+      <ul className="mt-2 flex flex-col gap-1 text-sm text-slate-600">
+        {p.payments.map((pay) => (
+          <li key={pay.id} className="flex justify-between gap-3">
+            <span>{thaiDate(pay.paidOn)}</span>
+            <span className="tabular-nums text-slate-800">{money(pay.amount)}</span>
+          </li>
+        ))}
+      </ul>
+      {p.receipts.length > 0 && (
+        <p className="-ml-2.5 mt-2 flex flex-wrap gap-x-1">
+          {p.receipts.map((r) => (
+            <Link
+              key={r.id}
+              to={billingDocViewerPath(p.contractId, r.id)}
+              target="_blank"
+              rel="noreferrer"
+              className="link-pill inline-flex min-h-11 items-center gap-1 text-sm font-medium text-brand lg:min-h-0"
+            >
+              <Receipt size={14} aria-hidden /> {billingDocLabel(r)} {r.docNo}
+            </Link>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Summary({ p }: Readonly<{ p: CustomerPaymentDetailDto }>) {
+  const rows = summaryRows(p);
 
   return (
     <div>
@@ -266,36 +307,146 @@ function Summary({ p }: Readonly<{ p: CustomerPaymentDetailDto }>) {
         </Link>
       )}
 
-      {/* รับเงินแล้ว (บางส่วนหรือครบ) + ใบเสร็จ */}
-      {(p.payments.length > 0 || p.receipts.length > 0) && (
-        <div className="mt-4 border-t border-slate-100 pt-4">
-          <p className="text-sm font-medium text-slate-900">บริษัทได้รับเงินแล้ว</p>
-          <ul className="mt-2 flex flex-col gap-1 text-sm text-slate-600">
-            {p.payments.map((pay) => (
-              <li key={pay.id} className="flex justify-between gap-3">
-                <span>{thaiDate(pay.paidOn)}</span>
-                <span className="tabular-nums text-slate-800">{money(pay.amount)}</span>
-              </li>
-            ))}
-          </ul>
-          {p.receipts.length > 0 && (
-            <p className="-ml-2.5 mt-2 flex flex-wrap gap-x-1">
-              {p.receipts.map((r) => (
-                <Link
-                  key={r.id}
-                  to={billingDocViewerPath(p.contractId, r.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="link-pill inline-flex min-h-11 items-center gap-1 text-sm font-medium text-brand lg:min-h-0"
-                >
-                  <Receipt size={14} aria-hidden /> {billingDocLabel(r)} {r.docNo}
-                </Link>
-              ))}
-            </p>
-          )}
-        </div>
-      )}
+      <PaidLines p={p} />
     </div>
+  );
+}
+
+type ShownNotice = {
+  amount: number;
+  paidOn: string;
+  evidence: NonNullable<CustomerPaymentDetailDto["notice"]>["evidence"] | null;
+  fileCount: number;
+};
+
+/** การแจ้งโอนที่โชว์ — รอตรวจอยู่ใช้ของเซิร์ฟเวอร์ · เพิ่งส่งแต่ข้อมูลงวดยังโหลดไม่เสร็จ ใช้ค่าที่ลูกค้าเพิ่งส่งไปก่อน */
+/** ช่องทางตั้งต้น: มี QR = สแกนจ่าย · ไม่มี = โอนเข้าบัญชี */
+function defaultMethod(p: CustomerPaymentDetailDto): Method {
+  return p.payQr ? "qr" : "bank";
+}
+
+function pageTitleOf(p: CustomerPaymentDetailDto | null) {
+  return p ? `ชำระงวดที่ ${p.seq} · ${p.projectName}` : "ชำระเงิน";
+}
+
+function subtitleOf(p: CustomerPaymentDetailDto | null) {
+  return p ? `${p.projectName} · สัญญา ${p.contractNo}` : "รายละเอียดการชำระเงิน";
+}
+
+/** โหลดงวดไม่สำเร็จ — ปุ่มลองใหม่เฉพาะความผิดพลาดที่ลองใหม่แล้วมีโอกาสผ่าน */
+function LoadFailure({ failure, onRetry }: Readonly<{ failure: Failure; onRetry: () => void }>) {
+  return (
+    <FormAlert
+      kind={failure.kind}
+      message={failure.message}
+      focus={false}
+      onRetry={isRetryable(failure.kind) ? onRetry : undefined}
+    />
+  );
+}
+
+function shownNoticeOf(notice: CustomerPaymentDetailDto["notice"] | null, justSent: SentNotice | null): ShownNotice | null {
+  if (notice) {
+    return { amount: Number(notice.amount), paidOn: notice.paidOn, evidence: notice.evidence, fileCount: notice.evidence.length };
+  }
+  return justSent && { amount: justSent.amount, paidOn: justSent.paidOn, evidence: null, fileCount: justSent.fileCount };
+}
+
+/** แจ้งโอนแล้วยังตรวจไม่พบเงินเข้า */
+function RejectedNotice({ notice }: Readonly<{ notice: NonNullable<CustomerPaymentDetailDto["notice"]> }>) {
+  return (
+    <div className="mt-4 flex gap-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-900">
+      <AlertCircle size={18} className="mt-0.5 shrink-0 text-rose-600" aria-hidden />
+      <div>
+        <p className="font-medium">การแจ้งโอน {money(Number(notice.amount))} บาท ยังตรวจไม่พบเงินเข้า</p>
+        {notice.rejectReason && <p className="mt-0.5">{notice.rejectReason}</p>}
+        <p className="mt-1 text-rose-800">ตรวจรายการในแอปธนาคาร แล้วแจ้งโอนใหม่ด้านล่าง หรือติดต่อบริษัท</p>
+      </div>
+    </div>
+  );
+}
+
+/** แจ้งโอนแล้ว — ลูกค้ากำลังรอคำตอบ (+ ยอดในสลิปไม่ตรง · ยกเลิกการแจ้งเอง) */
+function SentNotice({
+  p,
+  shown,
+  pending,
+  cancelling,
+  cancelError,
+  onCancel,
+}: Readonly<{
+  p: CustomerPaymentDetailDto;
+  shown: ShownNotice;
+  pending: boolean;
+  cancelling: boolean;
+  cancelError: string | null;
+  onCancel: (noticeId: string) => void;
+}>) {
+  return (
+    <output className="mt-4 flex gap-3 rounded-lg bg-sky-50 p-3 text-sm text-sky-900">
+      <Clock size={18} className="mt-0.5 shrink-0 text-sky-600" aria-hidden />
+      <div className="min-w-0">
+        <p className="font-medium">
+          แจ้งโอนแล้ว {money(shown.amount)} บาท (โอนวันที่ {thaiDate(shown.paidOn)})
+        </p>
+        <p className="mt-0.5 text-sky-800">
+          {/* ระบบตรวจสลิปกับธนาคารผ่านแล้ว — แต่ยังไม่ใช่ "ชำระแล้ว" จนกว่าบริษัทกดยืนยัน (ไม่บอกเกินจริง) */}
+          {pending && p.notice?.slipVerified
+            ? "ระบบตรวจสลิปกับธนาคารแล้ว รอบริษัทยืนยัน — งวดจะเปลี่ยนเป็นชำระแล้วเมื่อยืนยัน และคุณจะได้รับแจ้งเตือน"
+            : "รอบริษัทตรวจสอบกับบัญชี — งวดจะเปลี่ยนเป็นชำระแล้วเมื่อตรวจพบเงินเข้า และคุณจะได้รับแจ้งเตือน"}
+        </p>
+        <p className="-ml-2.5 mt-1 flex flex-wrap gap-x-1">
+          {shown.evidence && p.notice
+            ? shown.evidence.map((e, i, all) => (
+                <a
+                  key={e.id}
+                  href={myNoticeEvidenceUrl(p.contractId, p.notice!.id, e.id)}
+                  target="_blank"
+                  rel="noopener"
+                  className="link-pill inline-flex min-h-11 items-center gap-1 font-medium text-brand lg:min-h-0"
+                >
+                  <Paperclip size={13} aria-hidden />
+                  สลิปที่ส่ง{all.length > 1 ? ` ${i + 1}` : ""}
+                </a>
+              ))
+            : (
+              // ลิงก์เปิดสลิปมาพร้อมข้อมูลงวดชุดใหม่ — ระหว่างนี้บอกจำนวนไฟล์ที่ส่งไปแทน
+              <span className="inline-flex min-h-11 items-center gap-1 px-2.5 text-sky-800 lg:min-h-0">
+                <Paperclip size={13} aria-hidden /> แนบสลิป {shown.fileCount} ไฟล์
+              </span>
+            )}
+        </p>
+        {/* ข้อ A: ยอดในสลิปตามธนาคารไม่ตรงกับที่กรอก — บอกทันที (ส่วนใหญ่คือแนบผิดใบ/พิมพ์ผิด) */}
+        {pending && p.notice?.slipAmountMismatch && (
+          <div className="mt-2 flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-900">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden />
+            <p>
+              <span className="font-medium">
+                ยอดในสลิปคือ {money(Number(p.notice.slipAmountMismatch.slipAmount))} บาท ไม่ตรงกับที่คุณกรอก (
+                {money(shown.amount)} บาท)
+              </span>
+              <span className="block text-amber-800">
+                ถ้าแนบสลิปผิดใบหรือพิมพ์ยอดผิด กด "ยกเลิกการแจ้งนี้" แล้วส่งใหม่ได้เลย
+              </span>
+            </p>
+          </div>
+        )}
+        {/* ข้อ B: ยกเลิกเองได้ระหว่างที่บริษัทยังไม่ได้ตรวจ — ไม่ต้องรอพนักงานกด "ไม่ตรง" */}
+        {pending && p.notice?.canCancel && (
+          <div className="mt-2">
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={() => onCancel(p.notice!.id)}
+              className="inline-flex min-h-11 items-center gap-1 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 lg:min-h-9"
+            >
+              {cancelling ? "กำลังยกเลิก..." : "ยกเลิกการแจ้งนี้"}
+            </button>
+            {cancelError && <p className="mt-1 text-sm text-red-700">{cancelError}</p>}
+          </div>
+        )}
+      </div>
+    </output>
   );
 }
 
@@ -314,7 +465,7 @@ export function MyPaymentDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const confirm = useConfirm();
-  usePageMeta(p ? `ชำระงวดที่ ${p.seq} · ${p.projectName}` : "ชำระเงิน");
+  usePageMeta(pageTitleOf(p));
 
   // นับรอบคำขอ — กดสลับงวดเร็ว ๆ แล้วคำตอบของงวดก่อนมาถึงทีหลัง ห้ามทับงวดล่าสุด
   // (ไม่งั้นข้อมูลไม่ตรงงวดใน URL หน้าจะค้างจางเหมือนกำลังโหลดตลอดไป)
@@ -359,16 +510,60 @@ export function MyPaymentDetailPage() {
     }
   }
 
-  const subtitle = p ? `${p.projectName} · สัญญา ${p.contractNo}` : "รายละเอียดการชำระเงิน";
+  /**
+   * การ์ดขวา: แจ้งโอนได้ = ฟอร์มแจ้งโอน (มีสรุปยอดในตัว) · นอกนั้น = สรุปยอด + สถานะการแจ้ง
+   * ส่งสำเร็จแล้วแต่ข้อมูลงวดยังโหลดไม่เสร็จ — ใช้ค่าที่ลูกค้าเพิ่งส่งแสดงไปก่อน (เดิมฟอร์มหายเฉย ๆ 1–2 วินาที)
+   */
+  function renderAside(p: CustomerPaymentDetailDto, pending: boolean) {
+    const rejectedBox = p.notice?.status === "REJECTED" && <RejectedNotice notice={p.notice} />;
+    if (p.canNotify && !justSent) {
+      return (
+        <PaymentNoticeForm
+          key={p.installmentId}
+          contractId={p.contractId}
+          installmentId={p.installmentId}
+          defaultAmount={p.amountToPay}
+          summary={
+            <>
+              <Summary p={p} />
+              {rejectedBox}
+            </>
+          }
+          onSubmitted={(sent) => {
+            setJustSent(sent);
+            void load();
+          }}
+        />
+      );
+    }
+    const shownNotice = shownNoticeOf(pending ? p.notice : null, justSent);
+    return (
+      <div className={CARD}>
+        <Summary p={p} />
+        {p.notBilledYet && (
+          <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            ยังไม่ถึงกำหนดชำระงวดนี้ — บริษัทจะส่งใบแจ้งหนี้เมื่องานถึงงวด
+          </p>
+        )}
+        {/* แจ้งโอนแล้ว — ลูกค้ากำลังรอคำตอบ */}
+        {shownNotice && (
+          <SentNotice
+            p={p}
+            shown={shownNotice}
+            pending={pending}
+            cancelling={cancelling}
+            cancelError={cancelError}
+            onCancel={(noticeId) => void cancelNotice(p.contractId, noticeId)}
+          />
+        )}
+        {rejectedBox}
+      </div>
+    );
+  }
 
-  const failureBox = failed && (
-    <FormAlert
-      kind={failed.failure.kind}
-      message={failed.failure.message}
-      focus={false}
-      onRetry={isRetryable(failed.failure.kind) ? () => void load() : undefined}
-    />
-  );
+  const subtitle = subtitleOf(p);
+
+  const failureBox = failed && <LoadFailure failure={failed.failure} onRetry={() => void load()} />;
 
   if (failed && !p) {
     return (
@@ -389,127 +584,10 @@ export function MyPaymentDetailPage() {
   // โหลดงวดนั้นพังแล้ว = ไม่ใช่กำลังโหลด → หน้าเดิมกลับมากดได้ พร้อมกล่องแจ้งและปุ่มลองใหม่ด้านบน
   const stale = p.installmentId !== installmentId && failed?.id !== installmentId;
   const pending = p.notice?.status === "PENDING";
-  const rejected = p.notice?.status === "REJECTED";
   const showPay = !p.paid && !p.notBilledYet && !pending && !justSent;
-  const activeMethod: Method = method ?? (p.payQr ? "qr" : "bank");
-
-  const rejectedBox = rejected && p.notice && (
-    <div className="mt-4 flex gap-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-900">
-      <AlertCircle size={18} className="mt-0.5 shrink-0 text-rose-600" aria-hidden />
-      <div>
-        <p className="font-medium">การแจ้งโอน {money(Number(p.notice.amount))} บาท ยังตรวจไม่พบเงินเข้า</p>
-        {p.notice.rejectReason && <p className="mt-0.5">{p.notice.rejectReason}</p>}
-        <p className="mt-1 text-rose-800">ตรวจรายการในแอปธนาคาร แล้วแจ้งโอนใหม่ด้านล่าง หรือติดต่อบริษัท</p>
-      </div>
-    </div>
-  );
-
-  // ส่งสำเร็จแล้วแต่ข้อมูลงวดยังโหลดไม่เสร็จ — ใช้ค่าที่ลูกค้าเพิ่งส่งแสดงไปก่อน (เดิมฟอร์มหายเฉย ๆ 1–2 วินาที)
-  const shownNotice =
-    pending && p.notice
-      ? { amount: Number(p.notice.amount), paidOn: p.notice.paidOn, evidence: p.notice.evidence, fileCount: p.notice.evidence.length }
-      : justSent && { amount: justSent.amount, paidOn: justSent.paidOn, evidence: null, fileCount: justSent.fileCount };
-
-  let aside: ReactNode;
-  if (p.canNotify && !justSent) {
-    aside = (
-      <PaymentNoticeForm
-        key={p.installmentId}
-        contractId={p.contractId}
-        installmentId={p.installmentId}
-        defaultAmount={p.amountToPay}
-        summary={
-          <>
-            <Summary p={p} />
-            {rejectedBox}
-          </>
-        }
-        onSubmitted={(sent) => {
-          setJustSent(sent);
-          void load();
-        }}
-      />
-    );
-  } else {
-    aside = (
-      <div className={CARD}>
-        <Summary p={p} />
-        {p.notBilledYet && (
-          <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            ยังไม่ถึงกำหนดชำระงวดนี้ — บริษัทจะส่งใบแจ้งหนี้เมื่องานถึงงวด
-          </p>
-        )}
-        {/* แจ้งโอนแล้ว — ลูกค้ากำลังรอคำตอบ */}
-        {shownNotice && (
-          <div role="status" className="mt-4 flex gap-3 rounded-lg bg-sky-50 p-3 text-sm text-sky-900">
-            <Clock size={18} className="mt-0.5 shrink-0 text-sky-600" aria-hidden />
-            <div className="min-w-0">
-              <p className="font-medium">
-                แจ้งโอนแล้ว {money(shownNotice.amount)} บาท (โอนวันที่ {thaiDate(shownNotice.paidOn)})
-              </p>
-              <p className="mt-0.5 text-sky-800">
-                {/* ระบบตรวจสลิปกับธนาคารผ่านแล้ว — แต่ยังไม่ใช่ "ชำระแล้ว" จนกว่าบริษัทกดยืนยัน (ไม่บอกเกินจริง) */}
-                {pending && p.notice?.slipVerified
-                  ? "ระบบตรวจสลิปกับธนาคารแล้ว รอบริษัทยืนยัน — งวดจะเปลี่ยนเป็นชำระแล้วเมื่อยืนยัน และคุณจะได้รับแจ้งเตือน"
-                  : "รอบริษัทตรวจสอบกับบัญชี — งวดจะเปลี่ยนเป็นชำระแล้วเมื่อตรวจพบเงินเข้า และคุณจะได้รับแจ้งเตือน"}
-              </p>
-              <p className="-ml-2.5 mt-1 flex flex-wrap gap-x-1">
-                {shownNotice.evidence && p.notice
-                  ? shownNotice.evidence.map((e, i, all) => (
-                      <a
-                        key={e.id}
-                        href={myNoticeEvidenceUrl(p.contractId, p.notice!.id, e.id)}
-                        target="_blank"
-                        rel="noopener"
-                        className="link-pill inline-flex min-h-11 items-center gap-1 font-medium text-brand lg:min-h-0"
-                      >
-                        <Paperclip size={13} aria-hidden />
-                        สลิปที่ส่ง{all.length > 1 ? ` ${i + 1}` : ""}
-                      </a>
-                    ))
-                  : (
-                    // ลิงก์เปิดสลิปมาพร้อมข้อมูลงวดชุดใหม่ — ระหว่างนี้บอกจำนวนไฟล์ที่ส่งไปแทน
-                    <span className="inline-flex min-h-11 items-center gap-1 px-2.5 text-sky-800 lg:min-h-0">
-                      <Paperclip size={13} aria-hidden /> แนบสลิป {shownNotice.fileCount} ไฟล์
-                    </span>
-                  )}
-              </p>
-              {/* ข้อ A: ยอดในสลิปตามธนาคารไม่ตรงกับที่กรอก — บอกทันที (ส่วนใหญ่คือแนบผิดใบ/พิมพ์ผิด) */}
-              {pending && p.notice?.slipAmountMismatch && (
-                <div className="mt-2 flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-900">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden />
-                  <p>
-                    <span className="font-medium">
-                      ยอดในสลิปคือ {money(Number(p.notice.slipAmountMismatch.slipAmount))} บาท ไม่ตรงกับที่คุณกรอก (
-                      {money(shownNotice.amount)} บาท)
-                    </span>
-                    <span className="block text-amber-800">
-                      ถ้าแนบสลิปผิดใบหรือพิมพ์ยอดผิด กด "ยกเลิกการแจ้งนี้" แล้วส่งใหม่ได้เลย
-                    </span>
-                  </p>
-                </div>
-              )}
-              {/* ข้อ B: ยกเลิกเองได้ระหว่างที่บริษัทยังไม่ได้ตรวจ — ไม่ต้องรอพนักงานกด "ไม่ตรง" */}
-              {pending && p.notice?.canCancel && (
-                <div className="mt-2">
-                  <button
-                    type="button"
-                    disabled={cancelling}
-                    onClick={() => void cancelNotice(p.contractId, p.notice!.id)}
-                    className="inline-flex min-h-11 items-center gap-1 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 lg:min-h-9"
-                  >
-                    {cancelling ? "กำลังยกเลิก..." : "ยกเลิกการแจ้งนี้"}
-                  </button>
-                  {cancelError && <p className="mt-1 text-sm text-red-700">{cancelError}</p>}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {rejectedBox}
-      </div>
-    );
-  }
+  const activeMethod: Method = method ?? defaultMethod(p);
+  // งวดที่กำลังโหลด (คงหน้าเดิมไว้จาง ๆ) — ตัวเลือกงวดชี้ไปงวดใหม่ทันที
+  const loadingId = stale ? installmentId : null;
 
   return (
     <PortalPage title="ชำระเงิน" subtitle={subtitle} back={BACK} wide>
@@ -526,9 +604,9 @@ export function MyPaymentDetailPage() {
             <div className="mt-3">
               <InstallmentPicker
                 options={p.installments}
-                selectedId={stale ? installmentId : p.installmentId}
+                selectedId={loadingId ?? p.installmentId}
                 selectedToPay={showPay && !stale ? p.amountToPay : null}
-                loadingId={stale ? installmentId : null}
+                loadingId={loadingId}
               />
             </div>
           </section>
@@ -542,7 +620,7 @@ export function MyPaymentDetailPage() {
           )}
         </div>
         <aside className="min-w-0 lg:col-span-5" aria-label="สรุปยอดและแจ้งโอน">
-          {aside}
+          {renderAside(p, pending)}
         </aside>
       </div>
     </PortalPage>

@@ -97,12 +97,38 @@ function ensureLoaded(): State {
 
 // ชื่อบริษัทใน ASN ยาวและเป็นทางการ ("Advanced Wireless Network Company Limited") — ตัดคำนิติบุคคลท้ายชื่อ
 // ออกให้สั้นพออ่านในตาราง ไม่แปลงเป็นชื่อแบรนด์เอง (เดาผิดแล้วจะชี้ผิดค่าย)
-const LEGAL_SUFFIX =
-  /[\s,.]*(public company limited|company limited|co\.?\s*,?\s*ltd\.?|corporation|limited|ltd\.?|inc\.?|corp\.?|plc\.?|llc\.?)\.?$/i;
+//
+// เดิมเป็น regex ก้อนเดียว `[\s,.]*(…|co\.?\s*,?\s*ltd\.?|…)\.?$` ซึ่งย้อนลองได้หลายทางจนช้าแบบทวีคูณกับชื่อยาว ๆ
+// ที่นี่แยกเป็นขั้น: หาคำท้ายชื่อ (ไม่มีจุด / มีจุดเดียว / จุดสองตัวสำหรับคำย่อ) แล้วกินตัวคั่นข้างหน้าเอง — ผลเหมือนเดิม
+const LEGAL_WORD = /(?:public company limited|company limited|co\.?\s*(?:,\s*)?ltd|corporation|limited|ltd|inc|corp|plc|llc)$/i;
+/** คำย่อที่เขียนจุดท้ายได้เอง ("Ltd.") — จึงตามด้วยจุดได้อีกหนึ่งตัว */
+const DOTTED_LEGAL_WORD = /(?:co\.?\s*(?:,\s*)?ltd|ltd|inc|corp|plc|llc)$/i;
+const isNameSeparator = (c: string) => c === "," || c === "." || c.trim() === "";
+
+/** ตำแหน่งเริ่มของคำนิติบุคคลท้ายชื่อ (รวมตัวคั่นข้างหน้า) · ไม่มี = -1 */
+function legalSuffixStart(name: string): number {
+  let best = -1;
+  const consider = (end: number, word: RegExp) => {
+    const m = word.exec(name.slice(0, end));
+    if (!m) return;
+    let start = m.index;
+    while (start > 0 && isNameSeparator(name[start - 1])) start--;
+    if (best < 0 || start < best) best = start;
+  };
+  consider(name.length, LEGAL_WORD);
+  if (name.endsWith(".")) consider(name.length - 1, LEGAL_WORD);
+  if (name.endsWith("..")) consider(name.length - 2, DOTTED_LEGAL_WORD);
+  return best;
+}
+
 function shortNetworkName(org: string | undefined): string | null {
   if (!org) return null;
   let name = org.trim();
-  for (let i = 0; i < 3 && LEGAL_SUFFIX.test(name); i += 1) name = name.replace(LEGAL_SUFFIX, "").trim();
+  for (let i = 0; i < 3; i += 1) {
+    const start = legalSuffixStart(name);
+    if (start < 0) break;
+    name = name.slice(0, start).trim();
+  }
   return name || org.trim();
 }
 
@@ -118,7 +144,7 @@ function countryName(code: string): string {
 /** ประเทศ/ผู้ให้บริการของไอพีสาธารณะ — ไอพีภายใน/ไม่มีฐานข้อมูล/หาไม่เจอ = null */
 export function geoLookup(rawIp: string | null | undefined): IpGeo | null {
   const ip = classifyIp(rawIp);
-  if (!ip || ip.kind !== "public") return null;
+  if (ip?.kind !== "public") return null;
   const { country, asn } = ensureLoaded();
   if (!country && !asn) return null;
 
@@ -182,9 +208,11 @@ async function fetchMmdb(kind: "country" | "asn", month: string): Promise<Buffer
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`ดาวน์โหลด ${kind} ${month} ไม่สำเร็จ (HTTP ${res.status})`);
   const data = gunzipSync(Buffer.from(await res.arrayBuffer()));
-  // ตรวจว่าเปิดได้และค้นได้จริงก่อนเอาไปแทนของเดิม — ไฟล์เสียต้องไม่ทับไฟล์ที่ใช้งานได้
-  const probe = new Reader<object>(data).get("1.1.1.1");
-  if (!probe) throw new Error(`ไฟล์ ${kind} ${month} เปิดได้แต่ค้นไม่เจอ — ไม่ใช้ไฟล์นี้`);
+  // ตรวจว่าเปิดได้และมีข้อมูลจริงก่อนเอาไปแทนของเดิม — ไฟล์เสียต้องไม่ทับไฟล์ที่ใช้งานได้
+  // (ไฟล์ที่ไม่ใช่ฐานข้อมูล mmdb เปิดไม่ผ่านตั้งแต่บรรทัดนี้ · ไฟล์เปล่าไม่มีโหนดค้นหาเลย)
+  const { metadata } = new Reader<object>(data);
+  const hasNodes = metadata.nodeCount > 0;
+  if (!hasNodes) throw new Error(`ไฟล์ ${kind} ${month} เปิดได้แต่ไม่มีข้อมูล — ไม่ใช้ไฟล์นี้`);
   return data;
 }
 

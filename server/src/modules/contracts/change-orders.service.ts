@@ -582,10 +582,11 @@ export async function respondAsCustomer(customerId: string, contractId: string, 
     entityId: co.id,
     details: { projectId: co.projectId, docNo: co.docNo, totalAmount: co.totalAmount.toString() },
   });
+  const reason = input.note ? `: ${input.note}` : "";
   await notifyStaff(
     input.decision === "APPROVE"
       ? `ลูกค้าอนุมัติใบงานเพิ่ม-ลด ${co.docNo} (${contract.project.name}) — ${deltaText(Number(co.totalAmount))}`
-      : `ลูกค้าไม่อนุมัติใบงานเพิ่ม-ลด ${co.docNo} (${contract.project.name})${input.note ? `: ${input.note}` : ""}`,
+      : `ลูกค้าไม่อนุมัติใบงานเพิ่ม-ลด ${co.docNo} (${contract.project.name})${reason}`,
     `/projects/${co.projectId}?tab=contract&view=changes&contract=${co.contractId}`,
   ).catch(() => undefined);
 }

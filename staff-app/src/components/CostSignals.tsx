@@ -15,7 +15,11 @@ function thaiDate(iso: string): string {
   return d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" });
 }
 
-const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(Math.abs(n))}`;
+/** ยอดพร้อมเครื่องหมาย + / − (ศูนย์ไม่มีเครื่องหมาย) */
+function signed(n: number) {
+  if (n > 0) return `+${money(n)}`;
+  return n < 0 ? `−${money(Math.abs(n))}` : money(Math.abs(n));
+}
 
 /** รายละเอียดใต้ยอดในกล่องเงินเข้า/ออก — ยอด 0 ไม่แสดง จึงไม่มีบรรทัดที่ซ้ำกับยอดรวม */
 function SubLine({ label, value, sign = "", note }: Readonly<{ label: string; value: number; sign?: "+" | "−" | ""; note?: string }>) {
@@ -156,17 +160,7 @@ export function CashCard({
       {short && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
           <p>
-            {next ? (
-              <>
-                ควรเร่งเก็บ <b className="font-semibold">งวดที่ {next.seq}</b> ({next.milestone}) ยังค้าง{" "}
-                <b className="font-semibold tabular-nums">{money(next.outstanding)}</b> บาท
-                {next.dueOn ? ` · ครบกำหนด ${thaiDate(next.dueOn)}` : " · ยังไม่ได้ตั้งวันครบกำหนด"}
-              </>
-            ) : cash.contractSigned ? (
-              "เก็บเงินครบทุกงวดแล้ว แต่ยังจ่ายออกมากกว่า — ตรวจว่าบันทึกบิลซ้ำ หรือมีงานเพิ่มที่ยังไม่ได้ออกใบงานเพิ่ม-ลด"
-            ) : (
-              "ยังไม่มีสัญญาที่ลงนาม จึงยังเก็บเงินลูกค้าไม่ได้"
-            )}
+            <ShortfallAdvice next={next} contractSigned={cash.contractSigned} />
           </p>
           {next && onGoToContract && (
             <button type="button" onClick={onGoToContract} className="link-pill -mr-2.5 shrink-0 font-medium text-red-800 hover:bg-red-100">
@@ -352,4 +346,24 @@ export function PriceDriftCard({
       )}
     </section>
   );
+}
+
+/** ออกเงินแทนลูกค้าอยู่ — บอกงวดที่ควรเร่งเก็บ · เก็บครบแล้ว = ให้ตรวจบิล · ยังไม่มีสัญญา = ยังเก็บไม่ได้ */
+function ShortfallAdvice({
+  next,
+  contractSigned,
+}: Readonly<{ next: ProjectCostReportDto["cash"]["nextInstallment"]; contractSigned: boolean }>) {
+  if (next) {
+    return (
+      <>
+        ควรเร่งเก็บ <b className="font-semibold">งวดที่ {next.seq}</b> ({next.milestone}) ยังค้าง{" "}
+        <b className="font-semibold tabular-nums">{money(next.outstanding)}</b> บาท
+        {next.dueOn ? ` · ครบกำหนด ${thaiDate(next.dueOn)}` : " · ยังไม่ได้ตั้งวันครบกำหนด"}
+      </>
+    );
+  }
+  if (contractSigned) {
+    return "เก็บเงินครบทุกงวดแล้ว แต่ยังจ่ายออกมากกว่า — ตรวจว่าบันทึกบิลซ้ำ หรือมีงานเพิ่มที่ยังไม่ได้ออกใบงานเพิ่ม-ลด";
+  }
+  return "ยังไม่มีสัญญาที่ลงนาม จึงยังเก็บเงินลูกค้าไม่ได้";
 }

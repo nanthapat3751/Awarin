@@ -58,7 +58,8 @@ type Actor = { id: string; role: string };
 
 const OVERHEAD_LABEL = "ค่าดำเนินการ/ทั่วไป";
 /** ใบงานเพิ่ม-ลดสถานะนี้เก็บเงินลูกค้าไม่ได้แล้ว — ผูกไว้ก็ยังถือว่ารอออก VO */
-const DEAD_CHANGE_ORDER: readonly ChangeOrderStatus[] = ["REJECTED", "CANCELLED"];
+const DEAD_CHANGE_ORDER_STATUSES: ChangeOrderStatus[] = ["REJECTED", "CANCELLED"];
+const DEAD_CHANGE_ORDER: ReadonlySet<ChangeOrderStatus> = new Set(DEAD_CHANGE_ORDER_STATUSES);
 
 const baht = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -155,7 +156,7 @@ interface OverrunFields {
 
 function voPendingOf(row: OverrunFields): boolean {
   if (row.overrunReason !== "CUSTOMER_CHANGE" || row.voWaived) return false;
-  return row.changeOrder == null || DEAD_CHANGE_ORDER.includes(row.changeOrder.status);
+  return row.changeOrder == null || DEAD_CHANGE_ORDER.has(row.changeOrder.status);
 }
 
 function toOverrunDto(row: OverrunFields): CostOverrunDto | null {
@@ -246,7 +247,7 @@ async function loadContext(projectId: string) {
     loadCosts(projectId),
     loadCommitments(projectId),
     prisma.changeOrder.findMany({
-      where: { projectId, status: { notIn: [...DEAD_CHANGE_ORDER] } },
+      where: { projectId, status: { notIn: DEAD_CHANGE_ORDER_STATUSES } },
       orderBy: [{ contractId: "asc" }, { seq: "asc" }],
       select: { id: true, docNo: true, title: true, status: true },
     }),
@@ -324,7 +325,7 @@ export async function getCostReport(projectId: string, actor: Actor): Promise<Pr
   const commitmentDtos = ctx.commitments
     .map((c) => toCommitmentDto(c, ctx.exposureCosts, vatClaimable))
     // ที่ยังเปิดอยู่ (ยังต้องจ่าย) ขึ้นก่อน
-    .sort((a, b) => (a.status === b.status ? 0 : a.status === "OPEN" ? -1 : 1));
+    .sort((a, b) => openFirst(a.status, b.status));
 
   let pendingCount = 0;
   let pendingAmount = 0;
@@ -544,7 +545,14 @@ export async function projectMoneySignals(projectId: string) {
 function categoryLabel(ctx: Context, categoryId: string | null): string {
   if (categoryId == null) return OVERHEAD_LABEL;
   const root = ctx.roots.find((r) => r.id === categoryId);
-  return root ? `${root.code ? `${root.code} ` : ""}${root.name}` : "หมวดนี้";
+  if (!root) return "หมวดนี้";
+  return root.code ? `${root.code} ${root.name}` : root.name;
+}
+
+/** เรียงยอดผูกพันที่ยังเปิด (ยังต้องจ่าย) ขึ้นก่อน */
+function openFirst(a: string, b: string): number {
+  if (a === b) return 0;
+  return a === "OPEN" ? -1 : 1;
 }
 
 /**
@@ -935,7 +943,7 @@ export async function resolveVo(
   if (input.changeOrderId !== undefined) {
     if (input.changeOrderId) {
       const co = await prisma.changeOrder.findFirst({
-        where: { id: input.changeOrderId, projectId, status: { notIn: [...DEAD_CHANGE_ORDER] } },
+        where: { id: input.changeOrderId, projectId, status: { notIn: DEAD_CHANGE_ORDER_STATUSES } },
         select: { id: true },
       });
       if (!co) throw new ProjectCostError("ไม่พบใบงานเพิ่ม-ลดที่เลือก (หรือใบนั้นถูกปฏิเสธ/ยกเลิกแล้ว)", 404);

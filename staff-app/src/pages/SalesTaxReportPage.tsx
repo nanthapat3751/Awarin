@@ -111,7 +111,7 @@ export function SalesTaxReportPage() {
 
         {loading && <TableSkeleton rows={8} cols={6} />}
 
-        {!loading && report && report.rows.length === 0 && (
+        {!loading && report?.rows.length === 0 && (
           <div className="rounded-lg border border-slate-200 bg-white px-6 py-12 text-center">
             <FileSpreadsheet size={26} className="mx-auto mb-3 text-slate-300" aria-hidden />
             <p className="text-sm text-slate-600">ไม่มีใบกำกับภาษีที่ออกใน{thaiMonth(month)}</p>

@@ -3,7 +3,7 @@ import { AlertTriangle, Check, Lock, Plus, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../lib/api";
-import { listInstallments, setRetention, updateInstallments } from "../lib/contracts-api";
+import { listInstallments, setRetention as saveRetentionPct, updateInstallments } from "../lib/contracts-api";
 import { useToast } from "../lib/toast-context";
 import { Button } from "./Button";
 import { rowKey, sameRowKey } from "../lib/row-keys";
@@ -65,7 +65,7 @@ export function ContractInstallmentsEditor({
   const [savedPrintsTable, setSavedPrintsTable] = useState(true);
   /** เงินประกันผลงาน % — ค่าที่บันทึกแล้ว กับค่าที่กำลังพิมพ์ */
   const [savedRetention, setSavedRetention] = useState(contract.retentionPct == null ? "" : String(Number(contract.retentionPct)));
-  const [retention, setRetentionInput] = useState(savedRetention);
+  const [retention, setRetention] = useState(savedRetention);
   const [savingRetention, setSavingRetention] = useState(false);
   const printsTable = bodyHasTable ?? savedPrintsTable;
 
@@ -150,7 +150,7 @@ export function ContractInstallmentsEditor({
     if (retentionInvalid) return;
     setSavingRetention(true);
     try {
-      await setRetention(projectId, contract.id, { pct: retentionPct });
+      await saveRetentionPct(projectId, contract.id, { pct: retentionPct });
       setSavedRetention(retention.trim());
       toast.success(retentionPct ? `ตั้งเงินประกันผลงาน ${retentionPct}% แล้ว` : "สัญญานี้ไม่มีเงินประกันผลงาน");
     } catch (err) {
@@ -291,7 +291,7 @@ export function ContractInstallmentsEditor({
               placeholder="ไม่มี"
               className={`${INPUT} w-20 text-right tabular-nums`}
               value={retention}
-              onChange={(e) => setRetentionInput(e.target.value)}
+              onChange={(e) => setRetention(e.target.value)}
             />
             <span className="text-sm text-slate-500">% ของยอดแต่ละงวด (รวม VAT)</span>
             {retention.trim() !== savedRetention && (
@@ -301,14 +301,16 @@ export function ContractInstallmentsEditor({
             )}
           </div>
           <p className="text-xs text-slate-500">
-            {retentionInvalid
-              ? "ใส่ได้ 0–20%"
-              : retentionPct
-                ? `ผู้ว่าจ้างกันไว้ทุกงวด รวม ${money(round2((target * retentionPct) / 100))} บาท แล้วคืนเมื่อพ้นระยะรับประกันผลงาน — พิมพ์ใต้ตารางงวดในสัญญา`
-                : "เว้นว่าง = สัญญานี้ไม่มีเงินประกันผลงาน"}
+            {retentionHint(retentionInvalid, retentionPct, target)}
           </p>
         </div>
       )}
     </div>
   );
+}
+
+function retentionHint(invalid: boolean, pct: number | null, target: number) {
+  if (invalid) return "ใส่ได้ 0–20%";
+  if (!pct) return "เว้นว่าง = สัญญานี้ไม่มีเงินประกันผลงาน";
+  return `ผู้ว่าจ้างกันไว้ทุกงวด รวม ${money(round2((target * pct) / 100))} บาท แล้วคืนเมื่อพ้นระยะรับประกันผลงาน — พิมพ์ใต้ตารางงวดในสัญญา`;
 }

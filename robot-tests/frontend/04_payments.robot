@@ -97,8 +97,8 @@ TC_PAY_CUS_005 ยกเลิกการแจ้งโอนแล้วแ�
     Open Installment    2
     Wait Until Element Is Visible    xpath=//main//button[contains(., "ยกเลิกการแจ้งนี้")]
     Click Button    xpath=//main//button[contains(., "ยกเลิกการแจ้งนี้")]
-    Wait Until Element Is Visible    xpath=//*[@role="dialog" or @role="alertdialog"]//button[normalize-space(.)="ยกเลิกการแจ้ง"]
-    Click Button    xpath=//*[@role="dialog" or @role="alertdialog"]//button[normalize-space(.)="ยกเลิกการแจ้ง"]
+    Wait Until Element Is Visible    xpath=//*[self::dialog or @role="dialog" or @role="alertdialog"]//button[normalize-space(.)="ยกเลิกการแจ้ง"]
+    Click Button    xpath=//*[self::dialog or @role="dialog" or @role="alertdialog"]//button[normalize-space(.)="ยกเลิกการแจ้ง"]
     Wait Until Page Contains Element    ${NOTICE_SUBMIT}    15s
     Page Should Not Contain    ไม่ตรงกับที่คุณกรอก
     Record Actual    การแจ้งถูกยกเลิก ฟอร์ม "ส่งแจ้งโอน" กลับมา และกล่องเตือนยอดไม่ตรงหายไป

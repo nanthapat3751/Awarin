@@ -90,11 +90,11 @@ function ItemRow({ item, rowNav }: Readonly<{ item: PendingItem; rowNav: ReturnT
       <td className="px-3 py-2.5">
         <span className="flex items-start gap-2">
           <span
-            role="img"
-            aria-label={LEVEL_LABEL[item.level]}
+            aria-hidden
             title={LEVEL_LABEL[item.level]}
             className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${LEVEL_STYLE[item.level].dot}`}
           />
+          <span className="sr-only">{LEVEL_LABEL[item.level]}</span>
           <span className="font-medium text-slate-800">{item.category}</span>
         </span>
       </td>
@@ -220,7 +220,7 @@ export function PendingWorkPage() {
 
       {data && items.length > 0 && (
         <>
-          <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="กรองตามความเร่ง">
+          <fieldset className="mb-4 flex flex-wrap items-center gap-2 min-w-0" aria-label="กรองตามความเร่ง">
             {(["all", ...LEVEL_ORDER] as Filter[])
               .filter((f) => f === "all" || counts[f] > 0)
               .map((f) => {
@@ -250,7 +250,7 @@ export function PendingWorkPage() {
                   </button>
                 );
               })}
-          </div>
+          </fieldset>
 
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <table className="w-full min-w-[720px] text-sm md:min-w-0">

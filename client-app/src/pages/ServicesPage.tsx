@@ -344,7 +344,7 @@ export function ServicesPage() {
                   </span>
                   <span className="mt-1 block text-sm leading-snug text-slate-500">{svc.desc}</span>
                   <span className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-brand">
-                    ดูรายละเอียด
+                    <span>ดูรายละเอียด</span>
                     <span
                       aria-hidden
                       className="transition-transform group-hover:translate-y-0.5 motion-reduce:transition-none"
@@ -519,29 +519,35 @@ export function ServicesPage() {
             รวมผลงานออกแบบและก่อสร้างที่เราภูมิใจนำเสนอ
           </p>
 
-          {portfolioLoading ? (
-            // แถวการ์ดแนวตั้งขนาดเดียวกับแถบจริง (w-80/sm:w-96 · 4:5) ล้นขวาแบบแถบเลื่อน
-            <SkeletonGroup label="กำลังโหลดผลงาน" className="flex gap-6 overflow-hidden">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="w-80 shrink-0 sm:w-96">
-                  <Skeleton className="aspect-4/5 w-full rounded-2xl" />
-                  <Skeleton className="mt-3.5 h-5 w-2/3" />
-                  <Skeleton className="mt-2 h-3.5 w-1/2" />
-                </div>
-              ))}
-            </SkeletonGroup>
-          ) : portfolio.length > 0 ? (
-            <PortfolioCarousel items={portfolio} />
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 py-24 text-center">
-              <p className="text-lg font-medium text-slate-500">ผลงานเร็ว ๆ นี้</p>
-            </div>
-          )}
+          <PortfolioStrip loading={portfolioLoading} items={portfolio} />
         </div>
       </section>
 
       {/* ============================ CTA ============================ */}
       <CtaBanner title="พร้อมเริ่มโครงการของคุณแล้วหรือยัง?" />
+    </div>
+  );
+}
+
+/** แถบผลงานเด่น — ระหว่างโหลดเป็นการ์ดแนวตั้งขนาดเดียวกับแถบจริง (w-80/sm:w-96 · 4:5) ล้นขวาแบบแถบเลื่อน */
+function PortfolioStrip({ loading, items }: Readonly<{ loading: boolean; items: PortfolioDto[] }>) {
+  if (loading) {
+    return (
+      <SkeletonGroup label="กำลังโหลดผลงาน" className="flex gap-6 overflow-hidden">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="w-80 shrink-0 sm:w-96">
+            <Skeleton className="aspect-4/5 w-full rounded-2xl" />
+            <Skeleton className="mt-3.5 h-5 w-2/3" />
+            <Skeleton className="mt-2 h-3.5 w-1/2" />
+          </div>
+        ))}
+      </SkeletonGroup>
+    );
+  }
+  if (items.length > 0) return <PortfolioCarousel items={items} />;
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 py-24 text-center">
+      <p className="text-lg font-medium text-slate-500">ผลงานเร็ว ๆ นี้</p>
     </div>
   );
 }

@@ -63,7 +63,7 @@ export function PortfolioDetailPage() {
     loading ? undefined : (item?.title ?? "ไม่พบผลงาน"),
     item
       ? (item.description ??
-          `${item.title} · ผลงาน${item.type === "CONSTRUCTION" ? "ก่อสร้าง" : "ออกแบบ"}ของเรา ดูภาพงานจริงทั้งหมด`)
+          `${item.title} · ผลงาน${workKind(item.type)}ของเรา ดูภาพงานจริงทั้งหมด`)
       : undefined,
   );
 
@@ -165,4 +165,8 @@ export function PortfolioDetailPage() {
       </div>
     </div>
   );
+}
+
+function workKind(type: string) {
+  return type === "CONSTRUCTION" ? "ก่อสร้าง" : "ออกแบบ";
 }

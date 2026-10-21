@@ -71,5 +71,6 @@ export function applyNetRounding(
 export function roundingUnitLabel(unit: number | null | undefined): string {
   if (unit == null) return "ไม่ปัด";
   if (unit === 1) return "ตัดสตางค์ทิ้ง";
-  return `ปัดลงหลัก${{ 100: "ร้อย", 1000: "พัน", 10000: "หมื่น" }[unit] ?? ` ${unit}`}`;
+  const place = { 100: "ร้อย", 1000: "พัน", 10000: "หมื่น" }[unit] ?? ` ${unit}`;
+  return `ปัดลงหลัก${place}`;
 }

@@ -413,6 +413,7 @@ function formFromInput(input: StructuralInput): FormState {
   if (input.meshBendUp) meshEnd = "BEND_UP";
   else if (input.endBends) meshEnd = "BEND";
   const settings = input.settings;
+  const diaOr = (bars: { dia: number } | null | undefined, fallback: string) => (bars ? String(bars.dia) : fallback);
   return {
     ...base,
     label: input.label,
@@ -421,13 +422,13 @@ function formFromInput(input: StructuralInput): FormState {
     depth: s(input.depth),
     length: s(input.length),
     mainCount: s(input.mainBars?.count),
-    mainDia: input.mainBars ? String(input.mainBars.dia) : base.mainDia,
+    mainDia: diaOr(input.mainBars, base.mainDia),
     topCount: s(input.topBars?.count),
-    topDia: input.topBars ? String(input.topBars.dia) : base.topDia,
+    topDia: diaOr(input.topBars, base.topDia),
     bottomCount: s(input.bottomBars?.count),
-    bottomDia: input.bottomBars ? String(input.bottomBars.dia) : base.bottomDia,
+    bottomDia: diaOr(input.bottomBars, base.bottomDia),
     tieSpacing: s(input.ties?.spacing),
-    tieDia: input.ties ? String(input.ties.dia) : base.tieDia,
+    tieDia: diaOr(input.ties, base.tieDia),
     tieEndSpacing: s(input.tieEndZone?.spacing),
     tieEndLength: s(input.tieEndZone?.length),
     meshByCount: Boolean(input.meshCount),
@@ -435,9 +436,9 @@ function formFromInput(input: StructuralInput): FormState {
     meshCountShort: s(input.meshCount?.short),
     // ตะแกรงตามจำนวนเส้นเก็บระยะ 1 ไว้แทน — ไม่ใช่ค่าที่ผู้ใช้กรอก
     meshSpacing: input.meshCount ? "" : s(input.mesh?.spacing),
-    meshDia: input.mesh ? String(input.mesh.dia) : base.meshDia,
+    meshDia: diaOr(input.mesh, base.meshDia),
     meshTopSpacing: s(input.meshTop?.spacing),
-    meshTopDia: input.meshTop ? String(input.meshTop.dia) : base.meshTopDia,
+    meshTopDia: diaOr(input.meshTop, base.meshTopDia),
     footingType: input.footingType ?? "MESH",
     diamondTies: Boolean(input.diamondTies),
     meshEnd,
@@ -450,20 +451,20 @@ function formFromInput(input: StructuralInput): FormState {
     edgeForm: Boolean(input.edgeForm),
     edgeLength: s(input.edgeForm?.length),
     dowelCount: s(input.dowels?.count),
-    dowelDia: input.dowels ? String(input.dowels.dia) : base.dowelDia,
+    dowelDia: diaOr(input.dowels, base.dowelDia),
     dowelLength: s(input.dowels?.length),
     extraTopCount: s(input.extraTop?.count),
-    extraTopDia: input.extraTop ? String(input.extraTop.dia) : base.extraTopDia,
+    extraTopDia: diaOr(input.extraTop, base.extraTopDia),
     extraTopDiv: input.extraTop ? divOf(input.extraTop.ratio) : base.extraTopDiv,
     extraBottomCount: s(input.extraBottom?.count),
-    extraBottomDia: input.extraBottom ? String(input.extraBottom.dia) : base.extraBottomDia,
+    extraBottomDia: diaOr(input.extraBottom, base.extraBottomDia),
     extraBottomDiv: input.extraBottom ? divOf(input.extraBottom.ratio) : base.extraBottomDiv,
     stairRise: s(input.stair?.rise),
     stairSteps: s(input.stair?.steps),
     stairMainSpacing: s(input.stair?.main?.spacing),
-    stairMainDia: input.stair?.main ? String(input.stair.main.dia) : base.stairMainDia,
+    stairMainDia: diaOr(input.stair?.main, base.stairMainDia),
     stairDistSpacing: s(input.stair?.distribution?.spacing),
-    stairDistDia: input.stair?.distribution ? String(input.stair.distribution.dia) : base.stairDistDia,
+    stairDistDia: diaOr(input.stair?.distribution, base.stairDistDia),
     footingDepth: s(input.footingDepth),
     topFloor: Boolean(input.topFloor),
     coverCm: String(Number((settings.cover * 100).toFixed(2))),
@@ -487,80 +488,127 @@ function targetsFromLines(lines: StructuralMemberDto["lines"]): Record<string, T
   return out;
 }
 
+/** ช่องตัวเลข → ค่า · ว่าง = NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ */
+const numOf = (v: string) => (v.trim() === "" ? Number.NaN : Number(v));
+const filled = (v: string) => v.trim() !== "";
+// ช่องจำนวนเส้นว่าง = ไม่มีเหล็กชุดนั้น (เช่น คานที่ยังไม่รู้เหล็กบน)
+const barsOf = (count: string, dia: string) => (filled(count) ? { count: numOf(count), dia: Number(dia) } : null);
+const spacedOf = (spacing: string, dia: string) => (filled(spacing) ? { spacing: numOf(spacing), dia: Number(dia) } : null);
+
+/** เหล็กยืน + ปลอก (เสา · คาน · หัวเสาเข็ม) */
+function barParts(kind: StructuralKind, f: FormState, pileCap: boolean) {
+  const hasTies = kind === "COLUMN" || kind === "BEAM";
+  // ช่องใดช่องหนึ่งของช่วงปลายกรอกแล้ว = ตั้งใจใช้ — อีกช่องว่างจะได้ NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ
+  const endZoneUsed = filled(f.tieEndSpacing) || filled(f.tieEndLength);
+  return {
+    mainBars: kind === "COLUMN" || pileCap ? barsOf(f.mainCount, f.mainDia) : null,
+    ties: hasTies || pileCap ? spacedOf(f.tieSpacing, f.tieDia) : null,
+    tieEndZone: hasTies && endZoneUsed ? { spacing: numOf(f.tieEndSpacing), length: numOf(f.tieEndLength) } : null,
+  };
+}
+
+/** ตะแกรงล่าง/บน (ฐานแผ่น · พื้น) */
+function meshParts(kind: StructuralKind, f: FormState, meshFooting: boolean) {
+  const hasMesh = meshFooting || kind === "SLAB";
+  const byCount = meshFooting && f.meshByCount;
+  // ตะแกรงตามจำนวนเส้น: ระยะห่างไม่ได้ใช้นับ แต่ตะแกรงต้องมีค่า — ใส่ 1 ไว้ (ไม่แสดงในชื่อแถว)
+  const meshSpacing = byCount ? "1" : f.meshSpacing;
+  return {
+    mesh: hasMesh ? spacedOf(meshSpacing, f.meshDia) : null,
+    meshTop: hasMesh ? spacedOf(f.meshTopSpacing, f.meshTopDia) : null,
+    meshCount: byCount ? { long: numOf(f.meshCountLong), short: numOf(f.meshCountShort) } : null,
+  };
+}
+
+const NO_BEAM_PARTS = { topBars: null, bottomBars: null, supports: null, slabOnTop: null, extraTop: null, extraBottom: null };
+
+/** ของเฉพาะคาน: เหล็กบน/ล่าง · หักเสา/พื้น · เหล็กพิเศษ */
+function beamParts(f: FormState) {
+  const sides: 1 | 2 = f.slabSides === "1" ? 1 : 2;
+  return {
+    topBars: barsOf(f.topCount, f.topDia),
+    bottomBars: barsOf(f.bottomCount, f.bottomDia),
+    // ช่องใดช่องหนึ่งกรอกแล้ว = ตั้งใจหัก — อีกช่องว่างได้ NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ
+    supports: filled(f.supportCount) || filled(f.supportWidth) ? { count: numOf(f.supportCount), width: numOf(f.supportWidth) } : null,
+    slabOnTop: filled(f.slabThickness) ? { thickness: numOf(f.slabThickness), sides } : null,
+    // ตัวหาร 4 = L/4 · ว่าง/ผิด = NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ
+    extraTop: filled(f.extraTopCount) ? { count: numOf(f.extraTopCount), dia: Number(f.extraTopDia), ratio: 1 / numOf(f.extraTopDiv) } : null,
+    extraBottom: filled(f.extraBottomCount)
+      ? { count: numOf(f.extraBottomCount), dia: Number(f.extraBottomDia), ratio: 1 / numOf(f.extraBottomDiv) }
+      : null,
+  };
+}
+
+/** งอปลาย: ฐานราก = ตามปลายตะแกรง · เสาไม่มี · คาน/พื้น = ตามที่ติ๊ก */
+function endBendsOf(kind: StructuralKind, f: FormState) {
+  if (kind === "FOOTING") return f.meshEnd !== "STRAIGHT";
+  return kind !== "COLUMN" && f.endBends;
+}
+
+function stairOf(f: FormState) {
+  return {
+    rise: numOf(f.stairRise),
+    steps: numOf(f.stairSteps),
+    main: spacedOf(f.stairMainSpacing, f.stairMainDia),
+    distribution: spacedOf(f.stairDistSpacing, f.stairDistDia),
+  };
+}
+
+/** ของเฉพาะฐานราก (ชนิดอื่นได้ค่าว่าง) */
+function footingParts(f: FormState, footing: boolean, pileCap: boolean) {
+  if (!footing) return { footingType: undefined, diamondTies: false, meshBendUp: false, dowels: null };
+  return {
+    footingType: f.footingType,
+    diamondTies: pileCap && f.diamondTies,
+    meshBendUp: f.meshEnd === "BEND_UP",
+    dowels: filled(f.dowelCount) ? { count: numOf(f.dowelCount), dia: Number(f.dowelDia), length: numOf(f.dowelLength) } : null,
+  };
+}
+
 /** rule = ชุดเสนอราคา — แถวที่ลง BOQ คิดด้วยกฎชุดนี้ (ชุดสั่งตัดเซิร์ฟเวอร์คิดจากขนาดที่เก็บไว้เอง) */
 function inputOf(kind: StructuralKind, f: FormState, rule: TakeoffRuleSet): StructuralInput {
-  const n = (v: string) => (v.trim() === "" ? Number.NaN : Number(v));
-  // ช่องจำนวนเส้นว่าง = ไม่มีเหล็กชุดนั้น (เช่น คานที่ยังไม่รู้เหล็กบน)
-  const bars = (count: string, dia: string) => (count.trim() === "" ? null : { count: n(count), dia: Number(dia) });
-  const spaced = (spacing: string, dia: string) => (spacing.trim() === "" ? null : { spacing: n(spacing), dia: Number(dia) });
-  const hasTies = kind === "COLUMN" || kind === "BEAM";
-  const pileCap = kind === "FOOTING" && f.footingType === "PILE_CAP";
-  const meshFooting = kind === "FOOTING" && !pileCap;
-  // ตะแกรงตามจำนวนเส้น: ระยะห่างไม่ได้ใช้นับ แต่ตะแกรงต้องมีค่า — ใส่ 1 ไว้ (ไม่แสดงในชื่อแถว)
-  const meshSpacing = meshFooting && f.meshByCount ? "1" : f.meshSpacing;
-  // ช่องใดช่องหนึ่งของช่วงปลายกรอกแล้ว = ตั้งใจใช้ — อีกช่องว่างจะได้ NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ
-  const endZone =
-    hasTies && (f.tieEndSpacing.trim() !== "" || f.tieEndLength.trim() !== "")
-      ? { spacing: n(f.tieEndSpacing), length: n(f.tieEndLength) }
-      : null;
+  const footing = kind === "FOOTING";
+  const column = kind === "COLUMN";
+  const pileCap = footing && f.footingType === "PILE_CAP";
+  const foot = footingParts(f, footing, pileCap);
+  const bars = barParts(kind, f, pileCap);
+  const mesh = meshParts(kind, f, footing && !pileCap);
+  const beam = kind === "BEAM" ? beamParts(f) : NO_BEAM_PARTS;
   return {
     kind,
     label: f.label.trim() || STRUCTURAL_KINDS.find((k) => k.value === kind)!.prefix,
-    count: n(f.count),
-    width: n(f.width),
-    depth: n(f.depth),
-    length: n(f.length),
-    mainBars: kind === "COLUMN" || pileCap ? bars(f.mainCount, f.mainDia) : null,
-    topBars: kind === "BEAM" ? bars(f.topCount, f.topDia) : null,
-    bottomBars: kind === "BEAM" ? bars(f.bottomCount, f.bottomDia) : null,
-    ties: hasTies || pileCap ? spaced(f.tieSpacing, f.tieDia) : null,
-    tieEndZone: endZone,
-    mesh: meshFooting || kind === "SLAB" ? spaced(meshSpacing, f.meshDia) : null,
-    meshTop: meshFooting || kind === "SLAB" ? spaced(f.meshTopSpacing, f.meshTopDia) : null,
-    meshCount: meshFooting && f.meshByCount ? { long: n(f.meshCountLong), short: n(f.meshCountShort) } : null,
-    footingType: kind === "FOOTING" ? f.footingType : undefined,
-    diamondTies: pileCap && f.diamondTies,
-    // ช่องใดช่องหนึ่งกรอกแล้ว = ตั้งใจหัก — อีกช่องว่างได้ NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ
-    supports:
-      kind === "BEAM" && (f.supportCount.trim() !== "" || f.supportWidth.trim() !== "")
-        ? { count: n(f.supportCount), width: n(f.supportWidth) }
-        : null,
-    slabOnTop:
-      kind === "BEAM" && f.slabThickness.trim() !== "" ? { thickness: n(f.slabThickness), sides: f.slabSides === "1" ? 1 : 2 } : null,
+    count: numOf(f.count),
+    width: numOf(f.width),
+    depth: numOf(f.depth),
+    length: numOf(f.length),
+    mainBars: bars.mainBars,
+    topBars: beam.topBars,
+    bottomBars: beam.bottomBars,
+    ties: bars.ties,
+    tieEndZone: bars.tieEndZone,
+    mesh: mesh.mesh,
+    meshTop: mesh.meshTop,
+    meshCount: mesh.meshCount,
+    footingType: foot.footingType,
+    diamondTies: foot.diamondTies,
+    supports: beam.supports,
+    slabOnTop: beam.slabOnTop,
     onGround: (kind === "SLAB" || kind === "BEAM") && f.onGround,
-    edgeForm: kind === "SLAB" && f.edgeForm ? { length: f.edgeLength.trim() === "" ? null : n(f.edgeLength) } : null,
-    endBends: kind === "FOOTING" ? f.meshEnd !== "STRAIGHT" : kind !== "COLUMN" && f.endBends,
-    meshBendUp: kind === "FOOTING" && f.meshEnd === "BEND_UP",
-    dowels:
-      kind === "FOOTING" && f.dowelCount.trim() !== ""
-        ? { count: n(f.dowelCount), dia: Number(f.dowelDia), length: n(f.dowelLength) }
-        : null,
-    // ตัวหาร 4 = L/4 · ว่าง/ผิด = NaN ให้ตัวคิดแจ้งว่ากรอกไม่ครบ
-    extraTop:
-      kind === "BEAM" && f.extraTopCount.trim() !== ""
-        ? { count: n(f.extraTopCount), dia: Number(f.extraTopDia), ratio: 1 / n(f.extraTopDiv) }
-        : null,
-    extraBottom:
-      kind === "BEAM" && f.extraBottomCount.trim() !== ""
-        ? { count: n(f.extraBottomCount), dia: Number(f.extraBottomDia), ratio: 1 / n(f.extraBottomDiv) }
-        : null,
-    stair:
-      kind === "STAIR"
-        ? {
-            rise: n(f.stairRise),
-            steps: n(f.stairSteps),
-            main: spaced(f.stairMainSpacing, f.stairMainDia),
-            distribution: spaced(f.stairDistSpacing, f.stairDistDia),
-          }
-        : null,
-    footingDepth: kind === "COLUMN" && f.footingDepth.trim() !== "" ? n(f.footingDepth) : null,
-    topFloor: kind === "COLUMN" && f.topFloor,
+    edgeForm: kind === "SLAB" && f.edgeForm ? { length: filled(f.edgeLength) ? numOf(f.edgeLength) : null } : null,
+    endBends: endBendsOf(kind, f),
+    meshBendUp: foot.meshBendUp,
+    dowels: foot.dowels,
+    extraTop: beam.extraTop,
+    extraBottom: beam.extraBottom,
+    stair: kind === "STAIR" ? stairOf(f) : null,
+    footingDepth: column && filled(f.footingDepth) ? numOf(f.footingDepth) : null,
+    topFloor: column && f.topFloor,
     settings: {
-      cover: n(f.coverCm) / 100,
-      lapFactor: n(f.lapFactor),
-      stockLength: n(f.stockLength),
-      hookFactor: n(f.hookFactor),
-      bendFactor: n(f.bendFactor),
+      cover: numOf(f.coverCm) / 100,
+      lapFactor: numOf(f.lapFactor),
+      stockLength: numOf(f.stockLength),
+      hookFactor: numOf(f.hookFactor),
+      bendFactor: numOf(f.bendFactor),
       rules: {
         deductCover: rule.deductCover,
         bends: rule.bends,
@@ -681,12 +729,6 @@ export function StructuralCalcDialog({
     return chosen ?? fallback();
   }
 
-  function materialOptionsFor(g: OutputGroup): SearchableOption[] {
-    return materials
-      .filter((m) => m.active && g.fits(m.unit))
-      .map((m) => ({ value: m.id, label: m.code ? `${m.code} — ${m.name}` : m.name, sublabel: `หน่วย ${m.unit}`, keywords: `${m.code ?? ""} ${m.name}` }));
-  }
-
   const plan = groups.map((g) => ({ group: g, target: targetOf(g), newLine: newLines[g.key] ?? { materialId: "", categoryId: "" } }));
   const planError = plan
     .map(({ group, target, newLine }) =>
@@ -697,16 +739,10 @@ export function StructuralCalcDialog({
     )
     .find(Boolean);
   const active = plan.filter((p) => p.target.kind !== "skip");
-  const blocker =
-    (!dimsReady ? "กรอกขนาดให้ครบ" : null) ??
-    result?.errors[0] ??
-    (active.length === 0 ? "เลือกอย่างน้อยหนึ่งปลายทาง" : null) ??
-    planError ??
-    null;
+  const blocker = blockerOf(dimsReady, result?.errors[0], active.length, planError);
 
-  async function apply(keepOpen: boolean) {
-    if (blocker) return;
-    const payload: TakeoffTarget[] = active.map(({ group, target, newLine }) => {
+  function payloadOf(): TakeoffTarget[] {
+    return active.map(({ group, target, newLine }) => {
       const rows = group.rows.map((r) => r.row);
       if (target.kind === "item") return { itemId: target.itemId, rows };
       const material = newLine.materialId ? materialById.get(newLine.materialId) : undefined;
@@ -717,47 +753,48 @@ export function StructuralCalcDialog({
         rows,
       };
     });
+  }
+
+  async function saveEdit(member: StructuralMemberDto, payload: TakeoffTarget[]) {
+    const res = await replaceStructuralMember(projectId, member.key, payload, inputOf(kind, form, rule));
+    await onApplied();
+    toast.success(editedMessage(form.label.trim() || member.label, res));
+    onClose();
+  }
+
+  async function saveNew(payload: TakeoffTarget[], keepOpen: boolean) {
+    // ส่งขนาดชิ้นส่วนไปด้วย — เซิร์ฟเวอร์เก็บไว้คิดรายการสั่งเหล็กหน้างาน (ชุดสั่งตัด)
+    const res = await applyTakeoff(projectId, payload, inputOf(kind, form, rule));
+    // จำชื่อบรรทัดใหม่ไว้ — ชิ้นถัดไปลงบรรทัดเดียวกันแทนการสร้างซ้ำ
+    const nextRemembered = new Map(remembered);
+    for (const { group, target, newLine } of active) {
+      if (target.kind !== "new") continue;
+      nextRemembered.set(group.key, materialById.get(newLine.materialId)?.name ?? group.defaultName);
+    }
+    setRemembered(nextRemembered);
+    setTargets((prev) => {
+      const next = { ...prev };
+      for (const { group, target } of active) if (target.kind === "new") delete next[group.key];
+      return next;
+    });
+    await onApplied();
+    const needsPrice = active.some((a) => a.target.kind === "new" && !a.newLine.materialId);
+    toast.success(appliedMessage(form.label.trim() || kind, res, needsPrice));
+    if (keepOpen) {
+      // ชิ้นถัดไปมักเป็นชนิดเดียวกัน (B1 → B2) — คงเหล็ก/ค่ามาตรฐานไว้ ล้างชื่อกับขนาด
+      set({ label: nextLabel(form.label), width: "", depth: "", length: "", count: "1" });
+    } else {
+      onClose();
+    }
+  }
+
+  async function apply(keepOpen: boolean) {
+    if (blocker) return;
+    const payload = payloadOf();
     setSaving(true);
     try {
-      if (editing) {
-        const res = await replaceStructuralMember(projectId, editing.key, payload, inputOf(kind, form, rule));
-        await onApplied();
-        const label = form.label.trim() || editing.label;
-        toast.success(
-          `แก้ ${label} แล้ว` +
-            (res.created > 0 ? ` · สร้างบรรทัดใหม่ ${res.created}` : "") +
-            (res.removed > 0 ? ` · ลบบรรทัดที่ไม่เหลือแถว ${res.removed}` : "") +
-            (res.newVersion ? ` · แตกเป็นเวอร์ชัน ${res.version.versionNo} (เวอร์ชันเดิมส่งใบเสนอราคาแล้ว)` : ""),
-        );
-        onClose();
-        return;
-      }
-      // ส่งขนาดชิ้นส่วนไปด้วย — เซิร์ฟเวอร์เก็บไว้คิดรายการสั่งเหล็กหน้างาน (ชุดสั่งตัด)
-      const res = await applyTakeoff(projectId, payload, inputOf(kind, form, rule));
-      // จำชื่อบรรทัดใหม่ไว้ — ชิ้นถัดไปลงบรรทัดเดียวกันแทนการสร้างซ้ำ
-      const nextRemembered = new Map(remembered);
-      for (const { group, target, newLine } of active) {
-        if (target.kind !== "new") continue;
-        nextRemembered.set(group.key, materialById.get(newLine.materialId)?.name ?? group.defaultName);
-      }
-      setRemembered(nextRemembered);
-      setTargets((prev) => {
-        const next = { ...prev };
-        for (const { group, target } of active) if (target.kind === "new") delete next[group.key];
-        return next;
-      });
-      await onApplied();
-      const label = form.label.trim() || kind;
-      toast.success(
-        `ลง ${label} แล้ว ${res.lines} บรรทัด${res.created > 0 ? ` (สร้างใหม่ ${res.created})` : ""}` +
-          (res.created > 0 && active.some((a) => a.target.kind === "new" && !a.newLine.materialId) ? " — อย่าลืมใส่ราคาบรรทัดใหม่" : ""),
-      );
-      if (keepOpen) {
-        // ชิ้นถัดไปมักเป็นชนิดเดียวกัน (B1 → B2) — คงเหล็ก/ค่ามาตรฐานไว้ ล้างชื่อกับขนาด
-        set({ label: nextLabel(form.label), width: "", depth: "", length: "", count: "1" });
-      } else {
-        onClose();
-      }
+      if (editing) await saveEdit(editing, payload);
+      else await saveNew(payload, keepOpen);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ลงใบถอดแบบไม่สำเร็จ");
     } finally {
@@ -766,13 +803,6 @@ export function StructuralCalcDialog({
   }
 
   const dimLabels = DIM_LABELS[kind];
-  // สิ่งที่ชุดเสนอราคาไม่คิด — บอกไว้ใต้ค่ามาตรฐาน ให้รู้ว่าทำไมเหล็กสั้นกว่าตัดจริง
-  const ruleNotes = [
-    !rule.deductCover && "ไม่หักระยะหุ้ม",
-    !rule.bends && "ไม่บวกงอ",
-    !rule.laps && "ไม่บวกทาบ",
-    !rule.hooks && "ไม่มีขอปลอก",
-  ].filter(Boolean);
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -783,8 +813,7 @@ export function StructuralCalcDialog({
         onClick={() => !saving && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="structural-title"
         className="relative flex max-h-[92vh] w-full max-w-6xl flex-col rounded-lg bg-white shadow-xl"
@@ -863,298 +892,16 @@ export function StructuralCalcDialog({
               </div>
               {/* วัดคนละจุดได้ผลต่างกันมาก (ถึงศูนย์กลาง/หน้าเสา/ผิวนอก) — บอกจุดที่สูตรตั้งไว้ให้ชัด */}
               <p className="mt-2 text-xs text-slate-500">{MEASURE_HINTS[kind]}</p>
-              {kind === "STAIR" && (
-                <div className="mt-3 border-t border-slate-100 pt-3">
-                  <BarRow label="ความสูง / ขั้น">
-                    <span className="text-xs text-slate-500">สูงรวม</span>
-                    <input type="number" min="0" step="any" value={form.stairRise} onChange={(e) => set({ stairRise: e.target.value })} aria-label="ความสูงรวมของบันได" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม. ·</span>
-                    <input type="number" min="0" step="1" value={form.stairSteps} onChange={(e) => set({ stairSteps: e.target.value })} aria-label="จำนวนลูกตั้ง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ลูกตั้ง</span>
-                    {form.stairRise && form.stairSteps && Number(form.stairSteps) > 0 && form.length && (
-                      <span className="w-full text-xs text-slate-400">
-                        ลูกตั้ง {(Number(form.stairRise) / Number(form.stairSteps)).toFixed(3)} ม. · ลูกนอน {(Number(form.length) / Number(form.stairSteps)).toFixed(3)} ม.
-                      </span>
-                    )}
-                  </BarRow>
-                </div>
-              )}
-              {kind === "BEAM" && (
-                <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
-                  <p className="text-xs font-medium text-slate-600">หักส่วนที่ซ้อนกับเสาและพื้น (เว้นว่าง = ไม่หัก)</p>
-                  <BarRow label="เสาที่คานพาดผ่าน">
-                    <input type="number" min="0" step="1" value={form.supportCount} onChange={(e) => set({ supportCount: e.target.value })} aria-label="จำนวนเสาที่คานพาดผ่าน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ต้น กว้าง</span>
-                    <input type="number" min="0" step="any" value={form.supportWidth} onChange={(e) => set({ supportWidth: e.target.value })} aria-label="ความกว้างเสาตามแนวคาน" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม.</span>
-                    <span className="w-full text-xs text-slate-400">นับรวมเสาสองปลาย · กว้าง = ด้านของเสาตามแนวคาน</span>
-                  </BarRow>
-                  <BarRow label="พื้นบนคาน">
-                    <span className="text-xs text-slate-500">หนา</span>
-                    <input type="number" min="0" step="any" value={form.slabThickness} onChange={(e) => set({ slabThickness: e.target.value })} aria-label="ความหนาพื้นบนคาน" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม.</span>
-                    <select value={form.slabSides} onChange={(e) => set({ slabSides: e.target.value as "1" | "2" })} aria-label="พื้นวางบนคานกี่ข้าง" className="rounded-md border border-slate-300 px-2 py-1 text-sm">
-                      <option value="2">พื้นสองข้าง</option>
-                      <option value="1">ข้างเดียว (คานขอบ)</option>
-                    </select>
-                  </BarRow>
-                </div>
-              )}
+              {kind === "STAIR" && <StairDims form={form} set={set} />}
+              {kind === "BEAM" && <BeamDeductions form={form} set={set} />}
             </fieldset>
 
             <fieldset className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-xs font-medium text-slate-700">เหล็กเสริม (เว้นว่าง = ไม่คิด)</legend>
-              {kind === "COLUMN" && (
-                <BarRow label="เหล็กยืน">
-                  <input type="number" min="0" step="1" value={form.mainCount} onChange={(e) => set({ mainCount: e.target.value })} aria-label="จำนวนเหล็กยืน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                  <span className="text-xs text-slate-500">เส้น</span>
-                  <BarSelect value={form.mainDia} onChange={(v) => set({ mainDia: v })} label="ขนาดเหล็กยืน" />
-                </BarRow>
-              )}
-              {kind === "BEAM" && (
-                <>
-                  <BarRow label="เหล็กบน">
-                    <input type="number" min="0" step="1" value={form.topCount} onChange={(e) => set({ topCount: e.target.value })} aria-label="จำนวนเหล็กบน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">เส้น</span>
-                    <BarSelect value={form.topDia} onChange={(v) => set({ topDia: v })} label="ขนาดเหล็กบน" />
-                  </BarRow>
-                  <BarRow label="เหล็กล่าง">
-                    <input type="number" min="0" step="1" value={form.bottomCount} onChange={(e) => set({ bottomCount: e.target.value })} aria-label="จำนวนเหล็กล่าง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">เส้น</span>
-                    <BarSelect value={form.bottomDia} onChange={(v) => set({ bottomDia: v })} label="ขนาดเหล็กล่าง" />
-                  </BarRow>
-                  <BarRow label="เหล็กพิเศษบน">
-                    <input type="number" min="0" step="1" value={form.extraTopCount} onChange={(e) => set({ extraTopCount: e.target.value })} aria-label="จำนวนเหล็กพิเศษบนต่อจุดรองรับ" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">เส้น</span>
-                    <BarSelect value={form.extraTopDia} onChange={(v) => set({ extraTopDia: v })} label="ขนาดเหล็กพิเศษบน" />
-                    <span className="text-xs text-slate-500">ยาว L/</span>
-                    <input type="number" min="1" step="any" value={form.extraTopDiv} onChange={(e) => set({ extraTopDiv: e.target.value })} aria-label="ตัวหารความยาวเหล็กพิเศษบน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="w-full text-xs text-slate-400">ต่อจุดรองรับ ยื่นจากหน้าเสาเข้าช่วง · จุดกลาง (คานต่อเนื่อง) ยื่นสองข้าง · เว้นว่าง = ไม่มี</span>
-                  </BarRow>
-                  <BarRow label="เหล็กพิเศษล่าง">
-                    <input type="number" min="0" step="1" value={form.extraBottomCount} onChange={(e) => set({ extraBottomCount: e.target.value })} aria-label="จำนวนเหล็กพิเศษล่างต่อช่วง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">เส้น</span>
-                    <BarSelect value={form.extraBottomDia} onChange={(v) => set({ extraBottomDia: v })} label="ขนาดเหล็กพิเศษล่าง" />
-                    <span className="text-xs text-slate-500">ตัดห่างหน้าเสา L/</span>
-                    <input type="number" min="1" step="any" value={form.extraBottomDiv} onChange={(e) => set({ extraBottomDiv: e.target.value })} aria-label="ตัวหารระยะตัดเหล็กพิเศษล่าง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="w-full text-xs text-slate-400">กลางช่วง ยาว L − 2 × L/5 (ตามแบบขยายการเสริมเหล็กพิเศษ) · L = ช่วงสุทธิ · เว้นว่าง = ไม่มี</span>
-                  </BarRow>
-                </>
-              )}
-              {kind === "STAIR" && (
-                <>
-                  <BarRow label="เหล็กหลัก">
-                    <BarSelect value={form.stairMainDia} onChange={(v) => set({ stairMainDia: v })} label="ขนาดเหล็กหลักบันได" />
-                    <span className="text-xs text-slate-500">@</span>
-                    <input type="number" min="0" step="any" value={form.stairMainSpacing} onChange={(e) => set({ stairMainSpacing: e.target.value })} aria-label="ระยะห่างเหล็กหลักบันได" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม. วิ่งตามแนวเอียง</span>
-                  </BarRow>
-                  <BarRow label="เหล็กกันร้าว">
-                    <BarSelect value={form.stairDistDia} onChange={(v) => set({ stairDistDia: v })} label="ขนาดเหล็กกันร้าวบันได" />
-                    <span className="text-xs text-slate-500">@</span>
-                    <input type="number" min="0" step="any" value={form.stairDistSpacing} onChange={(e) => set({ stairDistSpacing: e.target.value })} aria-label="ระยะห่างเหล็กกันร้าวบันได" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม. วิ่งตามความกว้าง</span>
-                  </BarRow>
-                </>
-              )}
-              {(kind === "COLUMN" || kind === "BEAM") && (
-                <BarRow label="ปลอก">
-                  <BarSelect value={form.tieDia} onChange={(v) => set({ tieDia: v })} label="ขนาดปลอก" />
-                  <span className="text-xs text-slate-500">@</span>
-                  <input type="number" min="0" step="any" value={form.tieSpacing} onChange={(e) => set({ tieSpacing: e.target.value })} aria-label="ระยะห่างปลอก" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                  <span className="text-xs text-slate-500">ม.</span>
-                </BarRow>
-              )}
-              {(kind === "COLUMN" || kind === "BEAM") && (
-                <BarRow label="ปลอกถี่ช่วงปลาย">
-                  <span className="text-xs text-slate-500">@</span>
-                  <input type="number" min="0" step="any" value={form.tieEndSpacing} onChange={(e) => set({ tieEndSpacing: e.target.value })} aria-label="ระยะห่างปลอกช่วงปลาย" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                  <span className="text-xs text-slate-500">ม. ยาวข้างละ</span>
-                  <input type="number" min="0" step="any" value={form.tieEndLength} onChange={(e) => set({ tieEndLength: e.target.value })} aria-label="ความยาวช่วงปลายต่อข้าง" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                  <span className="text-xs text-slate-500">ม.</span>
-                  <span className="w-full text-xs text-slate-400">
-                    {kind === "BEAM" ? "ปลายคานทั้งสองข้าง มักยาว L/4" : "หัวและโคนเสา"} · เว้นว่าง = ระยะเดียวตลอด
-                  </span>
-                </BarRow>
-              )}
-              {kind === "COLUMN" && (
-                <>
-                  <BarRow label="ตั้งบนฐานราก">
-                    <span className="text-xs text-slate-500">ฐานหนา</span>
-                    <input type="number" min="0" step="any" value={form.footingDepth} onChange={(e) => set({ footingDepth: e.target.value })} aria-label="ความหนาฐานราก" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม.</span>
-                    <span className="w-full text-xs text-slate-400">เหล็กยืนฝังลงถึงตะแกรงล่างแล้วงอ {form.bendFactor}d · เว้นว่าง = เสาชั้นบน</span>
-                  </BarRow>
-                  <label className="mt-1 flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.topFloor} onChange={(e) => set({ topFloor: e.target.checked })} />
-                    ชั้นบนสุด — งอเข้าคานหลังคา {form.bendFactor}d แทนเผื่อทาบต่อชั้นถัดไป
-                  </label>
-                </>
-              )}
-              {kind === "FOOTING" && (
-                <BarRow label="รูปแบบเหล็ก">
-                  <select
-                    value={form.footingType}
-                    onChange={(e) => {
-                      const next = e.target.value as FootingType;
-                      // หัวเสาเข็มตั้งต้นตามแบบที่พบบ่อย (16-DB16 + ปลอก RB6@0.10) — แก้ได้
-                      set(
-                        next === "PILE_CAP"
-                          ? { footingType: next, mainCount: form.mainCount || "16", mainDia: "16", tieDia: "6", tieSpacing: form.tieSpacing || "0.10" }
-                          : { footingType: next },
-                      );
-                    }}
-                    aria-label="รูปแบบเหล็กฐานราก"
-                    className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-                  >
-                    <option value="MESH">ฐานแผ่ — ตะแกรงสองทาง</option>
-                    <option value="PILE_CAP">หัวเสาเข็ม — เหล็กยืนรอบ + ปลอกรัด</option>
-                  </select>
-                </BarRow>
-              )}
-              {kind === "FOOTING" && form.footingType === "PILE_CAP" && (
-                <>
-                  <BarRow label="เหล็กยืนรอบฐาน">
-                    <input type="number" min="0" step="1" value={form.mainCount} onChange={(e) => set({ mainCount: e.target.value })} aria-label="จำนวนเหล็กยืนรอบฐาน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">เส้น</span>
-                    <BarSelect value={form.mainDia} onChange={(v) => set({ mainDia: v })} label="ขนาดเหล็กยืนรอบฐาน" />
-                    <span className="w-full text-xs text-slate-400">ยาว = หนา − ระยะหุ้มบนล่าง + งอเข้าในฐานบนและล่าง {form.bendFactor}d</span>
-                  </BarRow>
-                  <BarRow label="ปลอกรัด">
-                    <BarSelect value={form.tieDia} onChange={(v) => set({ tieDia: v })} label="ขนาดปลอกรัด" />
-                    <span className="text-xs text-slate-500">@</span>
-                    <input type="number" min="0" step="any" value={form.tieSpacing} onChange={(e) => set({ tieSpacing: e.target.value })} aria-label="ระยะห่างปลอกรัดตามความหนา" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม. ตามความหนา</span>
-                  </BarRow>
-                  <label className="mt-1 flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.diamondTies} onChange={(e) => set({ diamondTies: e.target.checked })} />
-                    ปลอก 2 ชุดต่อชั้น (สี่เหลี่ยม + ข้าวหลามตัด) — แบบเขียน “2ป”
-                  </label>
-                </>
-              )}
-              {kind === "FOOTING" && form.footingType === "MESH" && (
-                <BarRow label="ตะแกรงล่าง">
-                  <BarSelect value={form.meshDia} onChange={(v) => set({ meshDia: v })} label="ขนาดตะแกรงล่าง" />
-                  <select value={form.meshByCount ? "count" : "spacing"} onChange={(e) => set({ meshByCount: e.target.value === "count" })} aria-label="กำหนดตะแกรงล่างด้วย" className="rounded-md border border-slate-300 px-2 py-1 text-sm">
-                    <option value="spacing">ระยะห่าง</option>
-                    <option value="count">จำนวนเส้น</option>
-                  </select>
-                  {form.meshByCount ? (
-                    <span className="flex w-full flex-wrap items-center gap-1.5">
-                      <span className="text-xs text-slate-500">แนวยาว</span>
-                      <input type="number" min="0" step="1" value={form.meshCountLong} onChange={(e) => set({ meshCountLong: e.target.value })} aria-label="จำนวนเส้นตะแกรงแนวยาว" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                      <span className="text-xs text-slate-500">เส้น · แนวกว้าง</span>
-                      <input type="number" min="0" step="1" value={form.meshCountShort} onChange={(e) => set({ meshCountShort: e.target.value })} aria-label="จำนวนเส้นตะแกรงแนวกว้าง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                      <span className="text-xs text-slate-500">เส้น</span>
-                      <span className="w-full text-xs text-slate-400">แนวยาว = เส้นที่วิ่งตามด้านยาว · ใส่ตามที่แบบเขียน เช่น 4-DB16 / 8-DB16</span>
-                    </span>
-                  ) : (
-                    <>
-                      <span className="text-xs text-slate-500">@</span>
-                      <input type="number" min="0" step="any" value={form.meshSpacing} onChange={(e) => set({ meshSpacing: e.target.value })} aria-label="ระยะห่างตะแกรงล่าง" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                      <span className="text-xs text-slate-500">ม. สองทาง</span>
-                    </>
-                  )}
-                </BarRow>
-              )}
-              {((kind === "FOOTING" && form.footingType === "MESH") || kind === "SLAB") && (
-                <>
-                  {kind === "SLAB" && (
-                    <BarRow label="ตะแกรงล่าง">
-                      <BarSelect value={form.meshDia} onChange={(v) => set({ meshDia: v })} label="ขนาดตะแกรงล่าง" />
-                      <span className="text-xs text-slate-500">@</span>
-                      <input type="number" min="0" step="any" value={form.meshSpacing} onChange={(e) => set({ meshSpacing: e.target.value })} aria-label="ระยะห่างตะแกรงล่าง" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                      <span className="text-xs text-slate-500">ม. สองทาง</span>
-                    </BarRow>
-                  )}
-                  <BarRow label="ตะแกรงบน">
-                    <BarSelect value={form.meshTopDia} onChange={(v) => set({ meshTopDia: v })} label="ขนาดตะแกรงบน" />
-                    <span className="text-xs text-slate-500">@</span>
-                    <input type="number" min="0" step="any" value={form.meshTopSpacing} onChange={(e) => set({ meshTopSpacing: e.target.value })} aria-label="ระยะห่างตะแกรงบน" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                    <span className="text-xs text-slate-500">ม. สองทาง</span>
-                    <span className="w-full text-xs text-slate-400">แบบกำหนดเหล็ก 2 ชั้น · เว้นว่าง = ชั้นเดียว</span>
-                  </BarRow>
-                </>
-              )}
-              {kind === "FOOTING" && (
-                <BarRow label="เหล็กเดือย">
-                  <input type="number" min="0" step="1" value={form.dowelCount} onChange={(e) => set({ dowelCount: e.target.value })} aria-label="จำนวนเหล็กเดือยต่อฐาน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                  <span className="text-xs text-slate-500">เส้น</span>
-                  <BarSelect value={form.dowelDia} onChange={(v) => set({ dowelDia: v })} label="ขนาดเหล็กเดือย" />
-                  <span className="text-xs text-slate-500">ยาว</span>
-                  <input type="number" min="0" step="any" value={form.dowelLength} onChange={(e) => set({ dowelLength: e.target.value })} aria-label="ความยาวเหล็กเดือยต่อเส้น" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                  <span className="text-xs text-slate-500">ม./เส้น</span>
-                  <span className="w-full text-xs text-slate-400">เช่น 4-DB20 DOWEL ฝังหัวเสาเข็ม · ยาวกรอกตามแบบ · เว้นว่าง = ไม่มี</span>
-                </BarRow>
-              )}
-              {kind === "FOOTING" && form.footingType === "MESH" && (
-                <BarRow label="ปลายตะแกรง">
-                  <select value={form.meshEnd} onChange={(e) => set({ meshEnd: e.target.value as MeshEnd })} aria-label="ปลายตะแกรงฐานราก" className="rounded-md border border-slate-300 px-2 py-1 text-sm">
-                    <option value="STRAIGHT">ตรง ไม่งอ</option>
-                    <option value="BEND">งอปลายข้างละ {form.bendFactor}d</option>
-                    <option value="BEND_UP">งอขึ้นถึงผิวบน (รูปตัว U)</option>
-                  </select>
-                  {form.meshEnd === "BEND_UP" && (
-                    <span className="w-full text-xs text-slate-400">ขาสูงข้างละ หนา − ระยะหุ้มบนล่าง</span>
-                  )}
-                </BarRow>
-              )}
-              {(kind === "BEAM" || kind === "SLAB") && (
-                <label className="mt-1 flex items-start gap-2 text-sm text-slate-700">
-                  <input type="checkbox" className="mt-1" checked={form.endBends} onChange={(e) => set({ endBends: e.target.checked })} />
-                  <span>
-                    {kind === "BEAM" ? "งอปลายเหล็กบน/ล่างเข้าเสา" : "งอปลายตะแกรง"} ข้างละ {form.bendFactor}d
-                    {!rule.bends && <span className="block text-xs text-slate-400">ใช้ในรายการสั่งเหล็ก (ชุดเสนอราคาไม่บวกงอ)</span>}
-                  </span>
-                </label>
-              )}
-              {kind === "BEAM" && (
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input type="checkbox" checked={form.onGround} onChange={(e) => set({ onGround: e.target.checked })} />
-                  คานคอดินเทบนดิน (ไม่มีไม้แบบท้องคาน)
-                </label>
-              )}
-              {kind === "SLAB" && (
-                <>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.onGround} onChange={(e) => set({ onGround: e.target.checked })} />
-                    พื้นเทบนดิน (ไม่มีไม้แบบท้องพื้น)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.edgeForm} onChange={(e) => set({ edgeForm: e.target.checked })} />
-                    ตั้งแบบขอบพื้น
-                  </label>
-                  {form.edgeForm && (
-                    <BarRow label="ยาวขอบที่ตั้งแบบ">
-                      <input type="number" min="0" step="any" value={form.edgeLength} onChange={(e) => set({ edgeLength: e.target.value })} aria-label="ความยาวขอบพื้นที่ตั้งแบบ" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
-                      <span className="text-xs text-slate-500">ม. ต่อแผ่น</span>
-                      <span className="w-full text-xs text-slate-400">เว้นว่าง = รอบรูป 2×(กว้าง+ยาว) · พื้นรูปไม่เหลี่ยมให้วัดขอบจริงจากแปลน · ขอบที่วางบนคานไม่ต้องนับ</span>
-                    </BarRow>
-                  )}
-                </>
-              )}
+              <RebarFields kind={kind} form={form} set={set} rule={rule} />
             </fieldset>
 
-            <details className="group rounded-lg border border-slate-200 px-3 py-2">
-              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-slate-600">
-                <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
-                ค่ามาตรฐานที่ใช้คิด: ระยะหุ้ม {form.coverCm} ซม. · ทาบ {form.lapFactor}d · เหล็กยาว {form.stockLength} ม. · ขอปลอก {form.hookFactor}d · งอปลาย {form.bendFactor}d
-              </summary>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                <NumberField label="ระยะหุ้ม" value={form.coverCm} onChange={(v) => set({ coverCm: v })} suffix="ซม." />
-                <NumberField label="ระยะทาบ" value={form.lapFactor} onChange={(v) => set({ lapFactor: v })} suffix="× d" />
-                <NumberField label="เหล็กยาวต่อเส้น" value={form.stockLength} onChange={(v) => set({ stockLength: v })} suffix="ม." />
-                <NumberField label="ขอปลอกต่อข้าง" value={form.hookFactor} onChange={(v) => set({ hookFactor: v })} suffix="× d" />
-                <NumberField label="งอปลายเหล็กหลัก" value={form.bendFactor} onChange={(v) => set({ bendFactor: v })} suffix="× d" />
-              </div>
-              <p className="mt-2 text-xs text-slate-400">
-                ไม่รวมเหล็กเสริมพิเศษ (เหล็กเสริมบนเหนือเสา/ปลายคาน เหล็กคอม้า) — เผื่อด้วย % เผื่อเสียในใบถอดแบบของบรรทัดเหล็ก
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                เหล็กที่ลง BOQ คิดตาม “ชุดเสนอราคา”{ruleNotes.length > 0 && ` (${ruleNotes.join(" · ")})`}{" "}
-                — ขนาดที่กรอกถูกเก็บไว้คิด “รายการสั่งเหล็กหน้างาน” ด้วยชุดสั่งตัดให้เอง · ตั้งได้ที่ ตั้งค่า → ถอดปริมาณ
-              </p>
-            </details>
+            <StandardsPanel form={form} set={set} rule={rule} />
           </div>
 
           {/* ───── ขวา: ผลลัพธ์ + ปลายทาง ───── */}
@@ -1169,83 +916,19 @@ export function StructuralCalcDialog({
                 {e}
               </Notice>
             ))}
-            {plan.map(({ group, target, newLine }) => {
-              const candidates = candidatesFor(group, items);
-              const value = target.kind === "item" ? target.itemId : target.kind;
-              return (
-                <section key={group.key} className={`rounded-lg border p-3 ${target.kind === "skip" ? "border-slate-200 opacity-60" : "border-slate-200"}`}>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-slate-800">{group.title}</h3>
-                    <span className="text-base font-semibold text-brand tabular-nums">
-                      {fmtQty(group.total)} <span className="text-xs font-normal">{group.unit}</span>
-                    </span>
-                  </div>
-                  <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
-                    {group.rows.map((r) => (
-                      <li key={r.row.label}>
-                        <span className="text-slate-700">{r.row.label}</span> — {r.explain}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-                    <label htmlFor={`target-${group.key}`} className="text-xs text-slate-600">
-                      ลงบรรทัด
-                    </label>
-                    <select
-                      id={`target-${group.key}`}
-                      value={value}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setTargets((t) => ({
-                          ...t,
-                          [group.key]: v === "new" || v === "skip" ? { kind: v } : { kind: "item", itemId: v },
-                        }));
-                      }}
-                      className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                    >
-                      {candidates.map((i) => (
-                        <option key={i.id} value={i.id}>
-                          {i.name} ({i.unit}){i.qtyBasis === "SHEET" ? ` · ใบถอดแบบ ${i.takeoffRows.length} แถว` : ""}
-                        </option>
-                      ))}
-                      <option value="new">+ สร้างบรรทัดใหม่</option>
-                      <option value="skip">ไม่ต้องลง</option>
-                    </select>
-                  </div>
-                  {target.kind === "new" && (
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      <div className="text-xs text-slate-600">
-                        <span className="mb-1 block">วัสดุจากคลัง (ราคามาด้วย)</span>
-                        <SearchableSelect
-                          options={materialOptionsFor(group)}
-                          value={newLine.materialId}
-                          onChange={(v) => setNewLines((n) => ({ ...n, [group.key]: { ...newLine, materialId: v } }))}
-                          placeholder={`ค้นหาวัสดุหน่วย ${group.unit}`}
-                          clearable
-                        />
-                      </div>
-                      <div className="text-xs text-slate-600">
-                        <span className="mb-1 block">
-                          หมวดงาน{materialById.get(newLine.materialId)?.categoryId ? " (เว้นได้ — ใช้หมวดของวัสดุ)" : ""}
-                        </span>
-                        <SearchableSelect
-                          options={categoryOptions}
-                          value={newLine.categoryId}
-                          onChange={(v) => setNewLines((n) => ({ ...n, [group.key]: { ...newLine, categoryId: v } }))}
-                          placeholder="เลือกหมวดงาน"
-                          clearable
-                        />
-                      </div>
-                      {!newLine.materialId && (
-                        <p className="text-xs text-slate-500 sm:col-span-2">
-                          จะสร้าง “{group.defaultName}” หน่วย {group.unit} ราคา 0 — ใส่ราคาทีหลังที่ปุ่มแก้ไขของบรรทัด
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
+            {plan.map(({ group, target, newLine }) => (
+              <TargetCard
+                key={group.key}
+                group={group}
+                target={target}
+                newLine={newLine}
+                items={items}
+                materials={materials}
+                categoryOptions={categoryOptions}
+                onTarget={(t) => setTargets((cur) => ({ ...cur, [group.key]: t }))}
+                onNewLine={(line) => setNewLines((n) => ({ ...n, [group.key]: line }))}
+              />
+            ))}
           </div>
         </div>
 
@@ -1261,18 +944,516 @@ export function StructuralCalcDialog({
               </Button>
             )}
             <Button onClick={() => apply(false)} disabled={Boolean(blocker) || saving}>
-              {editing ? (saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข") : saving ? "กำลังลง..." : "ลง BOQ"}
+              {applyLabel(Boolean(editing), saving)}
             </Button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body,
   );
 }
 
+type FieldProps = Readonly<{ form: FormState; set: (patch: Partial<FormState>) => void }>;
+type RebarProps = Readonly<{ kind: StructuralKind; form: FormState; set: (patch: Partial<FormState>) => void; rule: TakeoffRuleSet }>;
+
+/** ช่องเหล็กเสริมตามชนิดชิ้นส่วน — แต่ละชนิดมีชุดช่องของตัวเอง */
+function RebarFields(props: RebarProps) {
+  switch (props.kind) {
+    case "COLUMN":
+      return <ColumnRebar {...props} />;
+    case "BEAM":
+      return <BeamRebar {...props} />;
+    case "STAIR":
+      return <StairRebar {...props} />;
+    case "FOOTING":
+      return <FootingRebar {...props} />;
+    default:
+      return <SlabRebar {...props} />;
+  }
+}
+
+/** ปลอก + ปลอกถี่ช่วงปลาย (เสา/คาน) */
+function TieRows({ kind, form, set }: RebarProps) {
+  return (
+    <>
+      <BarRow label="ปลอก">
+        <BarSelect value={form.tieDia} onChange={(v) => set({ tieDia: v })} label="ขนาดปลอก" />
+        <span className="text-xs text-slate-500">@</span>
+        <input type="number" min="0" step="any" value={form.tieSpacing} onChange={(e) => set({ tieSpacing: e.target.value })} aria-label="ระยะห่างปลอก" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม.</span>
+      </BarRow>
+      <BarRow label="ปลอกถี่ช่วงปลาย">
+        <span className="text-xs text-slate-500">@</span>
+        <input type="number" min="0" step="any" value={form.tieEndSpacing} onChange={(e) => set({ tieEndSpacing: e.target.value })} aria-label="ระยะห่างปลอกช่วงปลาย" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม. ยาวข้างละ</span>
+        <input type="number" min="0" step="any" value={form.tieEndLength} onChange={(e) => set({ tieEndLength: e.target.value })} aria-label="ความยาวช่วงปลายต่อข้าง" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม.</span>
+        <span className="w-full text-xs text-slate-400">
+          {kind === "BEAM" ? "ปลายคานทั้งสองข้าง มักยาว L/4" : "หัวและโคนเสา"} · เว้นว่าง = ระยะเดียวตลอด
+        </span>
+      </BarRow>
+    </>
+  );
+}
+
+/** งอปลายเหล็กหลัก (คาน/พื้น) — ชุดเสนอราคาที่ไม่บวกงอใช้ค่านี้แค่ในรายการสั่งเหล็ก */
+function EndBendsOption({ kind, form, set, rule }: RebarProps) {
+  return (
+    <label className="mt-1 flex items-start gap-2 text-sm text-slate-700">
+      <input type="checkbox" className="mt-1" checked={form.endBends} onChange={(e) => set({ endBends: e.target.checked })} />
+      <span>
+        {kind === "BEAM" ? "งอปลายเหล็กบน/ล่างเข้าเสา" : "งอปลายตะแกรง"} ข้างละ {form.bendFactor}d
+        {!rule.bends && <span className="block text-xs text-slate-400">ใช้ในรายการสั่งเหล็ก (ชุดเสนอราคาไม่บวกงอ)</span>}
+      </span>
+    </label>
+  );
+}
+
+/** ตะแกรงบน (ฐานแผ่น/พื้น) */
+function MeshTopRow({ form, set }: FieldProps) {
+  return (
+    <BarRow label="ตะแกรงบน">
+      <BarSelect value={form.meshTopDia} onChange={(v) => set({ meshTopDia: v })} label="ขนาดตะแกรงบน" />
+      <span className="text-xs text-slate-500">@</span>
+      <input type="number" min="0" step="any" value={form.meshTopSpacing} onChange={(e) => set({ meshTopSpacing: e.target.value })} aria-label="ระยะห่างตะแกรงบน" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+      <span className="text-xs text-slate-500">ม. สองทาง</span>
+      <span className="w-full text-xs text-slate-400">แบบกำหนดเหล็ก 2 ชั้น · เว้นว่าง = ชั้นเดียว</span>
+    </BarRow>
+  );
+}
+
+/** เสา: เหล็กยืน · ปลอก · ฐานราก/ชั้นบนสุด */
+function ColumnRebar(props: RebarProps) {
+  const { form, set } = props;
+  return (
+    <>
+      <BarRow label="เหล็กยืน">
+        <input type="number" min="0" step="1" value={form.mainCount} onChange={(e) => set({ mainCount: e.target.value })} aria-label="จำนวนเหล็กยืน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">เส้น</span>
+        <BarSelect value={form.mainDia} onChange={(v) => set({ mainDia: v })} label="ขนาดเหล็กยืน" />
+      </BarRow>
+      <TieRows {...props} />
+      <BarRow label="ตั้งบนฐานราก">
+        <span className="text-xs text-slate-500">ฐานหนา</span>
+        <input type="number" min="0" step="any" value={form.footingDepth} onChange={(e) => set({ footingDepth: e.target.value })} aria-label="ความหนาฐานราก" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม.</span>
+        <span className="w-full text-xs text-slate-400">เหล็กยืนฝังลงถึงตะแกรงล่างแล้วงอ {form.bendFactor}d · เว้นว่าง = เสาชั้นบน</span>
+      </BarRow>
+      <label className="mt-1 flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={form.topFloor} onChange={(e) => set({ topFloor: e.target.checked })} />
+        ชั้นบนสุด — งอเข้าคานหลังคา {form.bendFactor}d แทนเผื่อทาบต่อชั้นถัดไป
+      </label>
+    </>
+  );
+}
+
+/** คาน: เหล็กบน/ล่าง/พิเศษ · ปลอก · งอปลาย · คานคอดิน */
+function BeamRebar(props: RebarProps) {
+  const { form, set } = props;
+  return (
+    <>
+      <BarRow label="เหล็กบน">
+        <input type="number" min="0" step="1" value={form.topCount} onChange={(e) => set({ topCount: e.target.value })} aria-label="จำนวนเหล็กบน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">เส้น</span>
+        <BarSelect value={form.topDia} onChange={(v) => set({ topDia: v })} label="ขนาดเหล็กบน" />
+      </BarRow>
+      <BarRow label="เหล็กล่าง">
+        <input type="number" min="0" step="1" value={form.bottomCount} onChange={(e) => set({ bottomCount: e.target.value })} aria-label="จำนวนเหล็กล่าง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">เส้น</span>
+        <BarSelect value={form.bottomDia} onChange={(v) => set({ bottomDia: v })} label="ขนาดเหล็กล่าง" />
+      </BarRow>
+      <BarRow label="เหล็กพิเศษบน">
+        <input type="number" min="0" step="1" value={form.extraTopCount} onChange={(e) => set({ extraTopCount: e.target.value })} aria-label="จำนวนเหล็กพิเศษบนต่อจุดรองรับ" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">เส้น</span>
+        <BarSelect value={form.extraTopDia} onChange={(v) => set({ extraTopDia: v })} label="ขนาดเหล็กพิเศษบน" />
+        <span className="text-xs text-slate-500">ยาว L/</span>
+        <input type="number" min="1" step="any" value={form.extraTopDiv} onChange={(e) => set({ extraTopDiv: e.target.value })} aria-label="ตัวหารความยาวเหล็กพิเศษบน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="w-full text-xs text-slate-400">ต่อจุดรองรับ ยื่นจากหน้าเสาเข้าช่วง · จุดกลาง (คานต่อเนื่อง) ยื่นสองข้าง · เว้นว่าง = ไม่มี</span>
+      </BarRow>
+      <BarRow label="เหล็กพิเศษล่าง">
+        <input type="number" min="0" step="1" value={form.extraBottomCount} onChange={(e) => set({ extraBottomCount: e.target.value })} aria-label="จำนวนเหล็กพิเศษล่างต่อช่วง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">เส้น</span>
+        <BarSelect value={form.extraBottomDia} onChange={(v) => set({ extraBottomDia: v })} label="ขนาดเหล็กพิเศษล่าง" />
+        <span className="text-xs text-slate-500">ตัดห่างหน้าเสา L/</span>
+        <input type="number" min="1" step="any" value={form.extraBottomDiv} onChange={(e) => set({ extraBottomDiv: e.target.value })} aria-label="ตัวหารระยะตัดเหล็กพิเศษล่าง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="w-full text-xs text-slate-400">กลางช่วง ยาว L − 2 × L/5 (ตามแบบขยายการเสริมเหล็กพิเศษ) · L = ช่วงสุทธิ · เว้นว่าง = ไม่มี</span>
+      </BarRow>
+      <TieRows {...props} />
+      <EndBendsOption {...props} />
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={form.onGround} onChange={(e) => set({ onGround: e.target.checked })} />
+        <span>คานคอดินเทบนดิน (ไม่มีไม้แบบท้องคาน)</span>
+      </label>
+    </>
+  );
+}
+
+/** บันได: เหล็กหลัก + เหล็กกันร้าว */
+function StairRebar({ form, set }: FieldProps) {
+  return (
+    <>
+      <BarRow label="เหล็กหลัก">
+        <BarSelect value={form.stairMainDia} onChange={(v) => set({ stairMainDia: v })} label="ขนาดเหล็กหลักบันได" />
+        <span className="text-xs text-slate-500">@</span>
+        <input type="number" min="0" step="any" value={form.stairMainSpacing} onChange={(e) => set({ stairMainSpacing: e.target.value })} aria-label="ระยะห่างเหล็กหลักบันได" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม. วิ่งตามแนวเอียง</span>
+      </BarRow>
+      <BarRow label="เหล็กกันร้าว">
+        <BarSelect value={form.stairDistDia} onChange={(v) => set({ stairDistDia: v })} label="ขนาดเหล็กกันร้าวบันได" />
+        <span className="text-xs text-slate-500">@</span>
+        <input type="number" min="0" step="any" value={form.stairDistSpacing} onChange={(e) => set({ stairDistSpacing: e.target.value })} aria-label="ระยะห่างเหล็กกันร้าวบันได" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม. วิ่งตามความกว้าง</span>
+      </BarRow>
+    </>
+  );
+}
+
+/** ฐานราก: รูปแบบ (ฐานแผ่น/หัวเสาเข็ม) · ตะแกรง · เดือย · ปลายตะแกรง */
+function FootingRebar({ form, set }: FieldProps) {
+  const mesh = form.footingType === "MESH";
+  return (
+    <>
+      <BarRow label="รูปแบบเหล็ก">
+        <select
+          value={form.footingType}
+          onChange={(e) => {
+            const next = e.target.value as FootingType;
+            // หัวเสาเข็มตั้งต้นตามแบบที่พบบ่อย (16-DB16 + ปลอก RB6@0.10) — แก้ได้
+            set(
+              next === "PILE_CAP"
+                ? { footingType: next, mainCount: form.mainCount || "16", mainDia: "16", tieDia: "6", tieSpacing: form.tieSpacing || "0.10" }
+                : { footingType: next },
+            );
+          }}
+          aria-label="รูปแบบเหล็กฐานราก"
+          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+        >
+          <option value="MESH">ฐานแผ่ — ตะแกรงสองทาง</option>
+          <option value="PILE_CAP">หัวเสาเข็ม — เหล็กยืนรอบ + ปลอกรัด</option>
+        </select>
+      </BarRow>
+      {form.footingType === "PILE_CAP" && (
+        <>
+          <BarRow label="เหล็กยืนรอบฐาน">
+            <input type="number" min="0" step="1" value={form.mainCount} onChange={(e) => set({ mainCount: e.target.value })} aria-label="จำนวนเหล็กยืนรอบฐาน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+            <span className="text-xs text-slate-500">เส้น</span>
+            <BarSelect value={form.mainDia} onChange={(v) => set({ mainDia: v })} label="ขนาดเหล็กยืนรอบฐาน" />
+            <span className="w-full text-xs text-slate-400">ยาว = หนา − ระยะหุ้มบนล่าง + งอเข้าในฐานบนและล่าง {form.bendFactor}d</span>
+          </BarRow>
+          <BarRow label="ปลอกรัด">
+            <BarSelect value={form.tieDia} onChange={(v) => set({ tieDia: v })} label="ขนาดปลอกรัด" />
+            <span className="text-xs text-slate-500">@</span>
+            <input type="number" min="0" step="any" value={form.tieSpacing} onChange={(e) => set({ tieSpacing: e.target.value })} aria-label="ระยะห่างปลอกรัดตามความหนา" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+            <span className="text-xs text-slate-500">ม. ตามความหนา</span>
+          </BarRow>
+          <label className="mt-1 flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={form.diamondTies} onChange={(e) => set({ diamondTies: e.target.checked })} />
+            <span>ปลอก 2 ชุดต่อชั้น (สี่เหลี่ยม + ข้าวหลามตัด) — แบบเขียน “2ป”</span>
+          </label>
+        </>
+      )}
+      {mesh && (
+        <BarRow label="ตะแกรงล่าง">
+          <BarSelect value={form.meshDia} onChange={(v) => set({ meshDia: v })} label="ขนาดตะแกรงล่าง" />
+          <select value={form.meshByCount ? "count" : "spacing"} onChange={(e) => set({ meshByCount: e.target.value === "count" })} aria-label="กำหนดตะแกรงล่างด้วย" className="rounded-md border border-slate-300 px-2 py-1 text-sm">
+            <option value="spacing">ระยะห่าง</option>
+            <option value="count">จำนวนเส้น</option>
+          </select>
+          {form.meshByCount ? (
+            <span className="flex w-full flex-wrap items-center gap-1.5">
+              <span className="text-xs text-slate-500">แนวยาว</span>
+              <input type="number" min="0" step="1" value={form.meshCountLong} onChange={(e) => set({ meshCountLong: e.target.value })} aria-label="จำนวนเส้นตะแกรงแนวยาว" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+              <span className="text-xs text-slate-500">เส้น · แนวกว้าง</span>
+              <input type="number" min="0" step="1" value={form.meshCountShort} onChange={(e) => set({ meshCountShort: e.target.value })} aria-label="จำนวนเส้นตะแกรงแนวกว้าง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+              <span className="text-xs text-slate-500">เส้น</span>
+              <span className="w-full text-xs text-slate-400">แนวยาว = เส้นที่วิ่งตามด้านยาว · ใส่ตามที่แบบเขียน เช่น 4-DB16 / 8-DB16</span>
+            </span>
+          ) : (
+            <>
+              <span className="text-xs text-slate-500">@</span>
+              <input type="number" min="0" step="any" value={form.meshSpacing} onChange={(e) => set({ meshSpacing: e.target.value })} aria-label="ระยะห่างตะแกรงล่าง" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+              <span className="text-xs text-slate-500">ม. สองทาง</span>
+            </>
+          )}
+        </BarRow>
+      )}
+      {mesh && <MeshTopRow form={form} set={set} />}
+      <BarRow label="เหล็กเดือย">
+        <input type="number" min="0" step="1" value={form.dowelCount} onChange={(e) => set({ dowelCount: e.target.value })} aria-label="จำนวนเหล็กเดือยต่อฐาน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">เส้น</span>
+        <BarSelect value={form.dowelDia} onChange={(v) => set({ dowelDia: v })} label="ขนาดเหล็กเดือย" />
+        <span className="text-xs text-slate-500">ยาว</span>
+        <input type="number" min="0" step="any" value={form.dowelLength} onChange={(e) => set({ dowelLength: e.target.value })} aria-label="ความยาวเหล็กเดือยต่อเส้น" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม./เส้น</span>
+        <span className="w-full text-xs text-slate-400">เช่น 4-DB20 DOWEL ฝังหัวเสาเข็ม · ยาวกรอกตามแบบ · เว้นว่าง = ไม่มี</span>
+      </BarRow>
+      {mesh && (
+        <BarRow label="ปลายตะแกรง">
+          <select value={form.meshEnd} onChange={(e) => set({ meshEnd: e.target.value as MeshEnd })} aria-label="ปลายตะแกรงฐานราก" className="rounded-md border border-slate-300 px-2 py-1 text-sm">
+            <option value="STRAIGHT">ตรง ไม่งอ</option>
+            <option value="BEND">งอปลายข้างละ {form.bendFactor}d</option>
+            <option value="BEND_UP">งอขึ้นถึงผิวบน (รูปตัว U)</option>
+          </select>
+          {form.meshEnd === "BEND_UP" && (
+            <span className="w-full text-xs text-slate-400">ขาสูงข้างละ หนา − ระยะหุ้มบนล่าง</span>
+          )}
+        </BarRow>
+      )}
+    </>
+  );
+}
+
+/** พื้น: ตะแกรงล่าง/บน · งอปลาย · เทบนดิน · แบบขอบพื้น */
+function SlabRebar(props: RebarProps) {
+  const { form, set } = props;
+  return (
+    <>
+      <BarRow label="ตะแกรงล่าง">
+        <BarSelect value={form.meshDia} onChange={(v) => set({ meshDia: v })} label="ขนาดตะแกรงล่าง" />
+        <span className="text-xs text-slate-500">@</span>
+        <input type="number" min="0" step="any" value={form.meshSpacing} onChange={(e) => set({ meshSpacing: e.target.value })} aria-label="ระยะห่างตะแกรงล่าง" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม. สองทาง</span>
+      </BarRow>
+      <MeshTopRow {...props} />
+      <EndBendsOption {...props} />
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={form.onGround} onChange={(e) => set({ onGround: e.target.checked })} />
+        <span>พื้นเทบนดิน (ไม่มีไม้แบบท้องพื้น)</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={form.edgeForm} onChange={(e) => set({ edgeForm: e.target.checked })} />
+        <span>ตั้งแบบขอบพื้น</span>
+      </label>
+      {form.edgeForm && (
+        <BarRow label="ยาวขอบที่ตั้งแบบ">
+          <input type="number" min="0" step="any" value={form.edgeLength} onChange={(e) => set({ edgeLength: e.target.value })} aria-label="ความยาวขอบพื้นที่ตั้งแบบ" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+          <span className="text-xs text-slate-500">ม. ต่อแผ่น</span>
+          <span className="w-full text-xs text-slate-400">เว้นว่าง = รอบรูป 2×(กว้าง+ยาว) · พื้นรูปไม่เหลี่ยมให้วัดขอบจริงจากแปลน · ขอบที่วางบนคานไม่ต้องนับ</span>
+        </BarRow>
+      )}
+    </>
+  );
+}
+
+/** บันได: ความสูงรวม + จำนวนลูกตั้ง (บอกขนาดลูกตั้ง/ลูกนอนให้ตรวจ) */
+function StairDims({ form, set }: FieldProps) {
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <BarRow label="ความสูง / ขั้น">
+        <span className="text-xs text-slate-500">สูงรวม</span>
+        <input type="number" min="0" step="any" value={form.stairRise} onChange={(e) => set({ stairRise: e.target.value })} aria-label="ความสูงรวมของบันได" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม. ·</span>
+        <input type="number" min="0" step="1" value={form.stairSteps} onChange={(e) => set({ stairSteps: e.target.value })} aria-label="จำนวนลูกตั้ง" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ลูกตั้ง</span>
+        {form.stairRise && form.stairSteps && Number(form.stairSteps) > 0 && form.length && (
+          <span className="w-full text-xs text-slate-400">
+            ลูกตั้ง {(Number(form.stairRise) / Number(form.stairSteps)).toFixed(3)} ม. · ลูกนอน {(Number(form.length) / Number(form.stairSteps)).toFixed(3)} ม.
+          </span>
+        )}
+      </BarRow>
+    </div>
+  );
+}
+
+/** คาน: หักส่วนที่ซ้อนกับเสาและพื้น */
+function BeamDeductions({ form, set }: FieldProps) {
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
+      <p className="text-xs font-medium text-slate-600">หักส่วนที่ซ้อนกับเสาและพื้น (เว้นว่าง = ไม่หัก)</p>
+      <BarRow label="เสาที่คานพาดผ่าน">
+        <input type="number" min="0" step="1" value={form.supportCount} onChange={(e) => set({ supportCount: e.target.value })} aria-label="จำนวนเสาที่คานพาดผ่าน" className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ต้น กว้าง</span>
+        <input type="number" min="0" step="any" value={form.supportWidth} onChange={(e) => set({ supportWidth: e.target.value })} aria-label="ความกว้างเสาตามแนวคาน" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม.</span>
+        <span className="w-full text-xs text-slate-400">นับรวมเสาสองปลาย · กว้าง = ด้านของเสาตามแนวคาน</span>
+      </BarRow>
+      <BarRow label="พื้นบนคาน">
+        <span className="text-xs text-slate-500">หนา</span>
+        <input type="number" min="0" step="any" value={form.slabThickness} onChange={(e) => set({ slabThickness: e.target.value })} aria-label="ความหนาพื้นบนคาน" className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm" />
+        <span className="text-xs text-slate-500">ม.</span>
+        <select value={form.slabSides} onChange={(e) => set({ slabSides: e.target.value as "1" | "2" })} aria-label="พื้นวางบนคานกี่ข้าง" className="rounded-md border border-slate-300 px-2 py-1 text-sm">
+          <option value="2">พื้นสองข้าง</option>
+          <option value="1">ข้างเดียว (คานขอบ)</option>
+        </select>
+      </BarRow>
+    </div>
+  );
+}
+
+/** ค่ามาตรฐานที่ใช้คิด (พับไว้) + สิ่งที่ชุดเสนอราคาไม่คิด */
+function StandardsPanel({ form, set, rule }: Readonly<{ form: FormState; set: (patch: Partial<FormState>) => void; rule: TakeoffRuleSet }>) {
+  const ruleNotes = ruleNotesOf(rule);
+  return (
+    <details className="group rounded-lg border border-slate-200 px-3 py-2">
+      <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-slate-600">
+        <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+        ค่ามาตรฐานที่ใช้คิด: ระยะหุ้ม {form.coverCm} ซม. · ทาบ {form.lapFactor}d · เหล็กยาว {form.stockLength} ม. · ขอปลอก {form.hookFactor}d · งอปลาย {form.bendFactor}d
+      </summary>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <NumberField label="ระยะหุ้ม" value={form.coverCm} onChange={(v) => set({ coverCm: v })} suffix="ซม." />
+        <NumberField label="ระยะทาบ" value={form.lapFactor} onChange={(v) => set({ lapFactor: v })} suffix="× d" />
+        <NumberField label="เหล็กยาวต่อเส้น" value={form.stockLength} onChange={(v) => set({ stockLength: v })} suffix="ม." />
+        <NumberField label="ขอปลอกต่อข้าง" value={form.hookFactor} onChange={(v) => set({ hookFactor: v })} suffix="× d" />
+        <NumberField label="งอปลายเหล็กหลัก" value={form.bendFactor} onChange={(v) => set({ bendFactor: v })} suffix="× d" />
+      </div>
+      <p className="mt-2 text-xs text-slate-400">
+        ไม่รวมเหล็กเสริมพิเศษ (เหล็กเสริมบนเหนือเสา/ปลายคาน เหล็กคอม้า) — เผื่อด้วย % เผื่อเสียในใบถอดแบบของบรรทัดเหล็ก
+      </p>
+      <p className="mt-1 text-xs text-slate-500">
+        เหล็กที่ลง BOQ คิดตาม “ชุดเสนอราคา”{ruleNotes.length > 0 && ` (${ruleNotes.join(" · ")})`}{" "}
+        — ขนาดที่กรอกถูกเก็บไว้คิด “รายการสั่งเหล็กหน้างาน” ด้วยชุดสั่งตัดให้เอง · ตั้งได้ที่ ตั้งค่า → ถอดปริมาณ
+      </p>
+    </details>
+  );
+}
+
+/** ผลลัพธ์หนึ่งก้อน (คอนกรีต/ไม้แบบ/เหล็กขนาดหนึ่ง) + เลือกว่าจะลงบรรทัดไหน */
+function TargetCard({
+  group,
+  target,
+  newLine,
+  items,
+  materials,
+  categoryOptions,
+  onTarget,
+  onNewLine,
+}: Readonly<{
+  group: OutputGroup;
+  target: Target;
+  newLine: NewLine;
+  items: BoqItemDto[];
+  materials: MaterialDto[];
+  categoryOptions: SearchableOption[];
+  onTarget: (t: Target) => void;
+  onNewLine: (line: NewLine) => void;
+}>) {
+  const candidates = candidatesFor(group, items);
+  const value = target.kind === "item" ? target.itemId : target.kind;
+  return (
+    <section className={`rounded-lg border p-3 ${target.kind === "skip" ? "border-slate-200 opacity-60" : "border-slate-200"}`}>
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold text-slate-800">{group.title}</h3>
+        <span className="text-base font-semibold text-brand tabular-nums">
+          {fmtQty(group.total)} <span className="text-xs font-normal">{group.unit}</span>
+        </span>
+      </div>
+      <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+        {group.rows.map((r) => (
+          <li key={r.row.label}>
+            <span className="text-slate-700">{r.row.label}</span> — {r.explain}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+        <label htmlFor={`target-${group.key}`} className="text-xs text-slate-600">
+          ลงบรรทัด
+        </label>
+        <select
+          id={`target-${group.key}`}
+          value={value}
+          onChange={(e) => {
+            const v = e.target.value;
+            onTarget(v === "new" || v === "skip" ? { kind: v } : { kind: "item", itemId: v });
+          }}
+          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+        >
+          {candidates.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.name} ({i.unit}){i.qtyBasis === "SHEET" ? ` · ใบถอดแบบ ${i.takeoffRows.length} แถว` : ""}
+            </option>
+          ))}
+          <option value="new">+ สร้างบรรทัดใหม่</option>
+          <option value="skip">ไม่ต้องลง</option>
+        </select>
+      </div>
+      {target.kind === "new" && (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="text-xs text-slate-600">
+            <span className="mb-1 block">วัสดุจากคลัง (ราคามาด้วย)</span>
+            <SearchableSelect
+              options={materialOptionsFor(materials, group)}
+              value={newLine.materialId}
+              onChange={(v) => onNewLine({ ...newLine, materialId: v })}
+              placeholder={`ค้นหาวัสดุหน่วย ${group.unit}`}
+              clearable
+            />
+          </div>
+          <div className="text-xs text-slate-600">
+            <span className="mb-1 block">
+              หมวดงาน{materials.find((m) => m.id === newLine.materialId)?.categoryId ? " (เว้นได้ — ใช้หมวดของวัสดุ)" : ""}
+            </span>
+            <SearchableSelect
+              options={categoryOptions}
+              value={newLine.categoryId}
+              onChange={(v) => onNewLine({ ...newLine, categoryId: v })}
+              placeholder="เลือกหมวดงาน"
+              clearable
+            />
+          </div>
+          {!newLine.materialId && (
+            <p className="text-xs text-slate-500 sm:col-span-2">
+              จะสร้าง “{group.defaultName}” หน่วย {group.unit} ราคา 0 — ใส่ราคาทีหลังที่ปุ่มแก้ไขของบรรทัด
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function materialOptionsFor(materials: MaterialDto[], g: OutputGroup): SearchableOption[] {
+  return materials
+    .filter((m) => m.active && g.fits(m.unit))
+    .map((m) => ({ value: m.id, label: m.code ? `${m.code} — ${m.name}` : m.name, sublabel: `หน่วย ${m.unit}`, keywords: `${m.code ?? ""} ${m.name}` }));
+}
+
+/** สิ่งที่ชุดเสนอราคาไม่คิด — บอกไว้ใต้ค่ามาตรฐาน ให้รู้ว่าทำไมเหล็กสั้นกว่าตัดจริง */
+function ruleNotesOf(rule: TakeoffRuleSet) {
+  return [
+    !rule.deductCover && "ไม่หักระยะหุ้ม",
+    !rule.bends && "ไม่บวกงอ",
+    !rule.laps && "ไม่บวกทาบ",
+    !rule.hooks && "ไม่มีขอปลอก",
+  ].filter(Boolean);
+}
+
+/** ปัญหาแรกที่กั้นการลง BOQ (null = ลงได้) */
+function blockerOf(dimsReady: boolean, firstError: string | undefined, activeCount: number, planError: string | null | undefined) {
+  if (!dimsReady) return "กรอกขนาดให้ครบ";
+  if (firstError !== undefined) return firstError;
+  if (activeCount === 0) return "เลือกอย่างน้อยหนึ่งปลายทาง";
+  return planError ?? null;
+}
+
+function applyLabel(editing: boolean, saving: boolean) {
+  if (editing) return saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข";
+  return saving ? "กำลังลง..." : "ลง BOQ";
+}
+
+type ReplaceResult = Awaited<ReturnType<typeof replaceStructuralMember>>;
+type ApplyResult = Awaited<ReturnType<typeof applyTakeoff>>;
+
+function editedMessage(label: string, res: ReplaceResult) {
+  return [
+    `แก้ ${label} แล้ว`,
+    res.created > 0 ? ` · สร้างบรรทัดใหม่ ${res.created}` : "",
+    res.removed > 0 ? ` · ลบบรรทัดที่ไม่เหลือแถว ${res.removed}` : "",
+    res.newVersion ? ` · แตกเป็นเวอร์ชัน ${res.version.versionNo} (เวอร์ชันเดิมส่งใบเสนอราคาแล้ว)` : "",
+  ].join("");
+}
+
+/** needsPrice = มีบรรทัดใหม่ที่ไม่ได้ผูกวัสดุ (ราคา 0) */
+function appliedMessage(label: string, res: ApplyResult, needsPrice: boolean) {
+  const createdNote = res.created > 0 ? ` (สร้างใหม่ ${res.created})` : "";
+  const priceNote = res.created > 0 && needsPrice ? " — อย่าลืมใส่ราคาบรรทัดใหม่" : "";
+  return `ลง ${label} แล้ว ${res.lines} บรรทัด${createdNote}${priceNote}`;
+}
+
 /** B1 → B2, F12 → F13 · ชื่อที่ไม่ลงท้ายด้วยเลขคงไว้ */
 function nextLabel(label: string): string {
-  const m = /^(.*?)(\d+)$/.exec(label.trim());
-  return m ? `${m[1]}${Number(m[2]) + 1}` : label;
+  const t = label.trim();
+  let i = t.length;
+  while (i > 0 && t[i - 1] >= "0" && t[i - 1] <= "9") i--;
+  return i < t.length ? `${t.slice(0, i)}${Number(t.slice(i)) + 1}` : label;
 }

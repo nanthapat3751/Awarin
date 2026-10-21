@@ -1,3 +1,5 @@
+import { scanVariableTokens } from "@systemboq/shared-types";
+
 import { BLOCK_ONLY_IN_CLAUSE, type FieldMode, NO_VARIABLES_HERE } from "./variable-autocomplete";
 
 /**
@@ -7,9 +9,8 @@ import { BLOCK_ONLY_IN_CLAUSE, type FieldMode, NO_VARIABLES_HERE } from "./varia
  * (ตารางในอารัมภบท / ตัวแปรในชื่อบนหน้าปก) ไม่มีใครเตือนเลย ทั้งที่ทั้งสองแบบพิมพ์วงเล็บดิบลงสัญญาจริง
  */
 
-/** ต้องตรงกับ VARIABLE_PATTERN ฝั่งเซิร์ฟเวอร์ — ถ้าจับไม่เหมือนกัน หน้าจอจะบอกว่าถูกแต่เอกสารออกมาผิด
- * (จับทั้งก้อนใน {{ }} แล้วตัดช่องว่างหัวท้ายด้วย tokenName — regex แบบ \s* ครอบกลุ่ม lazy ย้อนรอยยาว) */
-const TOKEN = /\{\{([^}]+)\}\}/g;
+// จับ {{ }} ด้วย scanVariableTokens ตัวเดียวกับเซิร์ฟเวอร์ (shared-types) — ถ้าจับไม่เหมือนกัน หน้าจอจะบอกว่าถูก
+// แต่เอกสารออกมาผิด · ตัดช่องว่างหัวท้ายด้วย tokenName
 
 /** ชื่อตัวแปรใน {{ ... }} · ข้างในเป็นช่องว่างล้วน = คงไว้ตามเดิม (นับเป็นตัวแปรที่ไม่รู้จัก) */
 function tokenName(inner: string): string {
@@ -51,11 +52,10 @@ function classify(name: string, vocab: Vocabulary, mode: FieldMode): SegmentKind
 export function segmentVariables(text: string, vocab: Vocabulary, mode: FieldMode): Segment[] {
   const out: Segment[] = [];
   let last = 0;
-  for (const m of text.matchAll(TOKEN)) {
-    const start = m.index ?? 0;
-    if (start > last) out.push({ text: text.slice(last, start), kind: "text" });
-    out.push({ text: m[0], kind: classify(tokenName(m[1]), vocab, mode) });
-    last = start + m[0].length;
+  for (const token of scanVariableTokens(text)) {
+    if (token.start > last) out.push({ text: text.slice(last, token.start), kind: "text" });
+    out.push({ text: text.slice(token.start, token.end), kind: classify(tokenName(token.inner), vocab, mode) });
+    last = token.end;
   }
   if (last < text.length) out.push({ text: text.slice(last), kind: "text" });
   return out;

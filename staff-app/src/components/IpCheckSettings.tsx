@@ -212,11 +212,14 @@ export function IpCheckSettings() {
 
           <p className="text-xs text-slate-500">
             เทียบกับ IP ที่โลกภายนอกเห็นได้จากมือถือเครื่องเดียวกัน (เช่น ค้นใน Google ว่า “what is my ip”) ถ้าตรงกัน
-            แปลว่าระบบบันทึกถูกต้อง · ประเทศ/ผู้ให้บริการค้นจากฐานข้อมูลในเซิร์ฟเวอร์เอง ไม่ส่ง IP ออกไปข้างนอก (
-            <a href={GEOIP_ATTRIBUTION.url} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+            แปลว่าระบบบันทึกถูกต้อง · ประเทศ/ผู้ให้บริการค้นจากฐานข้อมูลในเซิร์ฟเวอร์เอง ไม่ส่ง IP ออกไปข้างนอก (<a
+              href={GEOIP_ATTRIBUTION.url}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2"
+            >
               {GEOIP_ATTRIBUTION.text}
-            </a>
-            )
+            </a>)
           </p>
         </>
       )}

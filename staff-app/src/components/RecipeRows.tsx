@@ -223,7 +223,7 @@ export function RecipeEmptyState({ unitLabel, onStart }: Readonly<{ unitLabel: s
       </p>
       <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">ตัวอย่าง</span>
-        ผนัง 1 ตร.ม. = อิฐ 130 ก้อน + ปูนก่อ 0.25 ถุง + ทราย 0.01 คิว
+        <span>ผนัง 1 ตร.ม. = อิฐ 130 ก้อน + ปูนก่อ 0.25 ถุง + ทราย 0.01 คิว</span>
       </p>
       <div className="mt-1">
         <Button variant="ghost" size="sm" onClick={onStart}>

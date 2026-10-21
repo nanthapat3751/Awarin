@@ -142,17 +142,56 @@ export function groutKgPerSqm(widthMm: number, lengthMm: number, jointMm: number
  * ไม่บอกหน่วย: เลขไม่เกิน 150 ถือเป็นเซนติเมตร (กระเบื้อง 150 มม. มีน้อย ส่วน 60×60 ซม. มีทั่วไป)
  */
 export function parseTileSize(text: string): { widthMm: number; lengthMm: number } | null {
-  const m = /(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)\s*(ซม|cm|มม|mm)?/.exec(text);
+  const m = findSizePair(text);
   if (!m) return null;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
+  const { a, b, unit } = m;
   if (!(a > 0 && b > 0)) return null;
-  const unit = m[3];
   const toMm = unit === "ซม" || unit === "cm" || (!unit && Math.max(a, b) <= 150) ? 10 : 1;
   const w = Math.round(Math.min(a, b) * toMm);
   const l = Math.round(Math.max(a, b) * toMm);
   if (w < 20 || l > 3000) return null;
   return { widthMm: w, lengthMm: l };
+}
+
+const isDigit = (c: string | undefined) => c !== undefined && c >= "0" && c <= "9";
+const isSpace = (c: string | undefined) => c?.trim() === "";
+const SIZE_SEPARATORS = new Set(["x", "×", "X", "*"]);
+const SIZE_UNITS = ["ซม", "cm", "มม", "mm"];
+
+function skipSpaces(text: string, i: number): number {
+  let j = i;
+  while (isSpace(text[j])) j++;
+  return j;
+}
+
+/** เลขทศนิยมที่เริ่มตรงตำแหน่ง i (หลักติดกัน + ".หลัก" ถ้ามี) */
+function readNumber(text: string, i: number): { value: number; end: number } {
+  let j = i;
+  while (isDigit(text[j])) j++;
+  if (text[j] === "." && isDigit(text[j + 1])) {
+    j++;
+    while (isDigit(text[j])) j++;
+  }
+  return { value: Number(text.slice(i, j)), end: j };
+}
+
+/**
+ * คู่ "ก × ข หน่วย" แรกในข้อความ — อ่านทีละตัวอักษรแทน regex เดิมที่ต้องย้อนลองหลายทาง
+ * (ข้อความยาวที่มีตัวเลขเยอะทำให้ช้าแบบทวีคูณได้) ผลเหมือน regex เดิมทุกกรณี
+ */
+function findSizePair(text: string): { a: number; b: number; unit: string | undefined } | null {
+  for (let i = 0; i < text.length; i++) {
+    if (!isDigit(text[i]) || isDigit(text[i - 1])) continue;
+    const first = readNumber(text, i);
+    const sep = skipSpaces(text, first.end);
+    if (!SIZE_SEPARATORS.has(text[sep])) continue;
+    const start = skipSpaces(text, sep + 1);
+    if (!isDigit(text[start])) continue;
+    const second = readNumber(text, start);
+    const at = skipSpaces(text, second.end);
+    return { a: first.value, b: second.value, unit: SIZE_UNITS.find((u) => text.startsWith(u, at)) };
+  }
+  return null;
 }
 
 export interface TileRoomCount {
@@ -194,6 +233,9 @@ const fmt = (v: number, digits = 2) => String(Number(v.toFixed(digits)));
 function positive(v: number | null | undefined): v is number {
   return v != null && Number.isFinite(v) && v > 0;
 }
+/** ≥ 0 / > 0 — NaN ไม่ผ่าน เหมือนการเขียน !(v >= 0) แบบเดิม */
+const atLeastZero = (v: number) => v >= 0;
+const aboveZero = (v: number) => v > 0;
 
 /** ค่าที่กรอกในตัวคิดใช้ได้ไหม (ไม่รวมราคา — ดู tilePricingErrors) */
 export function tileConfigErrors(config: TileCalcConfig): string[] {
@@ -203,19 +245,19 @@ export function tileConfigErrors(config: TileCalcConfig): string[] {
     errors.push("ขนาดแผ่นต้องอยู่ระหว่าง 20–3,000 มม.");
   }
   if (!positive(thicknessMm) || thicknessMm > 50) errors.push("ความหนาแผ่นต้องมากกว่า 0 และไม่เกิน 50 มม.");
-  if (!(jointMm >= 0) || jointMm > 20) errors.push("ร่องยาแนวต้องอยู่ระหว่าง 0–20 มม.");
+  if (!atLeastZero(jointMm) || jointMm > 20) errors.push("ร่องยาแนวต้องอยู่ระหว่าง 0–20 มม.");
   if (config.piecesPerBox != null && (!Number.isInteger(config.piecesPerBox) || config.piecesPerBox <= 0)) {
     errors.push("แผ่นต่อกล่องต้องเป็นจำนวนเต็มมากกว่า 0");
   }
-  if (!(config.wastePct >= 0) || config.wastePct > 50) errors.push("เผื่อแตกหักต้องอยู่ระหว่าง 0–50%");
+  if (!atLeastZero(config.wastePct) || config.wastePct > 50) errors.push("เผื่อแตกหักต้องอยู่ระหว่าง 0–50%");
   const a = config.adhesive;
-  if (a && (!positive(a.kgPerSqm) || a.kgPerSqm > 30 || !positive(a.bagKg) || !(a.wastePct >= 0) || a.wastePct > 50)) {
+  if (a && (!positive(a.kgPerSqm) || a.kgPerSqm > 30 || !positive(a.bagKg) || !atLeastZero(a.wastePct) || a.wastePct > 50)) {
     errors.push("ปูนกาว: กรอกปริมาณต่อ ตร.ม. ขนาดถุง และเผื่อให้ถูกต้อง");
   }
   const g = config.grout;
-  if (g && (!positive(g.packKg) || !(g.wastePct >= 0) || g.wastePct > 50)) {
+  if (g && (!positive(g.packKg) || !atLeastZero(g.wastePct) || g.wastePct > 50)) {
     errors.push("ยาแนว: กรอกขนาดถุงและเผื่อให้ถูกต้อง");
-  } else if (g && !(jointMm > 0)) {
+  } else if (g && !aboveZero(jointMm)) {
     errors.push("ร่องยาแนว 0 มม. ไม่ต้องใช้ยาแนว — เอายาแนวออก หรือกรอกความกว้างร่อง");
   }
   const t = config.trim;
@@ -249,6 +291,66 @@ function piecesPerTile(cut: number, tile: number): number {
   return Math.max(1, floorSafe((tile + KERF) / (cut + KERF)));
 }
 
+interface TileSteps {
+  joint: number;
+  tA: number;
+  tB: number;
+  stepA: number;
+  stepB: number;
+}
+
+/** ช่องหัก: นับเฉพาะแผ่นเต็มที่อยู่ในช่องแน่ ๆ (ช่องวางตรงไหนของแนวปูก็ได้) */
+function deductRoom(row: TakeoffRowInput, t: TileSteps, times: string): TileRoomCount {
+  const n = row.count;
+  const inA = Math.max(0, floorSafe(row.length! / t.stepA) - 1);
+  const inB = Math.max(0, floorSafe(row.width! / t.stepB) - 1);
+  const saved = n * inA * inB;
+  return {
+    label: row.label,
+    deduct: true,
+    pieces: saved,
+    explain: `แผ่นเต็มที่อยู่ในช่องแน่ ๆ ${inA} × ${inB}${times} = ${saved} แผ่น`,
+  };
+}
+
+/** "1.2 ม. = 4 แผ่นเต็ม + เศษ 0.05 ม." */
+function alongText(span: number, fit: { full: number; cut: number }): string {
+  const rest = fit.cut > 0 ? ` + เศษ ${fmt(fit.cut, 3)} ม.` : "";
+  return `${fmt(span)} ม. = ${fit.full} แผ่นเต็ม${rest}`;
+}
+
+/** "ตัดขอบ 6 (แผ่นละ 2 ชิ้น)" */
+function edgeText(count: number, perTile: number): string {
+  const yieldNote = perTile > 1 ? ` (แผ่นละ ${perTile} ชิ้น)` : "";
+  return `ตัดขอบ ${count}${yieldNote}`;
+}
+
+/** ห้องหนึ่งแถว: แผ่นเต็ม + แผ่นตัดขอบสองแนว + มุม */
+function floorRoom(row: TakeoffRowInput, t: TileSteps, times: string): TileRoomCount {
+  const n = row.count;
+  const L = row.length!;
+  const W = row.width!;
+  const a = spanFit(L, t.tA, t.joint);
+  const b = spanFit(W, t.tB, t.joint);
+  const full = n * a.full * b.full;
+  const yieldA = a.cut > 0 ? piecesPerTile(a.cut, t.tA) : 0;
+  const yieldB = b.cut > 0 ? piecesPerTile(b.cut, t.tB) : 0;
+  const edgeA = yieldA && b.full > 0 ? ceilSafe((n * b.full) / yieldA) : 0;
+  const edgeB = yieldB && a.full > 0 ? ceilSafe((n * a.full) / yieldB) : 0;
+  const corner = yieldA && yieldB ? ceilSafe(n / (yieldA * yieldB)) : 0;
+  const pieces = full + edgeA + edgeB + corner;
+  const parts = [`เต็ม ${full}`];
+  if (edgeA) parts.push(edgeText(edgeA, yieldA));
+  if (edgeB) parts.push(edgeText(edgeB, yieldB));
+  if (corner) parts.push(`มุม ${corner}`);
+  return {
+    label: row.label,
+    deduct: false,
+    pieces,
+    explain: `ยาว ${alongText(L, a)} · กว้าง ${alongText(W, b)}${times} → ${parts.join(" + ")} = ${pieces} แผ่น`,
+  };
+}
+
 function layoutRows(config: TileCalcConfig, rows: TakeoffRowInput[]): { rooms: TileRoomCount[]; base: number } {
   const joint = config.jointMm / 1000;
   const long = config.lengthMm / 1000;
@@ -256,51 +358,14 @@ function layoutRows(config: TileCalcConfig, rows: TakeoffRowInput[]): { rooms: T
   // ด้านยาวของแผ่นตามด้าน "ยาว" ของห้อง (หรือกลับกันเมื่อติ๊กหมุน)
   const tA = config.rotate ? short : long;
   const tB = config.rotate ? long : short;
-  const stepA = tA + joint;
-  const stepB = tB + joint;
+  const steps: TileSteps = { joint, tA, tB, stepA: tA + joint, stepB: tB + joint };
   const rooms: TileRoomCount[] = [];
   let base = 0;
   for (const row of rows) {
-    const n = row.count;
-    const L = row.length!;
-    const W = row.width!;
-    const times = n > 1 ? ` × ${n} ห้อง` : "";
-    if (row.deduct) {
-      // ช่องหักวางตรงไหนของแนวปูก็ได้ — นับเฉพาะแผ่นเต็มที่อยู่ในช่องแน่ ๆ
-      const inA = Math.max(0, floorSafe(L / stepA) - 1);
-      const inB = Math.max(0, floorSafe(W / stepB) - 1);
-      const saved = n * inA * inB;
-      base -= saved;
-      rooms.push({
-        label: row.label,
-        deduct: true,
-        pieces: saved,
-        explain: `แผ่นเต็มที่อยู่ในช่องแน่ ๆ ${inA} × ${inB}${times} = ${saved} แผ่น`,
-      });
-      continue;
-    }
-    const a = spanFit(L, tA, joint);
-    const b = spanFit(W, tB, joint);
-    const full = n * a.full * b.full;
-    const yieldA = a.cut > 0 ? piecesPerTile(a.cut, tA) : 0;
-    const yieldB = b.cut > 0 ? piecesPerTile(b.cut, tB) : 0;
-    const edgeA = yieldA && b.full > 0 ? ceilSafe((n * b.full) / yieldA) : 0;
-    const edgeB = yieldB && a.full > 0 ? ceilSafe((n * a.full) / yieldB) : 0;
-    const corner = yieldA && yieldB ? ceilSafe(n / (yieldA * yieldB)) : 0;
-    const pieces = full + edgeA + edgeB + corner;
-    base += pieces;
-    const along = (span: number, fit: { full: number; cut: number }) =>
-      `${fmt(span)} ม. = ${fit.full} แผ่นเต็ม${fit.cut > 0 ? ` + เศษ ${fmt(fit.cut, 3)} ม.` : ""}`;
-    const parts = [`เต็ม ${full}`];
-    if (edgeA) parts.push(`ตัดขอบ ${edgeA}${yieldA > 1 ? ` (แผ่นละ ${yieldA} ชิ้น)` : ""}`);
-    if (edgeB) parts.push(`ตัดขอบ ${edgeB}${yieldB > 1 ? ` (แผ่นละ ${yieldB} ชิ้น)` : ""}`);
-    if (corner) parts.push(`มุม ${corner}`);
-    rooms.push({
-      label: row.label,
-      deduct: false,
-      pieces,
-      explain: `ยาว ${along(L, a)} · กว้าง ${along(W, b)}${times} → ${parts.join(" + ")} = ${pieces} แผ่น`,
-    });
+    const times = row.count > 1 ? ` × ${row.count} ห้อง` : "";
+    const room = row.deduct ? deductRoom(row, steps, times) : floorRoom(row, steps, times);
+    base += row.deduct ? -room.pieces : room.pieces;
+    rooms.push(room);
   }
   return { rooms, base };
 }
@@ -361,7 +426,7 @@ export function tileTakeoff(
     basePieces = round3(Math.max(0, area) / cell);
   }
   area = round3(area);
-  if (!(area > 0) || !(basePieces > 0)) {
+  if (!aboveZero(area) || !aboveZero(basePieces)) {
     return { ...empty, mode, errors: ["พื้นที่ปูต้องมากกว่า 0 — แถวหักมากกว่าพื้นที่ห้อง"] };
   }
 
@@ -429,19 +494,21 @@ const floor4 = (v: number) => Math.max(0.0001, Math.floor(v * 1e4 + 1e-6) / 1e4)
  * กระเบื้องเป็นกล่อง (ถ้ารู้แผ่นต่อกล่อง) — รวมเผื่อแล้ว จึงไม่ใส่เผื่อซ้ำในวัสดุย่อย
  * ปูนกาว/ยาแนวใส่เผื่อไว้ที่วัสดุย่อย · ปริมาณเป็นเศษได้ รายการสั่งซื้อรวมทุกบรรทัดแล้วค่อยปัดขึ้น
  */
-export function tileComponents(config: TileCalcConfig, result: TileTakeoffResult, lineQuantity: number): TileComponent[] {
-  if (result.errors.length > 0 || !(lineQuantity > 0)) return [];
-  const tileArea = (config.widthMm * config.lengthMm) / 1e6;
+/** ราคากระเบื้องต่อหน่วยที่ใช้ในสูตร — ต่อกล่องถ้ารู้แผ่นต่อกล่อง ไม่งั้นต่อแผ่น */
+function tileUnitPrice(config: TileCalcConfig, tileArea: number): number {
   const ppb = config.piecesPerBox;
   const p = config.tilePrice ?? 0;
-  let tilePrice: number;
-  if (ppb) {
-    if (config.tilePriceUnit === "BOX") tilePrice = p;
-    else if (config.tilePriceUnit === "PIECE") tilePrice = p * ppb;
-    else tilePrice = p * ppb * tileArea;
-  } else {
-    tilePrice = config.tilePriceUnit === "PIECE" ? p : p * tileArea;
-  }
+  if (!ppb) return config.tilePriceUnit === "PIECE" ? p : p * tileArea;
+  if (config.tilePriceUnit === "BOX") return p;
+  if (config.tilePriceUnit === "PIECE") return p * ppb;
+  return p * ppb * tileArea;
+}
+
+export function tileComponents(config: TileCalcConfig, result: TileTakeoffResult, lineQuantity: number): TileComponent[] {
+  if (result.errors.length > 0 || !aboveZero(lineQuantity)) return [];
+  const tileArea = (config.widthMm * config.lengthMm) / 1e6;
+  const ppb = config.piecesPerBox;
+  const tilePrice = tileUnitPrice(config, tileArea);
   const out: TileComponent[] = [
     {
       name: tileDisplayName(config),

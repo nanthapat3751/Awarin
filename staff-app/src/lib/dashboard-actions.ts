@@ -41,7 +41,7 @@ function approvalActions(pendingWork: PendingWorkDto): DashboardAction[] {
     return {
       key: `approval-${row.quote.id}`,
       level: days >= 1 ? ("urgent" as const) : ("opportunity" as const),
-      headline: `${row.project.name} — ${row.proposerName} ขออนุมัติใบเสนอราคา${days >= 1 ? ` (รอมา ${days} วัน)` : ""}`,
+      headline: `${row.project.name} — ${row.proposerName} ขออนุมัติใบเสนอราคา${waitedNote(days)}`,
       action: "ตรวจแล้วอนุมัติ หรือส่งกลับให้แก้",
       href: `/projects/${row.project.id}?tab=quotes`,
     };
@@ -141,7 +141,7 @@ function leadActions(pendingWork: PendingWorkDto): DashboardAction[] {
   return pendingWork.newLeads.map((lead) => ({
     key: `lead-${lead.id}`,
     level: (daysSince(lead.createdAt) >= 1 ? "urgent" : "opportunity") as ActionLevel,
-    headline: `คำขอใหม่จาก ${lead.name}${daysSince(lead.createdAt) >= 1 ? ` — รอมา ${daysSince(lead.createdAt)} วัน` : " — เข้ามาวันนี้"}`,
+    headline: `คำขอใหม่จาก ${lead.name} — ${leadAge(daysSince(lead.createdAt))}`,
     action: "ติดต่อกลับแล้วเปลี่ยนสถานะคำขอ",
     href: "/leads",
   }));
@@ -161,4 +161,12 @@ export function dashboardActions(
   ].sort(
     (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || (b.amount ?? 0) - (a.amount ?? 0),
   );
+}
+
+function waitedNote(days: number) {
+  return days >= 1 ? ` (รอมา ${days} วัน)` : "";
+}
+
+function leadAge(days: number) {
+  return days >= 1 ? `รอมา ${days} วัน` : "เข้ามาวันนี้";
 }

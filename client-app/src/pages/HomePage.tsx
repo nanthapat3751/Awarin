@@ -178,6 +178,44 @@ const HERO_TEXT_MAX_WAIT_MS = 800;
 /** รูปมาเร็วกว่านี้ (อยู่ในแคช) = โผล่ทันที ไม่ต้องจางเข้า */
 const HERO_INSTANT_MS = 150;
 
+/** รูป hero: null = ยังไม่รู้ค่าตั้ง (รอก่อน ไม่โหลดรูปสำรองไปพลาง) · รูปที่ตั้งไว้เปิดไม่ได้ = รูปสำรอง */
+function heroImageOf(siteImages: Record<string, string> | null, failed: boolean) {
+  if (siteImages === null) return null;
+  return failed ? HERO_FALLBACK : resolveSiteImage(siteImages.siteHeroHome, HERO_FALLBACK);
+}
+
+/**
+ * คอลัมน์ตามจำนวนแบบ (ตั้งแนะนำได้ 1–6) ให้ไม่มีช่องโหว่ท้ายแถว: 1 = ใบเดียวไม่ยืดสุดจอ ·
+ * 2/4 = สองคอลัมน์ · 3/5/6 = สามคอลัมน์จอใหญ่ (5 เหลือหนึ่งช่องก็ยังน้อยกว่าแบบอื่น)
+ */
+function featuredGridColsOf(count: number) {
+  if (count === 1) return "max-w-2xl";
+  if (count === 2 || count === 4) return "sm:grid-cols-2";
+  return "sm:grid-cols-2 lg:grid-cols-3";
+}
+
+/** ก้อนแสงวิ่งระหว่างรอรูป hero — วางตรงตำแหน่งเนื้อหาจริง (ชื่อบริษัท · หัวข้อ · คำอธิบาย · ปุ่ม · กล่องมุมขวาล่าง) */
+function HeroSkeleton() {
+  return (
+    <div aria-hidden className="skeleton-group absolute inset-0 flex items-center">
+      <div className="w-full max-w-5xl mx-auto px-4 py-24 flex flex-col items-start gap-5">
+        <div className="skeleton h-4 w-44" />
+        <div className="flex w-full flex-col gap-3">
+          <div className="skeleton h-8 sm:h-12 w-[min(40rem,90%)]" />
+          <div className="skeleton h-8 sm:h-12 w-[min(20rem,60%)]" />
+        </div>
+        <div className="flex w-full flex-col gap-2">
+          <div className="skeleton h-4 w-[min(36rem,95%)]" />
+          {/* จอกว้างคำอธิบายจริงอยู่บรรทัดเดียว */}
+          <div className="skeleton h-4 w-[min(26rem,70%)] sm:hidden" />
+        </div>
+        <div className="skeleton mt-2 h-11 w-32 rounded-lg" />
+      </div>
+      <div className="skeleton absolute bottom-0 right-0 h-40 sm:h-56 w-[82%] sm:w-136 rounded-none" />
+    </div>
+  );
+}
+
 export function HomePage() {
   usePageMeta(null);
   // ค่าตั้งจากการเปิดเว็บครั้งก่อน — รู้ทันทีว่า hero ใช้รูปไหน ไม่ต้องรอเครือข่าย
@@ -206,8 +244,7 @@ export function HomePage() {
   // parallax เบา ๆ ที่รูป hero (section มี overflow-hidden อยู่แล้ว รูปถูก scale เผื่อขอบในฮุก)
   const heroImgRef = useParallax<HTMLImageElement>();
   const [heroFailed, setHeroFailed] = useState(false);
-  const heroImage =
-    siteImages === null ? null : heroFailed ? HERO_FALLBACK : resolveSiteImage(siteImages.siteHeroHome, HERO_FALLBACK);
+  const heroImage = heroImageOf(siteImages, heroFailed);
 
   // ลำดับการโหลด hero ให้เหมือนส่วนอื่นของเว็บ: แสงวิ่ง (โทนเข้ม) ระหว่างรอ → รูปจางเข้า → ข้อความลอยขึ้น
   const mountedAt = useRef(performance.now());
@@ -245,9 +282,7 @@ export function HomePage() {
 
   // คอลัมน์ตามจำนวนแบบ (ตั้งแนะนำได้ 1–6) ให้ไม่มีช่องโหว่ท้ายแถว: 1 = ใบเดียวไม่ยืดสุดจอ ·
   // 2/4 = สองคอลัมน์ · 3/5/6 = สามคอลัมน์จอใหญ่ (5 เหลือหนึ่งช่องก็ยังน้อยกว่าแบบอื่น)
-  let featuredGridCols = "sm:grid-cols-2 lg:grid-cols-3";
-  if (featured.length === 1) featuredGridCols = "max-w-2xl";
-  else if (featured.length === 2 || featured.length === 4) featuredGridCols = "sm:grid-cols-2";
+  const featuredGridCols = featuredGridColsOf(featured.length);
 
   return (
     <div>
@@ -263,24 +298,7 @@ export function HomePage() {
             รูปในแคชจะไม่เห็นเลย · เดิมเป็นก้อนเดียวโทนเข้มเต็มจอ ผู้ใช้ขอให้เหมือนหน้าอื่น
             ก้อนข้อความหายเมื่อข้อความจริงพร้อม (รูปช้าเกิน HERO_TEXT_MAX_WAIT_MS ข้อความจะขึ้นเป็นสีเข้มบนพื้นขาว
             แทนที่ก้อน ไม่ซ้อนกัน) ส่วนก้อนกล่องมุมขวาล่างหายพร้อมกันเพราะกล่องจริงก็ขึ้นพร้อมข้อความ */}
-        {heroLight && !heroTextReady && (
-          <div aria-hidden className="skeleton-group absolute inset-0 flex items-center">
-            <div className="w-full max-w-5xl mx-auto px-4 py-24 flex flex-col items-start gap-5">
-              <div className="skeleton h-4 w-44" />
-              <div className="flex w-full flex-col gap-3">
-                <div className="skeleton h-8 sm:h-12 w-[min(40rem,90%)]" />
-                <div className="skeleton h-8 sm:h-12 w-[min(20rem,60%)]" />
-              </div>
-              <div className="flex w-full flex-col gap-2">
-                <div className="skeleton h-4 w-[min(36rem,95%)]" />
-                {/* จอกว้างคำอธิบายจริงอยู่บรรทัดเดียว */}
-                <div className="skeleton h-4 w-[min(26rem,70%)] sm:hidden" />
-              </div>
-              <div className="skeleton mt-2 h-11 w-32 rounded-lg" />
-            </div>
-            <div className="skeleton absolute bottom-0 right-0 h-40 sm:h-56 w-[82%] sm:w-136 rounded-none" />
-          </div>
-        )}
+        {heroLight && !heroTextReady && <HeroSkeleton />}
         <img
           ref={heroImgRef}
           src={heroImage ?? undefined}
@@ -453,7 +471,7 @@ export function HomePage() {
                 to="/house-designs"
                 className="group inline-flex min-h-11 items-center gap-1 text-sm font-medium text-brand"
               >
-                ดูแบบบ้านทั้งหมด
+                <span>ดูแบบบ้านทั้งหมด</span>
                 <span aria-hidden className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none">
                   →
                 </span>
@@ -494,7 +512,7 @@ export function HomePage() {
                       <HouseSpecLine d={d} />
                       {/* ขึ้นตลอด (ไม่ใช่เฉพาะตอนชี้) — จอสัมผัสไม่มีสถานะชี้ ต้องเห็นว่ากดได้ */}
                       <span className="mt-auto inline-flex items-center gap-1 pt-4 text-sm font-medium text-brand">
-                        ดูรายละเอียด
+                        <span>ดูรายละเอียด</span>
                         <span aria-hidden className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none">
                           →
                         </span>

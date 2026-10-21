@@ -65,7 +65,7 @@ export function paymentWarnings(input: PaymentCheckInput, installments: readonly
 
   // บันทึกซ้ำ: ยอดเดียวกัน วันเดียวกัน ในสัญญาเดียวกัน (งวดไหนก็ได้ — กดผิดงวดแล้วกดใหม่ก็ซ้ำ)
   for (const inst of installments) {
-    const dup = inst.payments.find(
+    const dup = inst.payments.some(
       (p) => p.id !== input.editingPaymentId && p.paidOn === input.paidOn && roundTo(p.amount, 2) === amount,
     );
     if (dup) {

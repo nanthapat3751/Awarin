@@ -46,6 +46,25 @@ forgetLastEmail();
 const WARN_AFTER_REJECTS = 3;
 const REJECTS_KEY = "loginRejects";
 
+/** รายละเอียดใต้ข้อความผิดพลาด: ติดล็อก = นับถอยหลัง · ผิดหลายครั้ง = เตือนก่อนล็อก + ทางไปตั้งรหัสใหม่ */
+function failureDetail(waitRemaining: number | null, warnLock: boolean) {
+  if (waitRemaining != null) {
+    return <p className="font-semibold tabular-nums">ลองใหม่ได้ในอีก {formatCountdown(waitRemaining)}</p>;
+  }
+  if (!warnLock) return undefined;
+  return (
+    <div className="mt-1 flex flex-col items-start gap-2">
+      <p>กรอกผิดหลายครั้งแล้ว ถ้ายังผิดอีก บัญชีอาจถูกล็อกชั่วคราว — จำรหัสไม่ได้ ตั้งรหัสใหม่ได้เลย</p>
+      <Link
+        to="/forgot-password"
+        className="inline-flex min-h-11 items-center rounded-full bg-white px-4 text-sm font-medium text-brand shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 lg:min-h-9"
+      >
+        ตั้งรหัสผ่านใหม่
+      </Link>
+    </div>
+  );
+}
+
 function readRejects(): number {
   try {
     const n = Number(sessionStorage.getItem(REJECTS_KEY));
@@ -212,23 +231,7 @@ export function LoginForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
         <FormAlert
           kind={failure.kind}
           message={failure.message}
-          detail={
-            waitRemaining != null ? (
-              <p className="font-semibold tabular-nums">
-                ลองใหม่ได้ในอีก {formatCountdown(waitRemaining)}
-              </p>
-            ) : failure.kind === "input" && rejects >= WARN_AFTER_REJECTS ? (
-              <div className="mt-1 flex flex-col items-start gap-2">
-                <p>กรอกผิดหลายครั้งแล้ว ถ้ายังผิดอีก บัญชีอาจถูกล็อกชั่วคราว — จำรหัสไม่ได้ ตั้งรหัสใหม่ได้เลย</p>
-                <Link
-                  to="/forgot-password"
-                  className="inline-flex min-h-11 items-center rounded-full bg-white px-4 text-sm font-medium text-brand shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 lg:min-h-9"
-                >
-                  ตั้งรหัสผ่านใหม่
-                </Link>
-              </div>
-            ) : undefined
-          }
+          detail={failureDetail(waitRemaining, failure.kind === "input" && rejects >= WARN_AFTER_REJECTS)}
           // ปุ่มลองใหม่มีเฉพาะตอนที่กดแล้วมีโอกาสสำเร็จโดยไม่ต้องแก้อะไร — รหัสผ่านผิด
           // ไม่มีปุ่มนี้ เพราะกดซ้ำด้วยรหัสเดิมก็ผิดเหมือนเดิม แถมนับเข้าโควตาล็อกบัญชี
           onRetry={isRetryable(failure.kind) && !submitting ? () => void submit() : undefined}

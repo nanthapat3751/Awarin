@@ -201,11 +201,7 @@ export function CategoriesPage() {
   // แสดงทีละหมวดงานหลัก (แท็บ) แบบเดียวกับหน้าแม่แบบและหน้า BOQ ของโครงการ
   // ไม่มีหมวดใน URL = แท็บ "ภาพรวม" (รายชื่อหมวดหลัก) · ลิงก์ที่ชี้กลุ่มย่อย/รายการ พาไปหมวดหลักของมัน
   const requested = categoryId ? byId.get(categoryId) : undefined;
-  const selected = requested
-    ? requested.level === "CATEGORY"
-      ? requested
-      : topAncestorOf(requested.id)
-    : undefined;
+  const selected = requested && topCategoryOf(requested);
   // หมวดที่ปิดใช้งานซ่อนจากแถบ ยกเว้นหมวดที่เปิดอยู่ (เพิ่งกดปิดไป — ต้องยังเห็นว่าอยู่ตรงไหน)
   const tabCategories = topCategories.filter((c) => passesArchive(c) || c.id === selected?.id);
   const selectedIndex = selected ? tabCategories.indexOf(selected) : -1;
@@ -219,6 +215,11 @@ export function CategoriesPage() {
       current = current.parentId ? byId.get(current.parentId) : undefined;
     }
     return parts.join(" > ");
+  }
+
+  /** หมวดหลักของแถวที่ลิงก์ชี้มา (ตัวเองถ้าเป็นหมวดหลักอยู่แล้ว) */
+  function topCategoryOf(node: WorkCategoryDto): WorkCategoryDto | undefined {
+    return node.level === "CATEGORY" ? node : topAncestorOf(node.id);
   }
 
   function topAncestorOf(id: string): WorkCategoryDto | undefined {
@@ -787,25 +788,36 @@ export function CategoriesPage() {
     const collapsible = children.length > 0 && !(node.level === "CATEGORY" && Boolean(selected));
     const isOpen = !collapsible || !collapsed.has(node.id);
 
-    if (editingId === node.id && !continued) out.push(editRow(node));
-    else if (node.level === "ITEM") out.push(...itemRows(node, depth));
-    else out.push(groupHeaderRow(node, depth, { children, collapsible, isOpen, slice }));
+    out.push(...headRowsOf(node, depth, { children, collapsible, isOpen, slice }));
 
     // ฟอร์มเพิ่ม/วัสดุอยู่ใต้หัวชิ้นแรกของกลุ่มเท่านั้น ไม่ซ้ำบนหัว "(ต่อ)"
     if (!continued && addingChildFor === node.id && childLevel) out.push(addChildRow(node, childLevel));
 
-    if (isOpen) {
-      for (const child of slice ? slice.items : children) pushRows(child, depth + 1, out);
-      if (children.length === 0 && childLevel) {
-        out.push(
-          <tr key={`${node.id}-empty`} className="border-t border-slate-100">
-            <td colSpan={COL_COUNT} className="px-3 py-2 text-sm text-slate-500" style={{ paddingLeft: 24 + depth * 18 }}>
-              ยังไม่มี{LEVEL_LABEL[childLevel]}ในหมวดนี้ — กดปุ่ม “+ {LEVEL_LABEL[childLevel]}” ที่แถวด้านบน
-            </td>
-          </tr>,
-        );
-      }
-    }
+    if (!isOpen) return;
+    const shown = slice ? slice.items : children;
+    for (const child of shown) pushRows(child, depth + 1, out);
+    if (children.length === 0 && childLevel) out.push(emptyGroupRow(node.id, depth, childLevel));
+  }
+
+  /** แถวหัวของโหนด: ฟอร์มแก้ (ถ้ากำลังแก้ และไม่ใช่หัว "(ต่อ)") · แถวรายการ · หรือหัวกลุ่ม */
+  function headRowsOf(
+    node: WorkCategoryDto,
+    depth: number,
+    opts: { children: WorkCategoryDto[]; collapsible: boolean; isOpen: boolean; slice?: PageSegment },
+  ): ReactElement[] {
+    if (editingId === node.id && !opts.slice?.continued) return [editRow(node)];
+    if (node.level === "ITEM") return itemRows(node, depth);
+    return [groupHeaderRow(node, depth, opts)];
+  }
+
+  function emptyGroupRow(id: string, depth: number, childLevel: WorkCategoryLevel): ReactElement {
+    return (
+      <tr key={`${id}-empty`} className="border-t border-slate-100">
+        <td colSpan={COL_COUNT} className="px-3 py-2 text-sm text-slate-500" style={{ paddingLeft: 24 + depth * 18 }}>
+          ยังไม่มี{LEVEL_LABEL[childLevel]}ในหมวดนี้ — กดปุ่ม “+ {LEVEL_LABEL[childLevel]}” ที่แถวด้านบน
+        </td>
+      </tr>
+    );
   }
 
   // แบ่งแท็บหมวดเป็นหน้าละ PAGE_SIZE รายการ — กลุ่มย่อยที่ข้ามหน้าถูกตัดเป็นชิ้น (หัวซ้ำ "(ต่อ)")
@@ -911,6 +923,291 @@ export function CategoriesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightId, highlightPage]);
 
+  function renderRootAddForm() {
+    return (
+      <div className="mb-4 flex flex-col gap-2 border border-dashed border-slate-300 rounded-md px-3 py-2 bg-white">
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            placeholder="รหัสหมวด (เว้นว่างให้ระบบตั้งให้)"
+            value={newCode}
+            onChange={(e) => setNewCode(e.target.value)}
+            className="border border-slate-300 rounded-md px-2 py-1 text-sm w-56"
+          />
+          <input
+            placeholder="ชื่อหมวดงาน"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            className="border border-slate-300 rounded-md px-2 py-1 text-sm flex-1"
+          />
+          <Button size="sm" onClick={() => submitAdd(null, "CATEGORY")}>
+            <Plus size={14} /> เพิ่ม
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setAddingChildFor(null)}>
+            <X size={14} /> ยกเลิก
+          </Button>
+        </div>
+        <input
+          placeholder="คำอธิบาย (ไม่บังคับ)"
+          value={newDescription}
+          onChange={(e) => setNewDescription(e.target.value)}
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+        />
+      </div>
+    );
+  }
+
+  function renderSearchResults() {
+    return (
+      <div className="mt-4">
+        <p className="text-sm text-slate-700 mb-2">พบ {searchResults.length} รายการ</p>
+        {searchResults.length === 0 && <p className="text-slate-500">ไม่พบรายการที่ตรงกับคำค้น</p>}
+        {searchResults.map((node) => (
+          <button
+            key={node.id}
+            type="button"
+            onClick={() => jumpToResult(node)}
+            className={`w-full text-left flex items-center gap-3 border border-slate-200 bg-white rounded-lg px-3 py-2 mt-2 hover:bg-slate-50 ${
+              node.active ? "" : "opacity-60"
+            }`}
+          >
+            <span className="text-xs text-slate-500 w-24 shrink-0">{LEVEL_LABEL[node.level]}</span>
+            <span className="flex-1">
+              <span className="text-sm text-slate-800">
+                {node.code ? `${node.code} — ` : ""}
+                {node.name}
+                {!node.active && (
+                  <span className="ml-2 text-xs font-medium text-slate-500 bg-slate-200 rounded-full px-2 py-0.5">
+                    ปิดใช้งาน
+                  </span>
+                )}
+              </span>
+              <span className="block text-xs text-slate-500">{pathOf(node.id)}</span>
+            </span>
+            <span className="text-sm text-slate-700">ไปที่หมวด →</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderOverview() {
+    return (
+      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-200 text-left text-xs text-slate-600">
+            <tr>
+              <th className="w-20 px-3 py-2 font-medium">รหัส</th>
+              <th className="px-3 py-2 font-medium">หมวดงาน</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">กลุ่มงานย่อย</th>
+              <th className="px-3 py-2 text-right font-medium">รายการ</th>
+              <th className="px-3 py-2 text-right font-medium">ราคา</th>
+              <th className="w-10 px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {tabCategories.map((c) => {
+              const sum = summaryByCategory.get(c.id);
+              return (
+                <tr
+                  key={c.id}
+                  onClick={() => openTab(c.id)}
+                  className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${
+                    c.active ? "" : "opacity-60"
+                  }`}
+                >
+                  <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{c.code ?? "—"}</td>
+                  <td className="px-3 py-2.5">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openTab(c.id);
+                      }}
+                      className="text-left font-medium text-slate-800 hover:text-brand"
+                    >
+                      {c.name}
+                    </button>
+                    {!c.active && (
+                      <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
+                        ปิดใช้งาน
+                      </span>
+                    )}
+                    {c.description && <span className="block text-xs text-slate-500">{c.description}</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-slate-500 tabular-nums">
+                    {displayedSiblings(c.id).length}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-slate-500 tabular-nums">{sum?.items ?? 0}</td>
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">{priceSummary(c)}</td>
+                  <td className="px-3 py-2.5 text-slate-400">
+                    <ChevronRight size={16} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderCategory(top: WorkCategoryDto) {
+    return (
+      <>
+        {/* กับดัก sticky: overflow-x-auto ทำให้ overflow-y เป็น auto ตาม → กลายเป็น scroll
+            container → หัวตารางไม่ติดจอ จึงปล่อยเป็น visible เมื่อจอกว้างพอให้ตารางลงตัว
+            (พื้นที่เนื้อหาเต็มที่ 1,104px ≥ ตาราง 1,040px ตั้งแต่จอ ~1,330px) */}
+        {pageCount > 1 && (
+          <p className="mt-4 text-xs text-slate-500 tabular-nums">
+            แสดง {itemsOnPage > 0 ? `${itemsBeforePage + 1}-${itemsBeforePage + itemsOnPage}` : "—"} จาก {itemsTotal} รายการ
+          </p>
+        )}
+        <div className={`${pageCount > 1 ? "mt-2" : "mt-4"} overflow-x-auto min-[1330px]:overflow-x-visible rounded-lg border border-slate-200 bg-white`}>
+          <table className="w-full min-w-[1040px] table-fixed text-sm">
+            {/* ความกว้างตายตัว: ไม่งั้นเวลายุบ/กางหมวด ตารางจะคำนวณความกว้างใหม่จากเนื้อหา
+                ที่เห็นอยู่ แล้วคอลัมน์ขยับทั้งแถบ (วัดได้ถึง 194px) */}
+            <colgroup>
+              <col className="w-24" />
+              <col />
+              <col className="w-20" />
+              <col className="w-[104px]" />
+              <col className="w-[104px]" />
+              <col className="w-[104px]" />
+              <col className="w-20" />
+              <col className="w-[232px]" />
+            </colgroup>
+            {/* top-11 = ใต้แถบหมวดที่ล็อกสูง h-11 · เส้นคั่นเป็นเงา inset ไม่ใช่ border —
+                border ของเซลล์ไม่ติดจอไปกับหัวตาราง เหลือช่อง 1px ให้ปุ่มในแถวโผล่ */}
+            <thead className="sticky top-11 z-10 text-left text-xs text-slate-600">
+              {/* ชื่อหมวดเป็นแถวแรกของหัวตาราง + ปุ่มจัดการหมวดหลักรวมอยู่ที่นี่ที่เดียว */}
+              <tr>
+                <th
+                  colSpan={COL_COUNT}
+                  scope="colgroup"
+                  className={`bg-[#ececf7] px-3 py-2 font-normal shadow-[inset_0_-1px_0_0_rgb(203,213,225)] ${
+                    highlightId === top.id ? "ring-2 ring-emerald-300 ring-inset" : ""
+                  }`}
+                >
+                  <div id="category-title" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    {top.code && (
+                      <span className="font-mono text-sm font-semibold text-brand">{top.code}</span>
+                    )}
+                    <span className="text-sm font-semibold text-slate-900">{top.name}</span>
+                    <span className="text-xs text-slate-500">
+                      {displayedSiblings(top.id).length} กลุ่มงานย่อย ·{" "}
+                      {summaryByCategory.get(top.id)?.items ?? 0} รายการ
+                    </span>
+                    {!top.active && (
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
+                        ปิดใช้งาน
+                      </span>
+                    )}
+                    <span className="whitespace-nowrap">{priceSummary(top)}</span>
+                    <div className="ml-auto">{actionButtons(top)}</div>
+                  </div>
+                  {top.description && (
+                    <span className="mt-0.5 block text-xs text-slate-500">{top.description}</span>
+                  )}
+                </th>
+              </tr>
+              <tr className="[&_th]:bg-slate-200 [&_th]:shadow-[inset_0_-1px_0_0_rgb(203,213,225)]">
+                <th className="px-3 py-2 font-medium whitespace-nowrap">รหัส</th>
+                <th className="px-3 py-2 font-medium">ชื่อรายการ</th>
+                <th className="px-3 py-2 font-medium whitespace-nowrap">หน่วย</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">ค่าวัสดุ/หน่วย</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">ค่าแรง/หน่วย</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">รวม/หน่วย</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">เผื่อเสีย</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const rows: ReactElement[] = [];
+                if (editingId === top.id) rows.push(editRow(top));
+                if (addingChildFor === top.id) rows.push(addChildRow(top, "SUBGROUP"));
+                for (const seg of pageSegments) pushRows(seg.sub, 0, rows, seg);
+                if (displayedSiblings(top.id).length === 0) {
+                  rows.push(
+                    <tr key="empty" className="border-t border-slate-100">
+                      <td colSpan={COL_COUNT} className="px-3 py-6 text-center text-sm text-slate-500">
+                        ยังไม่มีกลุ่มงานย่อยในหมวดนี้ — กดปุ่ม “+ กลุ่มงานย่อย” ที่แถวชื่อหมวดด้านบน
+                      </td>
+                    </tr>,
+                  );
+                }
+                return rows;
+              })()}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={page} pageCount={pageCount} onChange={(n) => goPage(n)} />
+        {/* จบหมวดแล้วไปต่อได้เลย ไม่ต้องเลื่อนกลับขึ้นไปที่แถบ */}
+        <nav aria-label="เปลี่ยนหมวด" className="mt-3 flex items-center justify-between gap-3 text-sm">
+          {(() => {
+            const prev = selectedIndex > 0 ? tabCategories[selectedIndex - 1] : null;
+            const next = selectedIndex >= 0 ? tabCategories[selectedIndex + 1] ?? null : null;
+            const navBtn =
+              "inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900";
+            return (
+              <>
+                <button type="button" onClick={() => openTab(prev?.id ?? null, true)} className={navBtn}>
+                  <ChevronLeft size={16} />
+                  {prev ? (
+                    <>
+                      {prev.code && <span className="font-mono text-xs text-slate-400">{prev.code}</span>}
+                      {shortCategoryName(prev.name)}
+                    </>
+                  ) : (
+                    "ภาพรวม"
+                  )}
+                </button>
+                {next && (
+                  <button type="button" onClick={() => openTab(next.id, true)} className={navBtn}>
+                    {next.code && <span className="font-mono text-xs text-slate-400">{next.code}</span>}
+                    {shortCategoryName(next.name)}
+                    <ChevronRight size={16} />
+                  </button>
+                )}
+              </>
+            );
+          })()}
+        </nav>
+      </>
+    );
+  }
+
+  /**
+   * ยุบ/กางทุกกลุ่มย่อยของหมวดที่เปิด — ปลายขวาของแถบที่ติดจอ กดได้ตลอดไม่ต้องเลื่อนกลับขึ้นไป
+   * ปุ่มขอบบางแบบเดียวกับปุ่มอื่นในหน้า (ghost sm) — ผู้ใช้เลือกให้มีกรอบ แยกจากแท็บชัดเจน
+   */
+  function renderFoldAll() {
+    if (!selected || search.trim() !== "" || foldableSubs.length === 0) return null;
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={toggleAllSubs}
+        aria-label={allSubsCollapsed ? "กางกลุ่มงานย่อยทั้งหมด" : "ยุบกลุ่มงานย่อยทั้งหมด"}
+        className="shrink-0 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-brand"
+      >
+        {allSubsCollapsed ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
+        {allSubsCollapsed ? "กางทั้งหมด" : "ยุบทั้งหมด"}
+      </Button>
+    );
+  }
+
+  const archivedSuffix = archivedCount > 0 ? ` (${archivedCount})` : "";
+
+  /** เนื้อหาใต้แถบ: กำลังค้นหา = ผลค้นหา · ไม่ได้เลือกหมวด = ภาพรวม (กดแถวเพื่อเปิด) · เลือกแล้ว = ตารางของหมวด */
+  function mainView() {
+    if (search.trim() !== "") return renderSearchResults();
+    // ภาพรวม — รายชื่อหมวดหลัก ไม่มีปุ่มจัดการประจำแถว (ย้ายไปอยู่บนหัวของแต่ละแท็บ) กดแถวเพื่อเปิด
+    if (!selected) return renderOverview();
+    return renderCategory(selected);
+  }
+
   return (
     <Layout>
       <PageHeader
@@ -937,40 +1234,12 @@ export function CategoriesPage() {
             onChange={(e) => setShowArchived(e.target.checked)}
             className="accent-brand"
           />
-          แสดงที่ปิดใช้งาน{archivedCount > 0 ? ` (${archivedCount})` : ""}
+          แสดงที่ปิดใช้งาน{archivedSuffix}
         </label>
       </div>
 
       {addingChildFor === "root" && (
-        <div className="mb-4 flex flex-col gap-2 border border-dashed border-slate-300 rounded-md px-3 py-2 bg-white">
-          <div className="flex items-center gap-2">
-            <input
-              autoFocus
-              placeholder="รหัสหมวด (เว้นว่างให้ระบบตั้งให้)"
-              value={newCode}
-              onChange={(e) => setNewCode(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm w-56"
-            />
-            <input
-              placeholder="ชื่อหมวดงาน"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm flex-1"
-            />
-            <Button size="sm" onClick={() => submitAdd(null, "CATEGORY")}>
-              <Plus size={14} /> เพิ่ม
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setAddingChildFor(null)}>
-              <X size={14} /> ยกเลิก
-            </Button>
-          </div>
-          <input
-            placeholder="คำอธิบาย (ไม่บังคับ)"
-            value={newDescription}
-            onChange={(e) => setNewDescription(e.target.value)}
-            className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-          />
-        </div>
+        renderRootAddForm()
       )}
 
       {loading && <TableSkeleton rows={10} cols={4} />}
@@ -989,22 +1258,7 @@ export function CategoriesPage() {
             ariaLabel="หมวดงานหลัก"
             selectedKey={search.trim() === "" ? selected?.id ?? null : null}
             className="sticky top-0 z-20 h-11"
-            end={
-              // ยุบ/กางทุกกลุ่มย่อยของหมวดที่เปิด — ปลายขวาของแถบที่ติดจอ กดได้ตลอดไม่ต้องเลื่อนกลับขึ้นไป
-              // ปุ่มขอบบางแบบเดียวกับปุ่มอื่นในหน้า (ghost sm) — ผู้ใช้เลือกให้มีกรอบ แยกจากแท็บชัดเจน
-              selected && search.trim() === "" && foldableSubs.length > 0 ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={toggleAllSubs}
-                  aria-label={allSubsCollapsed ? "กางกลุ่มงานย่อยทั้งหมด" : "ยุบกลุ่มงานย่อยทั้งหมด"}
-                  className="shrink-0 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-brand"
-                >
-                  {allSubsCollapsed ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
-                  {allSubsCollapsed ? "กางทั้งหมด" : "ยุบทั้งหมด"}
-                </Button>
-              ) : null
-            }
+            end={renderFoldAll()}
           >
             {[null, ...tabCategories].map((c) => {
               const isSelected = search.trim() === "" && (c ? selected === c : !selected);
@@ -1047,217 +1301,7 @@ export function CategoriesPage() {
             })}
           </ScrollableTabBar>
 
-          {search.trim() !== "" ? (
-            <div className="mt-4">
-              <p className="text-sm text-slate-700 mb-2">พบ {searchResults.length} รายการ</p>
-              {searchResults.length === 0 && <p className="text-slate-500">ไม่พบรายการที่ตรงกับคำค้น</p>}
-              {searchResults.map((node) => (
-                <button
-                  key={node.id}
-                  type="button"
-                  onClick={() => jumpToResult(node)}
-                  className={`w-full text-left flex items-center gap-3 border border-slate-200 bg-white rounded-lg px-3 py-2 mt-2 hover:bg-slate-50 ${
-                    node.active ? "" : "opacity-60"
-                  }`}
-                >
-                  <span className="text-xs text-slate-500 w-24 shrink-0">{LEVEL_LABEL[node.level]}</span>
-                  <span className="flex-1">
-                    <span className="text-sm text-slate-800">
-                      {node.code ? `${node.code} — ` : ""}
-                      {node.name}
-                      {!node.active && (
-                        <span className="ml-2 text-xs font-medium text-slate-500 bg-slate-200 rounded-full px-2 py-0.5">
-                          ปิดใช้งาน
-                        </span>
-                      )}
-                    </span>
-                    <span className="block text-xs text-slate-500">{pathOf(node.id)}</span>
-                  </span>
-                  <span className="text-sm text-slate-700">ไปที่หมวด →</span>
-                </button>
-              ))}
-            </div>
-          ) : !selected ? (
-            // ภาพรวม — รายชื่อหมวดหลัก ไม่มีปุ่มจัดการประจำแถว (ย้ายไปอยู่บนหัวของแต่ละแท็บ) กดแถวเพื่อเปิด
-            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-200 text-left text-xs text-slate-600">
-                  <tr>
-                    <th className="w-20 px-3 py-2 font-medium">รหัส</th>
-                    <th className="px-3 py-2 font-medium">หมวดงาน</th>
-                    <th className="px-3 py-2 text-right font-medium whitespace-nowrap">กลุ่มงานย่อย</th>
-                    <th className="px-3 py-2 text-right font-medium">รายการ</th>
-                    <th className="px-3 py-2 text-right font-medium">ราคา</th>
-                    <th className="w-10 px-3 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {tabCategories.map((c) => {
-                    const sum = summaryByCategory.get(c.id);
-                    return (
-                      <tr
-                        key={c.id}
-                        onClick={() => openTab(c.id)}
-                        className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${
-                          c.active ? "" : "opacity-60"
-                        }`}
-                      >
-                        <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{c.code ?? "—"}</td>
-                        <td className="px-3 py-2.5">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openTab(c.id);
-                            }}
-                            className="text-left font-medium text-slate-800 hover:text-brand"
-                          >
-                            {c.name}
-                          </button>
-                          {!c.active && (
-                            <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
-                              ปิดใช้งาน
-                            </span>
-                          )}
-                          {c.description && <span className="block text-xs text-slate-500">{c.description}</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-slate-500 tabular-nums">
-                          {displayedSiblings(c.id).length}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-slate-500 tabular-nums">{sum?.items ?? 0}</td>
-                        <td className="px-3 py-2.5 text-right whitespace-nowrap">{priceSummary(c)}</td>
-                        <td className="px-3 py-2.5 text-slate-400">
-                          <ChevronRight size={16} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <>
-              {/* กับดัก sticky: overflow-x-auto ทำให้ overflow-y เป็น auto ตาม → กลายเป็น scroll
-                  container → หัวตารางไม่ติดจอ จึงปล่อยเป็น visible เมื่อจอกว้างพอให้ตารางลงตัว
-                  (พื้นที่เนื้อหาเต็มที่ 1,104px ≥ ตาราง 1,040px ตั้งแต่จอ ~1,330px) */}
-              {pageCount > 1 && (
-                <p className="mt-4 text-xs text-slate-500 tabular-nums">
-                  แสดง {itemsOnPage > 0 ? `${itemsBeforePage + 1}-${itemsBeforePage + itemsOnPage}` : "—"} จาก {itemsTotal} รายการ
-                </p>
-              )}
-              <div className={`${pageCount > 1 ? "mt-2" : "mt-4"} overflow-x-auto min-[1330px]:overflow-x-visible rounded-lg border border-slate-200 bg-white`}>
-                <table className="w-full min-w-[1040px] table-fixed text-sm">
-                  {/* ความกว้างตายตัว: ไม่งั้นเวลายุบ/กางหมวด ตารางจะคำนวณความกว้างใหม่จากเนื้อหา
-                      ที่เห็นอยู่ แล้วคอลัมน์ขยับทั้งแถบ (วัดได้ถึง 194px) */}
-                  <colgroup>
-                    <col className="w-24" />
-                    <col />
-                    <col className="w-20" />
-                    <col className="w-[104px]" />
-                    <col className="w-[104px]" />
-                    <col className="w-[104px]" />
-                    <col className="w-20" />
-                    <col className="w-[232px]" />
-                  </colgroup>
-                  {/* top-11 = ใต้แถบหมวดที่ล็อกสูง h-11 · เส้นคั่นเป็นเงา inset ไม่ใช่ border —
-                      border ของเซลล์ไม่ติดจอไปกับหัวตาราง เหลือช่อง 1px ให้ปุ่มในแถวโผล่ */}
-                  <thead className="sticky top-11 z-10 text-left text-xs text-slate-600">
-                    {/* ชื่อหมวดเป็นแถวแรกของหัวตาราง + ปุ่มจัดการหมวดหลักรวมอยู่ที่นี่ที่เดียว */}
-                    <tr>
-                      <th
-                        colSpan={COL_COUNT}
-                        scope="colgroup"
-                        className={`bg-[#ececf7] px-3 py-2 font-normal shadow-[inset_0_-1px_0_0_rgb(203,213,225)] ${
-                          highlightId === selected.id ? "ring-2 ring-emerald-300 ring-inset" : ""
-                        }`}
-                      >
-                        <div id="category-title" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                          {selected.code && (
-                            <span className="font-mono text-sm font-semibold text-brand">{selected.code}</span>
-                          )}
-                          <span className="text-sm font-semibold text-slate-900">{selected.name}</span>
-                          <span className="text-xs text-slate-500">
-                            {displayedSiblings(selected.id).length} กลุ่มงานย่อย ·{" "}
-                            {summaryByCategory.get(selected.id)?.items ?? 0} รายการ
-                          </span>
-                          {!selected.active && (
-                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
-                              ปิดใช้งาน
-                            </span>
-                          )}
-                          <span className="whitespace-nowrap">{priceSummary(selected)}</span>
-                          <div className="ml-auto">{actionButtons(selected)}</div>
-                        </div>
-                        {selected.description && (
-                          <span className="mt-0.5 block text-xs text-slate-500">{selected.description}</span>
-                        )}
-                      </th>
-                    </tr>
-                    <tr className="[&_th]:bg-slate-200 [&_th]:shadow-[inset_0_-1px_0_0_rgb(203,213,225)]">
-                      <th className="px-3 py-2 font-medium whitespace-nowrap">รหัส</th>
-                      <th className="px-3 py-2 font-medium">ชื่อรายการ</th>
-                      <th className="px-3 py-2 font-medium whitespace-nowrap">หน่วย</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">ค่าวัสดุ/หน่วย</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">ค่าแรง/หน่วย</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">รวม/หน่วย</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">เผื่อเสีย</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const rows: ReactElement[] = [];
-                      if (editingId === selected.id) rows.push(editRow(selected));
-                      if (addingChildFor === selected.id) rows.push(addChildRow(selected, "SUBGROUP"));
-                      for (const seg of pageSegments) pushRows(seg.sub, 0, rows, seg);
-                      if (displayedSiblings(selected.id).length === 0) {
-                        rows.push(
-                          <tr key="empty" className="border-t border-slate-100">
-                            <td colSpan={COL_COUNT} className="px-3 py-6 text-center text-sm text-slate-500">
-                              ยังไม่มีกลุ่มงานย่อยในหมวดนี้ — กดปุ่ม “+ กลุ่มงานย่อย” ที่แถวชื่อหมวดด้านบน
-                            </td>
-                          </tr>,
-                        );
-                      }
-                      return rows;
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-              <Pagination page={page} pageCount={pageCount} onChange={(n) => goPage(n)} />
-              {/* จบหมวดแล้วไปต่อได้เลย ไม่ต้องเลื่อนกลับขึ้นไปที่แถบ */}
-              <nav aria-label="เปลี่ยนหมวด" className="mt-3 flex items-center justify-between gap-3 text-sm">
-                {(() => {
-                  const prev = selectedIndex > 0 ? tabCategories[selectedIndex - 1] : null;
-                  const next = selectedIndex >= 0 ? tabCategories[selectedIndex + 1] ?? null : null;
-                  const navBtn =
-                    "inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900";
-                  return (
-                    <>
-                      <button type="button" onClick={() => openTab(prev?.id ?? null, true)} className={navBtn}>
-                        <ChevronLeft size={16} />
-                        {prev ? (
-                          <>
-                            {prev.code && <span className="font-mono text-xs text-slate-400">{prev.code}</span>}
-                            {shortCategoryName(prev.name)}
-                          </>
-                        ) : (
-                          "ภาพรวม"
-                        )}
-                      </button>
-                      {next && (
-                        <button type="button" onClick={() => openTab(next.id, true)} className={navBtn}>
-                          {next.code && <span className="font-mono text-xs text-slate-400">{next.code}</span>}
-                          {shortCategoryName(next.name)}
-                          <ChevronRight size={16} />
-                        </button>
-                      )}
-                    </>
-                  );
-                })()}
-              </nav>
-            </>
-          )}
+          {mainView()}
         </>
       )}
     </Layout>

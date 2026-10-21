@@ -46,12 +46,18 @@ function emailProblem(value: string, warnedTypo: string | null): { message: stri
  *
  * ตั้ง/เปลี่ยนต้องใส่รหัสผ่านปัจจุบัน แล้วกรอกรหัส 6 หลักที่ส่งไปที่อีเมลนั้น — เข้าระบบยังใช้ชื่อผู้ใช้เหมือนเดิม
  */
+/** เปิดมาเพื่อยืนยันอีเมล (defaultOpen) และยังไม่ยืนยัน: มีอีเมลแล้ว = รอกรอกรหัส · ยังไม่มี = กรอกอีเมล */
+function initialMode(defaultOpen: boolean, verified: boolean, email: string | null): Mode {
+  if (!defaultOpen || verified) return "view";
+  return email ? "code" : "edit";
+}
+
 export function RecoveryEmailRow({ defaultOpen = false }: Readonly<{ defaultOpen?: boolean }>) {
   const { user, commitUser } = useAuth();
   const toast = useToast();
   const email = user?.email ?? null;
   const verified = user?.emailVerified ?? false;
-  const [mode, setMode] = useState<Mode>(defaultOpen && !verified ? (email ? "code" : "edit") : "view");
+  const [mode, setMode] = useState<Mode>(() => initialMode(defaultOpen, verified, email));
   const [newEmail, setNewEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -73,7 +79,7 @@ export function RecoveryEmailRow({ defaultOpen = false }: Readonly<{ defaultOpen
     setError(err instanceof ApiError ? err.message : fallback);
   }
 
-  async function saveEmail(e: React.FormEvent) {
+  async function saveEmail(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const value = normalizeEmail(newEmail);
@@ -219,7 +225,7 @@ export function RecoveryEmailRow({ defaultOpen = false }: Readonly<{ defaultOpen
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs text-slate-600">
-              อีเมล
+              <span>อีเมล</span>
               <input
                 id="recovery-email-input"
                 type="email"
@@ -242,7 +248,7 @@ export function RecoveryEmailRow({ defaultOpen = false }: Readonly<{ defaultOpen
               )}
             </label>
             <label className="flex flex-col gap-1 text-xs text-slate-600">
-              รหัสผ่านปัจจุบัน (ยืนยันว่าเป็นคุณ)
+              <span>รหัสผ่านปัจจุบัน (ยืนยันว่าเป็นคุณ)</span>
               <input
                 id="recovery-email-password"
                 type="password"

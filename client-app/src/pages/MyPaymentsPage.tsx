@@ -138,11 +138,7 @@ function timelineMark(o: CustomerInstallmentOptionDto, isNext: boolean): { dot: 
         dot: <span className="m-1 block h-3 w-3 rounded-full bg-amber-500" />,
         note: (
           <span className="text-amber-800">
-            {o.daysOverdue != null
-              ? `เกินกำหนด ${o.daysOverdue} วัน`
-              : o.dueOn
-                ? `ต้องชำระ · ครบกำหนด ${thaiDate(o.dueOn)}`
-                : "ต้องชำระ"}
+            {dueText(o.daysOverdue, o.dueOn)}
           </span>
         ),
       };
@@ -470,7 +466,7 @@ export function MyPaymentsPage() {
 
   useEffect(load, [load]);
 
-  const noContracts = data && data.due.length === 0 && data.upcoming.length === 0 && data.history.length === 0;
+  const noContracts = data?.due.length === 0 && data.upcoming.length === 0 && data.history.length === 0;
   // แท็บเงินประกันขึ้นเฉพาะลูกค้าที่มีสัญญาที่มีเงินประกันผลงาน
   const tabs: Tab[] = data && data.retentions.length > 0 ? ["due", "upcoming", "retention", "history"] : ["due", "upcoming", "history"];
   const asked = searchParams.get("tab") as Tab | null;
@@ -535,7 +531,6 @@ export function MyPaymentsPage() {
           <div
             role="tablist"
             aria-label="การชำระเงิน"
-            onKeyDown={onTabKey}
             // เส้นฐานเป็นเงาด้านใน ไม่ใช่ border + -mb-px — กันแถบเลื่อนแนวตั้ง 1px บน Windows (เคยเจอที่ฝั่งพนักงาน)
             className="-mx-4 flex gap-1 overflow-x-auto overflow-y-hidden px-4 shadow-[inset_0_-1px_0_var(--color-slate-200)] [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden"
           >
@@ -554,6 +549,7 @@ export function MyPaymentsPage() {
                   aria-controls="pay-panel"
                   tabIndex={on ? 0 : -1}
                   onClick={() => selectTab(t)}
+                  onKeyDown={onTabKey}
                   className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-md border-b-2 px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand ${
                     on ? "border-brand font-semibold text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"
                   }`}
@@ -589,4 +585,9 @@ export function MyPaymentsPage() {
       )}
     </PortalPage>
   );
+}
+
+function dueText(daysOverdue: number | null, dueOn: string | null) {
+  if (daysOverdue != null) return `เกินกำหนด ${daysOverdue} วัน`;
+  return dueOn ? `ต้องชำระ · ครบกำหนด ${thaiDate(dueOn)}` : "ต้องชำระ";
 }

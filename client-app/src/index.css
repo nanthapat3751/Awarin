@@ -800,3 +800,22 @@ body {
     }
   }
 }
+
+/* กล่องที่เปิดค้าง (<dialog open>) ใช้แทน div role="dialog" — ล้างหน้าตาตั้งต้นของเบราว์เซอร์ทิ้งทั้งหมด
+   (กรอบ ระยะใน พื้นขาว ตำแหน่งกลางจอ ความกว้างพอดีเนื้อหา) ให้คลาสของแต่ละกล่องคุมหน้าตาเองเหมือนตอนเป็น div
+   อยู่ในชั้น base จึงแพ้คลาสที่ใส่รายตัวเสมอ · ไม่ใช้ showModal() — กันโฟกัส/Esc/ล็อกเลื่อนจอทำในคอมโพเนนต์อยู่แล้ว */
+@layer base {
+  dialog {
+    position: static;
+    inset: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    background: transparent;
+    color: inherit;
+  }
+}

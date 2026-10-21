@@ -73,6 +73,7 @@ export {
   type CalendarDay,
 } from "./date-input";
 export { GENERAL_INQUIRY_SERVICE_TYPE, SERVICE_TYPES } from "./service-type";
+export { replaceVariableTokens, scanVariableTokens, type VariableToken } from "./variable-tokens";
 export { AREA_RANGES, AREA_RANGE_VALUES, areaRangeLabel, isAreaRange, type AreaRange } from "./area-range";
 export { applyNetRounding, ROUNDING_UNITS, roundingUnitLabel, roundTo, type NetRounding } from "./rounding";
 import type { RetentionBalance } from "./retention";

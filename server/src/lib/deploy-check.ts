@@ -43,7 +43,17 @@ function isLocalHost(host: string): boolean {
 
 /** ดึงอีเมลจาก `"ชื่อ <a@b.c>"` หรือ `a@b.c` */
 function addressOf(from: string): string {
-  return (from.match(/<([^>]+)>/)?.[1] ?? from).trim().toLowerCase();
+  return (bracketed(from) ?? from).trim().toLowerCase();
+}
+
+/** ข้อความใน <...> คู่แรกที่มีอะไรอยู่ข้างใน — ไล่หาเองแทน regex ที่ย้อนลองได้หลายทาง */
+function bracketed(text: string): string | null {
+  for (let open = text.indexOf("<"); open >= 0; open = text.indexOf("<", open + 1)) {
+    const close = text.indexOf(">", open + 1);
+    if (close < 0) return null;
+    if (close > open + 1) return text.slice(open + 1, close);
+  }
+  return null;
 }
 
 function checkBaseUrl(
@@ -89,6 +99,13 @@ export function checkDeployConfig(env: NodeJS.ProcessEnv): DeployProblem[] {
     });
   }
 
+  problems.push(...checkMail(env));
+  return problems;
+}
+
+/** เมลต้องส่งจริง (smtp) · ผู้ส่งไม่ควรเป็นอีเมลส่วนตัว หรือคนละโดเมนกับเว็บ */
+function checkMail(env: NodeJS.ProcessEnv): DeployProblem[] {
+  const problems: DeployProblem[] = [];
   const mode = (env.MAIL_TRANSPORT ?? "console").toLowerCase();
   if (mode !== "smtp") {
     problems.push({
@@ -106,13 +123,7 @@ export function checkDeployConfig(env: NodeJS.ProcessEnv): DeployProblem[] {
         message: `ส่งอีเมลจากบัญชีส่วนตัว (${fromDomain}) — มีโอกาสเข้าสแปม ลูกค้าไม่คุ้นชื่อผู้ส่ง และ Gmail จำกัดราว 500 ฉบับ/วัน ควรใช้อีเมลโดเมนบริษัทที่ตั้ง SPF/DKIM/DMARC แล้ว`,
       });
     } else if (fromDomain) {
-      const site = env.CLIENT_BASE_URL?.trim() || env.CORS_ORIGIN_CLIENT?.trim();
-      let siteHost = "";
-      try {
-        siteHost = site ? new URL(site).hostname : "";
-      } catch {
-        siteHost = "";
-      }
+      const siteHost = siteHostOf(env);
       if (siteHost && !isLocalHost(siteHost) && registrableDomain(siteHost) !== registrableDomain(fromDomain)) {
         problems.push({
           level: "warn",
@@ -123,6 +134,17 @@ export function checkDeployConfig(env: NodeJS.ProcessEnv): DeployProblem[] {
     }
   }
   return problems;
+}
+
+/** โดเมนของเว็บฝั่งลูกค้า (ว่าง = ไม่ได้ตั้ง/อ่านไม่ออก) */
+function siteHostOf(env: NodeJS.ProcessEnv): string {
+  const site = env.CLIENT_BASE_URL?.trim() || env.CORS_ORIGIN_CLIENT?.trim();
+  if (!site) return "";
+  try {
+    return new URL(site).hostname;
+  } catch {
+    return "";
+  }
 }
 
 /** พิมพ์ผลตรวจ · คืน true ถ้ามีเรื่องร้ายแรง (ผู้เรียกต้องไม่เปิดระบบ) */

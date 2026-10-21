@@ -198,6 +198,15 @@ export function LeadsPage() {
     }
   }
 
+  /** เมนูโครงการของคำขอ — สอบถามทั่วไปไม่มีโครงการ · มีโครงการแล้ว = ไปที่โครงการ · ยังไม่มี = สร้าง */
+  function projectMenu(lead: { id: string; serviceType: string; projectId?: string | null }) {
+    if (lead.serviceType === GENERAL_INQUIRY_SERVICE_TYPE) return [];
+    if (lead.projectId) {
+      return [{ key: "project", label: "ไปที่โครงการ", onSelect: () => navigate(`/projects/${lead.projectId}`) }];
+    }
+    return [{ key: "create", label: "สร้างโครงการ", onSelect: () => void handleCreateProject(lead.id) }];
+  }
+
   async function handleCreateProject(id: string) {
     setCreatingProjectFor(id);
     try {
@@ -378,11 +387,7 @@ export function LeadsPage() {
                     label={`คำสั่งของคำขอ ${lead.name}`}
                     items={[
                       { key: "reply", label: lead.reply ? "แก้คำตอบ" : "ตอบกลับ", onSelect: () => openReply(lead) },
-                      ...(lead.serviceType === GENERAL_INQUIRY_SERVICE_TYPE
-                        ? []
-                        : lead.projectId
-                          ? [{ key: "project", label: "ไปที่โครงการ", onSelect: () => navigate(`/projects/${lead.projectId}`) }]
-                          : [{ key: "create", label: "สร้างโครงการ", onSelect: () => void handleCreateProject(lead.id) }]),
+                      ...projectMenu(lead),
                       ...(lead.projectId
                         ? []
                         : [{ key: "delete", label: "ลบ", danger: true, onSelect: () => void handleDelete(lead) }]),
@@ -408,8 +413,7 @@ export function LeadsPage() {
             onClick={() => setReplyingLead(null)}
             className="absolute inset-0 h-full w-full cursor-default bg-black/40"
           />
-          <div
-            role="dialog"
+          <dialog open
             aria-modal="true"
             aria-label="ตอบกลับคำขอ"
             className="relative bg-white rounded-lg shadow-xl w-full max-w-lg p-5"
@@ -465,7 +469,7 @@ export function LeadsPage() {
                 {savingReply ? "กำลังส่ง..." : "ส่งคำตอบ"}
               </Button>
             </div>
-          </div>
+          </dialog>
         </div>
       )}
     </Layout>

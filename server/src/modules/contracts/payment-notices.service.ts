@@ -384,7 +384,8 @@ export async function confirmNoticeBySlip(
     throw err;
   }
   const dates = notice.slipChecks.map((c) => toIsoDate(c.transferredAt)).filter((d): d is string => d != null);
-  const paidOn = dates.sort().at(-1) ?? toIsoDate(notice.paidOn)!;
+  dates.sort((a, b) => a.localeCompare(b));
+  const paidOn = dates.at(-1) ?? toIsoDate(notice.paidOn)!;
 
   await recordPayment(
     projectId,

@@ -62,8 +62,7 @@ const OverrunBox = forwardRef<
         <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden />
         <span>
           {noun}นี้ทำให้ <b className="font-semibold">{categoryLabelOf(report, form.category)}</b> เกินงบ{" "}
-          <b className="font-semibold tabular-nums">{money(over)}</b> บาท
-          <span className="text-amber-800/80"> (นับรวมยอดที่สั่งไว้แล้ว)</span> — เลือกสาเหตุก่อนบันทึก
+          <b className="font-semibold tabular-nums">{money(over)}</b> บาท<span className="text-amber-800/80"> (นับรวมยอดที่สั่งไว้แล้ว)</span> — เลือกสาเหตุก่อนบันทึก
         </span>
       </p>
       <div role="radiogroup" aria-label="สาเหตุที่เกินงบ" className="flex flex-wrap gap-1.5">
@@ -133,6 +132,11 @@ const OverrunBox = forwardRef<
   );
 });
 
+function formHeading(isCost: boolean, editing: boolean) {
+  if (isCost) return editing ? "แก้บิล" : "บันทึกบิลที่จ่ายแล้ว";
+  return editing ? "แก้ยอดที่สั่ง" : "บันทึกยอดที่สั่ง (ยังไม่จ่าย)";
+}
+
 export function CostEntryForm({
   report,
   form,
@@ -171,7 +175,7 @@ export function CostEntryForm({
     >
       <div>
         <p className="text-sm font-medium text-slate-800">
-          {isCost ? (editing ? "แก้บิล" : "บันทึกบิลที่จ่ายแล้ว") : editing ? "แก้ยอดที่สั่ง" : "บันทึกยอดที่สั่ง (ยังไม่จ่าย)"}
+          {formHeading(isCost, Boolean(editing))}
         </p>
         {!isCost && !editing && (
           <p className="text-xs text-slate-500">

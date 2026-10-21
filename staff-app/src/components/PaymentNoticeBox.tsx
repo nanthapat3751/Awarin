@@ -192,7 +192,7 @@ export function PaymentNoticeBox({
   const [viewing, setViewing] = useState<number | null>(null);
   const files: SlipFile[] = notice.evidence.map((e) => ({ id: e.id, fileName: e.fileName, url: evidenceUrl(e.id) }));
   const amount = Number(notice.amount);
-  const label = (i: number) => `สลิป${files.length > 1 ? ` ${i + 1}` : ""}`;
+  const label = (i: number) => (files.length > 1 ? `สลิป ${i + 1}` : "สลิป");
 
   return (
     <div className="mt-1.5 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs text-sky-900">

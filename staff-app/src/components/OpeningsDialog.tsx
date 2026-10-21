@@ -58,7 +58,7 @@ export function OpeningsDialog({
       const width = Number(r.width);
       const height = Number(r.height);
       if (!Number.isInteger(count) || count < 1) return { valid: out, error: `แถว ${i + 1}: จำนวนต้องเป็นจำนวนเต็มตั้งแต่ 1` };
-      if (!(width > 0) || !(height > 0)) return { valid: out, error: `แถว ${i + 1}: กรอกกว้างและสูง (เมตร)` };
+      if (!positive(width) || !positive(height)) return { valid: out, error: `แถว ${i + 1}: กรอกกว้างและสูง (เมตร)` };
       out.push({ label: r.label.trim() || `ช่องเปิด ${i + 1}`, count, width, height });
     }
     return { valid: out, error: null as string | null };
@@ -73,7 +73,7 @@ export function OpeningsDialog({
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" tabIndex={-1} aria-label="ปิด" onClick={onClose} className="absolute inset-0 h-full w-full cursor-default bg-black/40" />
-      <div role="dialog" aria-modal="true" aria-labelledby="openings-title" className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl">
+      <dialog open aria-modal="true" aria-labelledby="openings-title" className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div>
             <h2 id="openings-title" className="flex items-center gap-2 text-lg font-semibold text-slate-800">
@@ -158,8 +158,12 @@ export function OpeningsDialog({
             </Button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body,
   );
+}
+
+function positive(n: number) {
+  return n > 0;
 }

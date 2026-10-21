@@ -50,9 +50,111 @@ const DEFAULT_PLACEHOLDER = "placeholder:text-slate-800";
 
 type StepId = "tile" | "pattern" | "area" | "extras" | "price";
 
+const input = "w-full min-w-0 rounded-md border border-slate-300 px-2 py-1 text-sm";
+const numInput = `${input} text-right tabular-nums`;
+
+const ROOM_FIELD_LABEL = { count: "จำนวน", length: "ยาว", width: "กว้าง" } as const;
+
+const positive = (n: number) => n > 0;
+
+/** หน่วยราคาของวัสดุในคลัง → หน่วยราคากระเบื้อง (null = หน่วยอื่น ไม่ดึงราคา) */
+function tilePriceUnitOf(unit: string): TilePriceUnit | null {
+  if (unit.includes("กล่อง")) return "BOX";
+  if (unit.includes("แผ่น")) return "PIECE";
+  return unit.includes("ตร") ? "SQM" : null;
+}
+
+/** ราคาวัสดุ/ตร.ม. ของบรรทัด: ตัวคิดตั้งราคา · เคยตั้งแล้วเลิก = ราคาที่กรอกแทน · นอกนั้นราคาเดิม */
+function lineMaterialPrice(priced: boolean, pricedMaterial: number, wasPricedByCalc: boolean, fallbackPrice: string, current: number) {
+  if (priced) return pricedMaterial;
+  return wasPricedByCalc ? Number(fallbackPrice) : current;
+}
+
+/** เลิกให้ตัวคิดตั้งราคาแล้วแต่ยังไม่ได้กรอกราคาที่จะใช้แทน */
+function fallbackMissing(priced: boolean, wasPricedByCalc: boolean, fallbackPrice: string) {
+  if (priced || !wasPricedByCalc) return false;
+  return !(Number(fallbackPrice) >= 0 && fallbackPrice.trim() !== "");
+}
+
+type Issue = { text: string; step: StepId };
+
+/** ปัญหาแรกที่กั้นการบันทึก พร้อมหมวดที่ต้องไปแก้ */
+function firstIssue(p: {
+  sized: boolean;
+  configError: string | undefined;
+  useRooms: boolean;
+  rooms: { valid: unknown[]; error: string | null };
+  resultError: string | undefined;
+  pricingError: string | undefined;
+  missingFallback: boolean;
+}): Issue | null {
+  if (!p.sized) return { text: "กรอกขนาดแผ่น (กว้าง × ยาว มม.)", step: "tile" };
+  if (p.configError) return { text: p.configError, step: stepOfConfigError(p.configError) };
+  if (p.useRooms && p.rooms.error) return { text: p.rooms.error, step: "area" };
+  if (p.useRooms && p.rooms.valid.length === 0) return { text: "กรอกขนาดห้องอย่างน้อย 1 ห้อง", step: "area" };
+  if (p.resultError) return { text: p.resultError, step: "area" };
+  if (p.pricingError) return { text: p.pricingError, step: "price" };
+  if (p.missingFallback) return { text: "กรอกราคาวัสดุต่อ ตร.ม. ที่จะใช้แทน", step: "price" };
+  return null;
+}
+
+/** ข้อความบนหัวหมวดที่พับอยู่ — บอกค่าที่ใช้ในบรรทัดเดียว */
+function stepSummaries(p: {
+  form: TileForm;
+  config: TileCalcConfig;
+  sized: boolean;
+  useRooms: boolean;
+  roomCount: number;
+  area: number;
+  lineArea: number;
+  materialPrice: number;
+}) {
+  const { form, config, sized } = p;
+  const patternLabel = TILE_PATTERNS.find((x) => x.value === config.pattern)?.label ?? "";
+  const tile = sized
+    ? [
+        `${cm(config.widthMm)}×${cm(config.lengthMm)} ซม.`,
+        `หนา ${num(config.thicknessMm)} มม.`,
+        `ร่อง ${num(config.jointMm)} มม.`,
+        config.piecesPerBox ? `${config.piecesPerBox} แผ่น/กล่อง` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "ยังไม่ได้กรอกขนาดแผ่น";
+  const pattern = [patternLabel, config.rotate ? "วางด้านยาวตามแนวกว้าง" : null, `เผื่อแตกหัก ${num(config.wastePct)}%`]
+    .filter(Boolean)
+    .join(" · ");
+  const roomArea = sized && p.area > 0 ? ` · ${num(p.area)} ตร.ม.` : "";
+  const area = p.useRooms ? `ขนาดห้อง ${p.roomCount} รายการ${roomArea}` : `ใช้ปริมาณของบรรทัด ${num(p.lineArea)} ตร.ม.`;
+  const extras =
+    [form.useAdhesive && "ปูนกาว", form.useGrout && "ยาแนว", form.useTrim && "คิ้วจบขอบ"].filter(Boolean).join(" · ") ||
+    "ไม่คิดของประกอบ";
+  const price = config.priced
+    ? `ตั้งราคาจากตัวคิด · ${baht(p.materialPrice)} บาท/ตร.ม.`
+    : `คงราคาเหมาเดิม · ${baht(p.materialPrice)} บาท/ตร.ม.`;
+  return { tile, pattern, area, extras, price };
+}
+
+/** จำนวนแผ่นของแถวห้อง (แถวหักติดเครื่องหมายลบ) — undefined = ยังคิดไม่ได้ */
+function roomPiecesText(pieces: number | undefined, deduct: boolean) {
+  if (pieces === undefined) return null;
+  return deduct ? `−${pieces}` : String(pieces);
+}
+
+/** ให้แต่ละรายการมี key ที่ไม่ซ้ำโดยไม่ใช้ลำดับในอาร์เรย์ — ชื่อซ้ำได้เลขต่อท้าย */
+function withUniqueKeys<T>(items: T[], labelOf: (item: T) => string) {
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const label = labelOf(item);
+    const n = (seen.get(label) ?? 0) + 1;
+    seen.set(label, n);
+    return { item, key: `${label}#${n}` };
+  });
+}
+
 /** error ของ tileConfigErrors อยู่หมวดไหน — ใช้พาไปเปิดหมวดที่ต้องแก้ */
 function stepOfConfigError(message: string): StepId {
-  if (/^(ปูนกาว|ยาแนว|คิ้ว)|ไม่ต้องใช้ยาแนว/.test(message)) return "extras";
+  if (["ปูนกาว", "ยาแนว", "คิ้ว"].some((p) => message.startsWith(p)) || message.includes("ไม่ต้องใช้ยาแนว")) return "extras";
   if (message.startsWith("เผื่อแตกหัก")) return "pattern";
   return "tile";
 }
@@ -247,7 +349,7 @@ function parseRooms(rows: RoomRow[]): { valid: { index: number; row: TakeoffRowI
     const length = Number(r.length);
     const width = Number(r.width);
     if (!Number.isInteger(count) || count <= 0) return { valid, error: `${where}: จำนวนห้องต้องเป็นจำนวนเต็มมากกว่า 0` };
-    if (!(length > 0) || !(width > 0)) return { valid, error: `${where}: กรอกยาวและกว้างเป็นเมตร (มากกว่า 0)` };
+    if (!positive(length) || !positive(width)) return { valid, error: `${where}: กรอกยาวและกว้างเป็นเมตร (มากกว่า 0)` };
     if (length > 1000 || width > 1000) return { valid, error: `${where}: ขนาดเป็นเมตร — ${Math.max(length, width)} ม. มากผิดปกติ` };
     valid.push({ index: i, row: { label: r.label.trim() || where, count, length, width, deduct: r.deduct } });
   }
@@ -319,23 +421,22 @@ export function TileCalcDialog({
   const pricedMaterial = round2(
     components.reduce((sum, c) => sum + c.qtyPerUnit * (1 + (c.wasteFactorPct ?? 0) / 100) * c.unitPrice, 0),
   );
-  const materialPrice = config.priced ? pricedMaterial : wasPricedByCalc ? Number(fallbackPrice) : Number(item.materialUnitPrice);
+  const materialPrice = lineMaterialPrice(config.priced, pricedMaterial, wasPricedByCalc, fallbackPrice, Number(item.materialUnitPrice));
   const labor = Number(item.laborUnitPrice);
   const lineTotal = round2(round2(lineQty * materialPrice) + round2(lineQty * labor));
 
   const configError = tileConfigErrors(config)[0];
   const pricingError = config.priced ? tilePricingErrors(config)[0] : undefined;
   // ปัญหาแรกที่กั้นการบันทึก พร้อมหมวดที่ต้องไปแก้ (ปุ่ม "ไปแก้" + จุดเตือนบนหัวหมวด)
-  const issue: { text: string; step: StepId } | null =
-    (!sized ? { text: "กรอกขนาดแผ่น (กว้าง × ยาว มม.)", step: "tile" as const } : null) ??
-    (configError ? { text: configError, step: stepOfConfigError(configError) } : null) ??
-    (useRooms && parsedRooms.error ? { text: parsedRooms.error, step: "area" as const } : null) ??
-    (useRooms && parsedRooms.valid.length === 0 ? { text: "กรอกขนาดห้องอย่างน้อย 1 ห้อง", step: "area" as const } : null) ??
-    (result.errors[0] ? { text: result.errors[0], step: "area" as const } : null) ??
-    (pricingError ? { text: pricingError, step: "price" as const } : null) ??
-    (!config.priced && wasPricedByCalc && !(Number(fallbackPrice) >= 0 && fallbackPrice.trim() !== "")
-      ? { text: "กรอกราคาวัสดุต่อ ตร.ม. ที่จะใช้แทน", step: "price" as const }
-      : null);
+  const issue = firstIssue({
+    sized,
+    configError,
+    useRooms,
+    rooms: parsedRooms,
+    resultError: result.errors[0],
+    pricingError,
+    missingFallback: fallbackMissing(config.priced, wasPricedByCalc, fallbackPrice),
+  });
   const blocker = issue?.text ?? null;
 
   function pickMaterial(id: string) {
@@ -346,7 +447,7 @@ export function TileCalcDialog({
     }
     const other = m.id !== item.materialId;
     // วัสดุอื่นที่เป็นตัวกระเบื้องจริง: ชื่อ/ราคาของมันคือของกระเบื้อง · วัสดุของบรรทัดเองเป็นงานเหมา ไม่ใช่
-    const priceUnit: TilePriceUnit | null = /กล่อง/.test(m.unit) ? "BOX" : /แผ่น/.test(m.unit) ? "PIECE" : /ตร/.test(m.unit) ? "SQM" : null;
+    const priceUnit = tilePriceUnitOf(m.unit);
     set({
       sourceMaterialId: m.id,
       widthMm: String(m.tileWidthMm),
@@ -356,10 +457,6 @@ export function TileCalcDialog({
       ...(other ? { tileName: m.name } : {}),
       ...(other && priceUnit ? { tilePrice: String(Number(m.materialUnitPrice)), tilePriceUnit: priceUnit } : {}),
     });
-  }
-
-  function updateRoom(index: number, patch: Partial<RoomRow>) {
-    setRooms((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
   async function apply() {
@@ -397,37 +494,16 @@ export function TileCalcDialog({
     });
   }
 
-  const input = "w-full min-w-0 rounded-md border border-slate-300 px-2 py-1 text-sm";
-  const numInput = `${input} text-right tabular-nums`;
-  const defaults = sized ? defaultAdhesive(config.widthMm, config.lengthMm) : null;
-  const groutPerSqm = sized ? groutKgPerSqm(config.widthMm, config.lengthMm, config.jointMm, config.thicknessMm) : 0;
-  const patternLabel = TILE_PATTERNS.find((p) => p.value === config.pattern)?.label ?? "";
-  const tileSummary = sized
-    ? [
-        `${cm(config.widthMm)}×${cm(config.lengthMm)} ซม.`,
-        `หนา ${num(config.thicknessMm)} มม.`,
-        `ร่อง ${num(config.jointMm)} มม.`,
-        config.piecesPerBox ? `${config.piecesPerBox} แผ่น/กล่อง` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : "ยังไม่ได้กรอกขนาดแผ่น";
-  const patternSummary = [
-    patternLabel,
-    config.rotate ? "วางด้านยาวตามแนวกว้าง" : null,
-    `เผื่อแตกหัก ${num(config.wastePct)}%`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const areaSummary = useRooms
-    ? `ขนาดห้อง ${parsedRooms.valid.length} รายการ${sized && result.area > 0 ? ` · ${num(result.area)} ตร.ม.` : ""}`
-    : `ใช้ปริมาณของบรรทัด ${num(lineArea)} ตร.ม.`;
-  const extrasSummary =
-    [form.useAdhesive && "ปูนกาว", form.useGrout && "ยาแนว", form.useTrim && "คิ้วจบขอบ"].filter(Boolean).join(" · ") ||
-    "ไม่คิดของประกอบ";
-  const priceSummary = config.priced
-    ? `ตั้งราคาจากตัวคิด · ${baht(materialPrice)} บาท/ตร.ม.`
-    : `คงราคาเหมาเดิม · ${baht(materialPrice)} บาท/ตร.ม.`;
+  const summary = stepSummaries({
+    form,
+    config,
+    sized,
+    useRooms,
+    roomCount: parsedRooms.valid.length,
+    area: result.area,
+    lineArea,
+    materialPrice,
+  });
   const switchingFromDriver = useRooms && item.qtyBasis !== "SHEET" && item.qtyBasis !== "MANUAL";
   const replacingSheet = useRooms && item.qtyBasis === "SHEET" && existingRooms == null;
 
@@ -440,8 +516,7 @@ export function TileCalcDialog({
         onClick={() => !saving && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="tile-calc-title"
         className="relative flex max-h-[92vh] w-full max-w-5xl flex-col rounded-lg bg-white shadow-xl"
@@ -471,181 +546,29 @@ export function TileCalcDialog({
             <Step
               n={1}
               title="แผ่นกระเบื้อง"
-              summary={tileSummary}
+              summary={summary.tile}
               open={openStep === "tile"}
               onToggle={() => toggleStep("tile")}
               flagged={issue?.step === "tile"}
             >
-              {tileMaterials.length > 0 && (
-                <label className="flex flex-col gap-1 text-xs text-slate-600">
-                  <span>เลือกจากคลังวัสดุ</span>
-                  <select
-                    value={form.sourceMaterialId}
-                    onChange={(e) => pickMaterial(e.target.value)}
-                    className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                  >
-                    <option value="">— กรอกขนาดเอง —</option>
-                    {tileMaterials.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.code ? `${m.code} · ` : ""}
-                        {m.name} ({m.tileWidthMm}×{m.tileLengthMm})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs text-slate-600">ขนาดยอดนิยม</span>
-                <div className="flex flex-wrap gap-2">
-                  {SIZE_PRESETS.map(([w, l]) => {
-                    const active =
-                      (config.widthMm === w && config.lengthMm === l) || (config.widthMm === l && config.lengthMm === w);
-                    return (
-                      <button
-                        key={`${w}x${l}`}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => set({ widthMm: String(w), lengthMm: String(l), sourceMaterialId: "" })}
-                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors ${
-                          active
-                            ? "border-slate-800 bg-slate-800 text-white"
-                            : "border-slate-300 text-slate-700 hover:border-slate-400 hover:bg-slate-50"
-                        }`}
-                      >
-                        <TileShape widthMm={w} lengthMm={l} />
-                        {cm(w)}×{cm(l)} ซม.
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <Field label="กว้าง (มม.)">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={form.widthMm}
-                    onChange={(e) => set({ widthMm: e.target.value, sourceMaterialId: "" })}
-                    placeholder="300"
-                    aria-label="กว้างของแผ่น (มม.)"
-                    className={numInput}
-                  />
-                </Field>
-                <Field label="ยาว (มม.)">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={form.lengthMm}
-                    onChange={(e) => set({ lengthMm: e.target.value, sourceMaterialId: "" })}
-                    placeholder="300"
-                    aria-label="ยาวของแผ่น (มม.)"
-                    className={numInput}
-                  />
-                </Field>
-                <Field label="หนา (มม.)" isDefault={sized && form.thicknessMm.trim() === ""}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.5"
-                    value={form.thicknessMm}
-                    onChange={(e) => set({ thicknessMm: e.target.value })}
-                    placeholder={sized ? String(defaultTileThicknessMm(config.widthMm, config.lengthMm)) : ""}
-                    aria-label="ความหนาแผ่น (มม.)"
-                    className={`${numInput} ${DEFAULT_PLACEHOLDER}`}
-                  />
-                </Field>
-                <Field label="ร่องยาแนว (มม.)" isDefault={sized && form.jointMm.trim() === ""}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.5"
-                    value={form.jointMm}
-                    onChange={(e) => set({ jointMm: e.target.value })}
-                    placeholder={sized ? String(defaultTileJointMm(config.widthMm, config.lengthMm)) : ""}
-                    aria-label="ความกว้างร่องยาแนว (มม.)"
-                    className={`${numInput} ${DEFAULT_PLACEHOLDER}`}
-                  />
-                </Field>
-                <Field label="แผ่นต่อกล่อง">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={form.piecesPerBox}
-                    onChange={(e) => set({ piecesPerBox: e.target.value })}
-                    placeholder="ดูข้างกล่อง"
-                    aria-label="แผ่นต่อกล่อง"
-                    className={numInput}
-                  />
-                </Field>
-              </div>
-              <p className="text-xs text-slate-400">
-                ช่องที่มีป้าย &quot;ค่าตั้งต้น&quot; ระบบใช้ค่านั้นอยู่แล้ว — กรอกทับเมื่อของจริงต่างจากนี้
-              </p>
+<TileFields form={form} config={config} sized={sized} tileMaterials={tileMaterials} set={set} onPickMaterial={pickMaterial} />
             </Step>
 
             <Step
               n={2}
               title="วิธีปู"
-              summary={patternSummary}
+              summary={summary.pattern}
               open={openStep === "pattern"}
               onToggle={() => toggleStep("pattern")}
               flagged={issue?.step === "pattern"}
             >
-              <div role="radiogroup" aria-label="รูปแบบการปู" className="grid grid-cols-3 gap-2 sm:max-w-md">
-                {TILE_PATTERNS.map((p) => {
-                  const active = form.pattern === p.value;
-                  return (
-                    <button
-                      key={p.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => set({ pattern: p.value })}
-                      className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2.5 text-xs transition-colors ${
-                        active
-                          ? "border-slate-800 text-slate-800 ring-1 ring-slate-800"
-                          : "border-slate-200 text-slate-600 hover:border-slate-400"
-                      }`}
-                    >
-                      <PatternIcon pattern={p.value} />
-                      <span className={active ? "font-medium" : undefined}>{p.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {sized && config.widthMm !== config.lengthMm && form.pattern === "STRAIGHT" && (
-                <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <input type="checkbox" checked={form.rotate} onChange={(e) => set({ rotate: e.target.checked })} />
-                  วางด้านยาวของแผ่นตามแนว &quot;กว้าง&quot; ของห้อง
-                </label>
-              )}
-              <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                เผื่อแตกหัก/สำรองซ่อม
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  max="50"
-                  step="any"
-                  value={form.wastePct}
-                  onChange={(e) => set({ wastePct: e.target.value })}
-                  aria-label="เผื่อแตกหัก (%)"
-                  className="w-16 rounded-md border border-slate-300 px-2 py-0.5 text-right text-sm"
-                />
-                %
-                <span className="text-slate-400">· เศษจากการตัดแผ่น ระบบเผื่อให้เองตามวิธีปู</span>
-              </label>
+<PatternFields form={form} config={config} sized={sized} set={set} />
             </Step>
 
             <Step
               n={3}
               title="พื้นที่ปู"
-              summary={areaSummary}
+              summary={summary.area}
               open={openStep === "area"}
               onToggle={() => toggleStep("area")}
               flagged={issue?.step === "area"}
@@ -681,92 +604,7 @@ export function TileCalcDialog({
                         : "ใบถอดแบบเดิมของบรรทัดนี้ไม่ใช่ขนาดห้อง — จะถูกแทนด้วยห้องที่กรอกที่นี่"}
                     </p>
                   )}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-100 [&_th]:px-2 [&_th]:py-1.5">
-                        <tr>
-                          <th className="min-w-36">ห้อง / ตำแหน่ง</th>
-                          <th className="w-20 text-right">จำนวน</th>
-                          <th className="w-24 text-right">ยาว (ม.)</th>
-                          <th className="w-24 text-right">กว้าง (ม.)</th>
-                          <th className="w-16 text-right">แผ่น</th>
-                          <th className="w-16" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rooms.map((r, i) => (
-                          <tr key={r.key} className={`border-t border-slate-100 ${r.deduct ? "bg-red-50/60" : ""}`}>
-                            <td className="px-2 py-1">
-                              <div className="flex items-center gap-1.5">
-                                {r.deduct && (
-                                  <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-700">หัก</span>
-                                )}
-                                <input
-                                  value={r.label}
-                                  onChange={(e) => updateRoom(i, { label: e.target.value })}
-                                  placeholder={r.deduct ? "เช่น ฐานเคาน์เตอร์" : "เช่น ห้องน้ำ 1"}
-                                  maxLength={120}
-                                  aria-label={`ชื่อห้อง แถว ${i + 1}`}
-                                  className={input}
-                                />
-                              </div>
-                            </td>
-                            {(["count", "length", "width"] as const).map((k) => (
-                              <td key={k} className="px-2 py-1">
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  min="0"
-                                  step="any"
-                                  value={r[k]}
-                                  onChange={(e) => updateRoom(i, { [k]: e.target.value })}
-                                  aria-label={`${k === "count" ? "จำนวน" : k === "length" ? "ยาว" : "กว้าง"} แถว ${i + 1}`}
-                                  className={numInput}
-                                />
-                              </td>
-                            ))}
-                            <td className={`px-2 py-1 text-right tabular-nums ${r.deduct ? "text-red-700" : "text-slate-700"}`}>
-                              {piecesByIndex.has(i) ? `${r.deduct ? "−" : ""}${piecesByIndex.get(i)}` : <span className="text-slate-300">—</span>}
-                            </td>
-                            <td className="px-1 py-1">
-                              <div className="flex items-center justify-end gap-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => updateRoom(i, { deduct: !r.deduct })}
-                                  title={r.deduct ? "เปลี่ยนเป็นห้องที่ปู" : "เปลี่ยนเป็นส่วนที่ไม่ปู (หัก)"}
-                                  aria-pressed={r.deduct}
-                                  aria-label={`แถวหัก แถว ${i + 1}`}
-                                  className={`rounded p-1 ${r.deduct ? "text-red-600 hover:bg-red-100" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"}`}
-                                >
-                                  <Minus size={14} />
-                                </button>
-                                <Tooltip label="ลบแถว" side="top" align="end">
-                                  <button
-                                    type="button"
-                                    onClick={() => setRooms((prev) => (prev.length === 1 ? [blankRoom()] : prev.filter((_, j) => j !== i)))}
-                                    aria-label={`ลบแถว ${i + 1}`}
-                                    title="ลบแถว"
-                                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </Tooltip>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setRooms((p) => [...p, blankRoom()])}>
-                      <Plus size={14} /> เพิ่มห้อง
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setRooms((p) => [...p, blankRoom(true)])}>
-                      <Minus size={14} /> เพิ่มส่วนที่ไม่ปู
-                    </Button>
-                    <span className="text-xs text-slate-400">ผนัง: ยาว = ความยาวผนัง · กว้าง = ความสูงที่ปู</span>
-                  </div>
+<RoomsTable rooms={rooms} setRooms={setRooms} piecesByIndex={piecesByIndex} />
                 </>
               )}
             </Step>
@@ -774,132 +612,31 @@ export function TileCalcDialog({
             <Step
               n={4}
               title="ปูนกาว · ยาแนว · คิ้ว"
-              summary={extrasSummary}
+              summary={summary.extras}
               open={openStep === "extras"}
               onToggle={() => toggleStep("extras")}
               flagged={issue?.step === "extras"}
             >
-              <Accessory
-                checked={form.useAdhesive}
-                onToggle={(v) => set({ useAdhesive: v })}
-                label="ปูนกาว"
-                hint={defaults ? `ค่าตั้งต้นสำหรับเกรียงร่อง ${defaults.trowelMm} มม. — แก้ตามฉลากถุงที่ใช้` : undefined}
-              >
-                <MiniField
-                  label="กก./ตร.ม."
-                  value={form.adhesiveKg}
-                  placeholder={defaults ? String(defaults.kgPerSqm) : ""}
-                  isDefault={defaults != null && form.adhesiveKg.trim() === ""}
-                  onChange={(v) => set({ adhesiveKg: v })}
-                />
-                <MiniField label="กก./ถุง" value={form.bagKg} onChange={(v) => set({ bagKg: v })} />
-                <MiniField label="เผื่อ %" value={form.adhesiveWaste} onChange={(v) => set({ adhesiveWaste: v })} />
-              </Accessory>
-              <Accessory
-                checked={form.useGrout}
-                onToggle={(v) => set({ useGrout: v })}
-                label="ยาแนว"
-                hint={sized && groutPerSqm > 0 ? `ใช้ ${num(groutPerSqm)} กก./ตร.ม. คิดจากขนาดแผ่น ร่อง และความหนา` : undefined}
-              >
-                <MiniField label="กก./ถุง" value={form.packKg} onChange={(v) => set({ packKg: v })} />
-                <MiniField label="เผื่อ %" value={form.groutWaste} onChange={(v) => set({ groutWaste: v })} />
-              </Accessory>
-              <Accessory checked={form.useTrim} onToggle={(v) => set({ useTrim: v })} label="คิ้วจบขอบ" hint="ขอบที่ไม่ชนผนัง เช่น ขอบขั้นบันได มุมเสา">
-                <MiniField label="ความยาวขอบรวม (ม.)" value={form.trimLength} onChange={(v) => set({ trimLength: v })} wide />
-                <MiniField label="ม./เส้น" value={form.trimPieceLength} onChange={(v) => set({ trimPieceLength: v })} />
-              </Accessory>
+<ExtrasFields form={form} config={config} sized={sized} set={set} />
             </Step>
 
             <Step
               n={5}
               title="ราคาวัสดุของบรรทัด"
-              summary={priceSummary}
+              summary={summary.price}
               open={openStep === "price"}
               onToggle={() => toggleStep("price")}
               flagged={issue?.step === "price"}
             >
-              <div role="radiogroup" aria-label="วิธีตั้งราคา" className="flex flex-col gap-1.5 text-sm">
-                <label className="flex items-start gap-2">
-                  <input type="radio" checked={!form.priced} onChange={() => set({ priced: false })} className="mt-1" />
-                  <span>
-                    <span className="font-medium text-slate-800">คงราคาเหมาเดิม</span>{" "}
-                    <span className="text-slate-500">— ใช้ตัวคิดดูจำนวนแผ่น/กล่องอย่างเดียว ราคาบรรทัดไม่เปลี่ยน</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2">
-                  <input type="radio" checked={form.priced} onChange={() => set({ priced: true })} className="mt-1" />
-                  <span>
-                    <span className="font-medium text-slate-800">ตั้งราคาวัสดุจากรายการนี้</span>{" "}
-                    <span className="text-slate-500">— ราคาวัสดุ/ตร.ม. = กระเบื้องที่ต้องใช้จริง + ของประกอบ</span>
-                  </span>
-                </label>
-              </div>
-              {!form.priced && wasPricedByCalc && (
-                <label className="flex items-center gap-2 text-xs text-slate-600">
-                  ราคาวัสดุต่อ ตร.ม. ที่จะใช้แทน
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={fallbackPrice}
-                    onChange={(e) => setFallbackPrice(e.target.value)}
-                    aria-label="ราคาวัสดุต่อ ตร.ม. ที่จะใช้แทน"
-                    className="w-28 rounded-md border border-slate-300 px-2 py-1 text-right text-sm"
-                  />
-                  บาท
-                </label>
-              )}
-              {form.priced && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Field label="ราคากระเบื้อง (บาท)">
-                    <div className="flex gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={form.tilePrice}
-                        onChange={(e) => set({ tilePrice: e.target.value })}
-                        aria-label="ราคากระเบื้อง"
-                        className={numInput}
-                      />
-                      <select
-                        value={form.tilePriceUnit}
-                        onChange={(e) => set({ tilePriceUnit: e.target.value as TilePriceUnit })}
-                        aria-label="ราคาต่อ"
-                        className="rounded-md border border-slate-300 px-1 text-xs"
-                      >
-                        <option value="SQM">/ตร.ม.</option>
-                        <option value="BOX">/กล่อง</option>
-                        <option value="PIECE">/แผ่น</option>
-                      </select>
-                    </div>
-                  </Field>
-                  {form.useAdhesive && (
-                    <Field label="ปูนกาว (บาท/ถุง)">
-                      <input type="number" min="0" step="any" value={form.adhesivePrice} onChange={(e) => set({ adhesivePrice: e.target.value })} aria-label="ราคาปูนกาวต่อถุง" className={numInput} />
-                    </Field>
-                  )}
-                  {form.useGrout && (
-                    <Field label="ยาแนว (บาท/ถุง)">
-                      <input type="number" min="0" step="any" value={form.groutPrice} onChange={(e) => set({ groutPrice: e.target.value })} aria-label="ราคายาแนวต่อถุง" className={numInput} />
-                    </Field>
-                  )}
-                  {form.useTrim && (
-                    <Field label="คิ้ว (บาท/เส้น)">
-                      <input type="number" min="0" step="any" value={form.trimPrice} onChange={(e) => set({ trimPrice: e.target.value })} aria-label="ราคาคิ้วต่อเส้น" className={numInput} />
-                    </Field>
-                  )}
-                </div>
-              )}
-              <Field label="ชื่อกระเบื้องในรายการสั่งซื้อ">
-                <input
-                  value={form.tileName}
-                  onChange={(e) => set({ tileName: e.target.value })}
-                  placeholder={sized ? tileDisplayName({ ...config, tileName: "", piecesPerBox: null }) : "เช่น แกรนิตโต้ 60×60 สีเทา"}
-                  maxLength={120}
-                  className={input}
-                />
-              </Field>
+<PriceFields
+                form={form}
+                config={config}
+                sized={sized}
+                wasPricedByCalc={wasPricedByCalc}
+                fallbackPrice={fallbackPrice}
+                setFallbackPrice={setFallbackPrice}
+                set={set}
+              />
             </Step>
           </div>
 
@@ -947,9 +684,454 @@ export function TileCalcDialog({
             </Button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body,
+  );
+}
+
+/** หมวด 1 — ขนาด/ความหนา/ร่อง/แผ่นต่อกล่อง (เลือกจากคลังหรือกรอกเอง) */
+function TileFields({
+  form,
+  config,
+  sized,
+  tileMaterials,
+  set,
+  onPickMaterial,
+}: Readonly<{
+  form: TileForm;
+  config: TileCalcConfig;
+  sized: boolean;
+  tileMaterials: MaterialDto[];
+  set: (patch: Partial<TileForm>) => void;
+  onPickMaterial: (id: string) => void;
+}>) {
+  return (
+    <>
+      {tileMaterials.length > 0 && (
+        <label className="flex flex-col gap-1 text-xs text-slate-600">
+          <span>เลือกจากคลังวัสดุ</span>
+          <select
+            value={form.sourceMaterialId}
+            onChange={(e) => onPickMaterial(e.target.value)}
+            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          >
+            <option value="">— กรอกขนาดเอง —</option>
+            {tileMaterials.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.code ? `${m.code} · ` : ""}
+                {m.name} ({m.tileWidthMm}×{m.tileLengthMm})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs text-slate-600">ขนาดยอดนิยม</span>
+        <div className="flex flex-wrap gap-2">
+          {SIZE_PRESETS.map(([w, l]) => {
+            const active =
+              (config.widthMm === w && config.lengthMm === l) || (config.widthMm === l && config.lengthMm === w);
+            return (
+              <button
+                key={`${w}x${l}`}
+                type="button"
+                aria-pressed={active}
+                onClick={() => set({ widthMm: String(w), lengthMm: String(l), sourceMaterialId: "" })}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors ${
+                  active
+                    ? "border-slate-800 bg-slate-800 text-white"
+                    : "border-slate-300 text-slate-700 hover:border-slate-400 hover:bg-slate-50"
+                }`}
+              >
+                <TileShape widthMm={w} lengthMm={l} />
+                {cm(w)}×{cm(l)} ซม.
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Field label="กว้าง (มม.)">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            value={form.widthMm}
+            onChange={(e) => set({ widthMm: e.target.value, sourceMaterialId: "" })}
+            placeholder="300"
+            aria-label="กว้างของแผ่น (มม.)"
+            className={numInput}
+          />
+        </Field>
+        <Field label="ยาว (มม.)">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            value={form.lengthMm}
+            onChange={(e) => set({ lengthMm: e.target.value, sourceMaterialId: "" })}
+            placeholder="300"
+            aria-label="ยาวของแผ่น (มม.)"
+            className={numInput}
+          />
+        </Field>
+        <Field label="หนา (มม.)" isDefault={sized && form.thicknessMm.trim() === ""}>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.5"
+            value={form.thicknessMm}
+            onChange={(e) => set({ thicknessMm: e.target.value })}
+            placeholder={sized ? String(defaultTileThicknessMm(config.widthMm, config.lengthMm)) : ""}
+            aria-label="ความหนาแผ่น (มม.)"
+            className={`${numInput} ${DEFAULT_PLACEHOLDER}`}
+          />
+        </Field>
+        <Field label="ร่องยาแนว (มม.)" isDefault={sized && form.jointMm.trim() === ""}>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.5"
+            value={form.jointMm}
+            onChange={(e) => set({ jointMm: e.target.value })}
+            placeholder={sized ? String(defaultTileJointMm(config.widthMm, config.lengthMm)) : ""}
+            aria-label="ความกว้างร่องยาแนว (มม.)"
+            className={`${numInput} ${DEFAULT_PLACEHOLDER}`}
+          />
+        </Field>
+        <Field label="แผ่นต่อกล่อง">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            value={form.piecesPerBox}
+            onChange={(e) => set({ piecesPerBox: e.target.value })}
+            placeholder="ดูข้างกล่อง"
+            aria-label="แผ่นต่อกล่อง"
+            className={numInput}
+          />
+        </Field>
+      </div>
+      <p className="text-xs text-slate-400">
+        ช่องที่มีป้าย &quot;ค่าตั้งต้น&quot; ระบบใช้ค่านั้นอยู่แล้ว — กรอกทับเมื่อของจริงต่างจากนี้
+      </p>
+    </>
+  );
+}
+
+/** หมวด 2 — รูปแบบการปู · หมุนแผ่น · เผื่อแตกหัก */
+function PatternFields({
+  form,
+  config,
+  sized,
+  set,
+}: Readonly<{ form: TileForm; config: TileCalcConfig; sized: boolean; set: (patch: Partial<TileForm>) => void }>) {
+  return (
+    <>
+      <div role="radiogroup" aria-label="รูปแบบการปู" className="grid grid-cols-3 gap-2 sm:max-w-md">
+        {TILE_PATTERNS.map((p) => {
+          const active = form.pattern === p.value;
+          return (
+            <button
+              key={p.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => set({ pattern: p.value })}
+              className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2.5 text-xs transition-colors ${
+                active
+                  ? "border-slate-800 text-slate-800 ring-1 ring-slate-800"
+                  : "border-slate-200 text-slate-600 hover:border-slate-400"
+              }`}
+            >
+              <PatternIcon pattern={p.value} />
+              <span className={active ? "font-medium" : undefined}>{p.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {sized && config.widthMm !== config.lengthMm && form.pattern === "STRAIGHT" && (
+        <label className="flex items-center gap-1.5 text-xs text-slate-600">
+          <input type="checkbox" checked={form.rotate} onChange={(e) => set({ rotate: e.target.checked })} />
+          <span>วางด้านยาวของแผ่นตามแนว &quot;กว้าง&quot; ของห้อง</span>
+        </label>
+      )}
+      <label className="flex items-center gap-1.5 text-xs text-slate-600">
+        <span>เผื่อแตกหัก/สำรองซ่อม</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          max="50"
+          step="any"
+          value={form.wastePct}
+          onChange={(e) => set({ wastePct: e.target.value })}
+          aria-label="เผื่อแตกหัก (%)"
+          className="w-16 rounded-md border border-slate-300 px-2 py-0.5 text-right text-sm"
+        />
+        <span>%</span>
+        <span className="text-slate-400">· เศษจากการตัดแผ่น ระบบเผื่อให้เองตามวิธีปู</span>
+      </label>
+    </>
+  );
+}
+
+/** หมวด 3 — ตารางขนาดห้อง (แถวหัก = ส่วนที่ไม่ปู) พร้อมจำนวนแผ่นต่อแถว */
+function RoomsTable({
+  rooms,
+  setRooms,
+  piecesByIndex,
+}: Readonly<{
+  rooms: RoomRow[];
+  setRooms: (update: (prev: RoomRow[]) => RoomRow[]) => void;
+  piecesByIndex: Map<number, number>;
+}>) {
+  function updateRoom(index: number, patch: Partial<RoomRow>) {
+    setRooms((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs font-medium text-slate-600 [&_th]:bg-slate-100 [&_th]:px-2 [&_th]:py-1.5">
+            <tr>
+              <th className="min-w-36">ห้อง / ตำแหน่ง</th>
+              <th className="w-20 text-right">จำนวน</th>
+              <th className="w-24 text-right">ยาว (ม.)</th>
+              <th className="w-24 text-right">กว้าง (ม.)</th>
+              <th className="w-16 text-right">แผ่น</th>
+              <th className="w-16" />
+            </tr>
+          </thead>
+          <tbody>
+            {rooms.map((r, i) => (
+              <tr key={r.key} className={`border-t border-slate-100 ${r.deduct ? "bg-red-50/60" : ""}`}>
+                <td className="px-2 py-1">
+                  <div className="flex items-center gap-1.5">
+                    {r.deduct && (
+                      <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-700">หัก</span>
+                    )}
+                    <input
+                      value={r.label}
+                      onChange={(e) => updateRoom(i, { label: e.target.value })}
+                      placeholder={r.deduct ? "เช่น ฐานเคาน์เตอร์" : "เช่น ห้องน้ำ 1"}
+                      maxLength={120}
+                      aria-label={`ชื่อห้อง แถว ${i + 1}`}
+                      className={input}
+                    />
+                  </div>
+                </td>
+                {(["count", "length", "width"] as const).map((k) => (
+                  <td key={k} className="px-2 py-1">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
+                      value={r[k]}
+                      onChange={(e) => updateRoom(i, { [k]: e.target.value })}
+                      aria-label={`${ROOM_FIELD_LABEL[k]} แถว ${i + 1}`}
+                      className={numInput}
+                    />
+                  </td>
+                ))}
+                <td className={`px-2 py-1 text-right tabular-nums ${r.deduct ? "text-red-700" : "text-slate-700"}`}>
+                  {roomPiecesText(piecesByIndex.get(i), r.deduct) ?? <span className="text-slate-300">—</span>}
+                </td>
+                <td className="px-1 py-1">
+                  <div className="flex items-center justify-end gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => updateRoom(i, { deduct: !r.deduct })}
+                      title={r.deduct ? "เปลี่ยนเป็นห้องที่ปู" : "เปลี่ยนเป็นส่วนที่ไม่ปู (หัก)"}
+                      aria-pressed={r.deduct}
+                      aria-label={`แถวหัก แถว ${i + 1}`}
+                      className={`rounded p-1 ${r.deduct ? "text-red-600 hover:bg-red-100" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"}`}
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <Tooltip label="ลบแถว" side="top" align="end">
+                      <button
+                        type="button"
+                        onClick={() => setRooms((prev) => (prev.length === 1 ? [blankRoom()] : prev.filter((_, j) => j !== i)))}
+                        aria-label={`ลบแถว ${i + 1}`}
+                        title="ลบแถว"
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={() => setRooms((p) => [...p, blankRoom()])}>
+          <Plus size={14} /> เพิ่มห้อง
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setRooms((p) => [...p, blankRoom(true)])}>
+          <Minus size={14} /> เพิ่มส่วนที่ไม่ปู
+        </Button>
+        <span className="text-xs text-slate-400">ผนัง: ยาว = ความยาวผนัง · กว้าง = ความสูงที่ปู</span>
+      </div>
+    </>
+  );
+}
+
+/** หมวด 4 — ปูนกาว · ยาแนว · คิ้วจบขอบ */
+function ExtrasFields({
+  form,
+  config,
+  sized,
+  set,
+}: Readonly<{ form: TileForm; config: TileCalcConfig; sized: boolean; set: (patch: Partial<TileForm>) => void }>) {
+  const defaults = sized ? defaultAdhesive(config.widthMm, config.lengthMm) : null;
+  const groutPerSqm = sized ? groutKgPerSqm(config.widthMm, config.lengthMm, config.jointMm, config.thicknessMm) : 0;
+  return (
+    <>
+      <Accessory
+        checked={form.useAdhesive}
+        onToggle={(v) => set({ useAdhesive: v })}
+        label="ปูนกาว"
+        hint={defaults ? `ค่าตั้งต้นสำหรับเกรียงร่อง ${defaults.trowelMm} มม. — แก้ตามฉลากถุงที่ใช้` : undefined}
+      >
+        <MiniField
+          label="กก./ตร.ม."
+          value={form.adhesiveKg}
+          placeholder={defaults ? String(defaults.kgPerSqm) : ""}
+          isDefault={defaults != null && form.adhesiveKg.trim() === ""}
+          onChange={(v) => set({ adhesiveKg: v })}
+        />
+        <MiniField label="กก./ถุง" value={form.bagKg} onChange={(v) => set({ bagKg: v })} />
+        <MiniField label="เผื่อ %" value={form.adhesiveWaste} onChange={(v) => set({ adhesiveWaste: v })} />
+      </Accessory>
+      <Accessory
+        checked={form.useGrout}
+        onToggle={(v) => set({ useGrout: v })}
+        label="ยาแนว"
+        hint={sized && groutPerSqm > 0 ? `ใช้ ${num(groutPerSqm)} กก./ตร.ม. คิดจากขนาดแผ่น ร่อง และความหนา` : undefined}
+      >
+        <MiniField label="กก./ถุง" value={form.packKg} onChange={(v) => set({ packKg: v })} />
+        <MiniField label="เผื่อ %" value={form.groutWaste} onChange={(v) => set({ groutWaste: v })} />
+      </Accessory>
+      <Accessory checked={form.useTrim} onToggle={(v) => set({ useTrim: v })} label="คิ้วจบขอบ" hint="ขอบที่ไม่ชนผนัง เช่น ขอบขั้นบันได มุมเสา">
+        <MiniField label="ความยาวขอบรวม (ม.)" value={form.trimLength} onChange={(v) => set({ trimLength: v })} wide />
+        <MiniField label="ม./เส้น" value={form.trimPieceLength} onChange={(v) => set({ trimPieceLength: v })} />
+      </Accessory>
+    </>
+  );
+}
+
+/** หมวด 5 — คงราคาเหมา หรือให้ตัวคิดตั้งราคาวัสดุ (กระเบื้อง + ของประกอบ) */
+function PriceFields({
+  form,
+  config,
+  sized,
+  wasPricedByCalc,
+  fallbackPrice,
+  setFallbackPrice,
+  set,
+}: Readonly<{
+  form: TileForm;
+  config: TileCalcConfig;
+  sized: boolean;
+  wasPricedByCalc: boolean;
+  fallbackPrice: string;
+  setFallbackPrice: (v: string) => void;
+  set: (patch: Partial<TileForm>) => void;
+}>) {
+  return (
+    <>
+      <div role="radiogroup" aria-label="วิธีตั้งราคา" className="flex flex-col gap-1.5 text-sm">
+        <label className="flex items-start gap-2">
+          <input type="radio" checked={!form.priced} onChange={() => set({ priced: false })} className="mt-1" />
+          <span>
+            <span className="font-medium text-slate-800">คงราคาเหมาเดิม</span>{" "}
+            <span className="text-slate-500">— ใช้ตัวคิดดูจำนวนแผ่น/กล่องอย่างเดียว ราคาบรรทัดไม่เปลี่ยน</span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2">
+          <input type="radio" checked={form.priced} onChange={() => set({ priced: true })} className="mt-1" />
+          <span>
+            <span className="font-medium text-slate-800">ตั้งราคาวัสดุจากรายการนี้</span>{" "}
+            <span className="text-slate-500">— ราคาวัสดุ/ตร.ม. = กระเบื้องที่ต้องใช้จริง + ของประกอบ</span>
+          </span>
+        </label>
+      </div>
+      {!form.priced && wasPricedByCalc && (
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <span>ราคาวัสดุต่อ ตร.ม. ที่จะใช้แทน</span>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={fallbackPrice}
+            onChange={(e) => setFallbackPrice(e.target.value)}
+            aria-label="ราคาวัสดุต่อ ตร.ม. ที่จะใช้แทน"
+            className="w-28 rounded-md border border-slate-300 px-2 py-1 text-right text-sm"
+          />
+          <span>บาท</span>
+        </label>
+      )}
+      {form.priced && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Field label="ราคากระเบื้อง (บาท)">
+            <div className="flex gap-1">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.tilePrice}
+                onChange={(e) => set({ tilePrice: e.target.value })}
+                aria-label="ราคากระเบื้อง"
+                className={numInput}
+              />
+              <select
+                value={form.tilePriceUnit}
+                onChange={(e) => set({ tilePriceUnit: e.target.value as TilePriceUnit })}
+                aria-label="ราคาต่อ"
+                className="rounded-md border border-slate-300 px-1 text-xs"
+              >
+                <option value="SQM">/ตร.ม.</option>
+                <option value="BOX">/กล่อง</option>
+                <option value="PIECE">/แผ่น</option>
+              </select>
+            </div>
+          </Field>
+          {form.useAdhesive && (
+            <Field label="ปูนกาว (บาท/ถุง)">
+              <input type="number" min="0" step="any" value={form.adhesivePrice} onChange={(e) => set({ adhesivePrice: e.target.value })} aria-label="ราคาปูนกาวต่อถุง" className={numInput} />
+            </Field>
+          )}
+          {form.useGrout && (
+            <Field label="ยาแนว (บาท/ถุง)">
+              <input type="number" min="0" step="any" value={form.groutPrice} onChange={(e) => set({ groutPrice: e.target.value })} aria-label="ราคายาแนวต่อถุง" className={numInput} />
+            </Field>
+          )}
+          {form.useTrim && (
+            <Field label="คิ้ว (บาท/เส้น)">
+              <input type="number" min="0" step="any" value={form.trimPrice} onChange={(e) => set({ trimPrice: e.target.value })} aria-label="ราคาคิ้วต่อเส้น" className={numInput} />
+            </Field>
+          )}
+        </div>
+      )}
+      <Field label="ชื่อกระเบื้องในรายการสั่งซื้อ">
+        <input
+          value={form.tileName}
+          onChange={(e) => set({ tileName: e.target.value })}
+          placeholder={sized ? tileDisplayName({ ...config, tileName: "", piecesPerBox: null }) : "เช่น แกรนิตโต้ 60×60 สีเทา"}
+          maxLength={120}
+          className={input}
+        />
+      </Field>
+    </>
   );
 }
 
@@ -1146,7 +1328,8 @@ function summaryLines(config: TileCalcConfig, result: ReturnType<typeof tileTake
     result.cutPct > 0 ? `เผื่อเศษตัด ${num(result.cutPct)}%` : null,
     config.wastePct > 0 ? `แตกหัก ${num(config.wastePct)}%` : null,
   ].filter(Boolean);
-  lines.push(`ต้องสั่งกระเบื้อง ${order}${allowance.length > 0 ? ` (รวม${allowance.join(" และ")})` : ""}`);
+  const allowanceNote = allowance.length > 0 ? ` (รวม${allowance.join(" และ")})` : "";
+  lines.push(`ต้องสั่งกระเบื้อง ${order}${allowanceNote}`);
   const extras = [
     result.adhesive && config.adhesive ? `ปูนกาว ${result.adhesive.bags} ถุง (ถุงละ ${num(config.adhesive.bagKg)} กก.)` : null,
     result.grout && config.grout ? `ยาแนว ${result.grout.packs} ถุง (ถุงละ ${num(config.grout.packKg)} กก.)` : null,
@@ -1271,8 +1454,8 @@ function ResultPanel({
         </dl>
         {result.rooms.length > 0 && (
           <ul className="mt-2 flex flex-col gap-1.5">
-            {result.rooms.map((r, i) => (
-              <li key={i} className={r.deduct ? "text-red-700" : undefined}>
+            {withUniqueKeys(result.rooms, (r) => r.label).map(({ item: r, key }) => (
+              <li key={key} className={r.deduct ? "text-red-700" : undefined}>
                 <span className="font-medium">{r.label}</span> — {r.explain}
               </li>
             ))}

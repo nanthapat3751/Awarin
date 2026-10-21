@@ -1,5 +1,4 @@
-import { looksLikeEmail } from "@systemboq/shared-types";
-import { SITE_IMAGE_KEYS, isSafeImageUrl } from "@systemboq/shared-types";
+import { SITE_IMAGE_KEYS, isSafeImageUrl, looksLikeEmail } from "@systemboq/shared-types";
 import { z } from "zod";
 
 import { isValidPromptPayId } from "../../lib/promptpay";

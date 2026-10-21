@@ -112,7 +112,7 @@ export function RowMenu({
             <Fragment key={item.key}>
               {/* เส้นคั่นก่อนกลุ่มคำสั่งอันตราย — แยกเป็นเส้นของตัวเอง ไม่ติดกับแถวที่ไฮไลต์ */}
               {item.danger && i > 0 && !ordered[i - 1].danger && (
-                <div role="separator" className="mx-2 my-1 border-t border-slate-200" />
+                <hr className="mx-2 my-1 border-t border-slate-200" />
               )}
               <button
                 type="button"

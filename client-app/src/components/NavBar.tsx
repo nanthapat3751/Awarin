@@ -213,9 +213,8 @@ function AccountMenu({
       {open && (
         // ชิดขวาของปุ่ม — ปุ่มอยู่ขอบขวาสุดของแถบ จัดกึ่งกลางจะล้นจอ
         <div className="absolute right-0 top-full z-40 pt-3 [text-shadow:none]">
-          <div
+          <section
             id="account-menu"
-            role="region"
             aria-label="บัญชีของฉัน"
             className="nav-menu-pop w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-left shadow-lg"
           >
@@ -235,7 +234,7 @@ function AccountMenu({
               <LogoutIcon />
               ออกจากระบบ
             </button>
-          </div>
+          </section>
         </div>
       )}
     </div>
@@ -271,9 +270,8 @@ function GuestMenu({ buttonClass }: Readonly<{ buttonClass: string }>) {
       {open && (
         // ชิดขวาของปุ่ม — ปุ่มอยู่ขอบขวาสุดของแถบ ถ้าจัดกึ่งกลางกล่องจะล้นออกนอกจอ
         <div className="absolute right-0 top-full z-40 pt-3 [text-shadow:none]">
-          <div
+          <section
             id="guest-menu"
-            role="region"
             aria-label="พื้นที่ลูกค้า"
             className="nav-menu-pop w-80 rounded-xl border border-slate-200 bg-white p-5 text-left shadow-xl"
           >
@@ -305,7 +303,7 @@ function GuestMenu({ buttonClass }: Readonly<{ buttonClass: string }>) {
                 สมัครเอง
               </Link>
             </p>
-          </div>
+          </section>
         </div>
       )}
     </div>

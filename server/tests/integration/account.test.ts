@@ -127,7 +127,7 @@ describe("staff account (my profile + avatar)", () => {
 
     const after = await prisma.user.findUniqueOrThrow({ where: { id: admin.userId } });
     expect(after.avatarUrl).toBe(before.avatarUrl);
-    expect(fs.readdirSync(UPLOADS_DIR).length).toBe(filesBefore);
+    expect(fs.readdirSync(UPLOADS_DIR)).toHaveLength(filesBefore);
   });
 
   it("removes the avatar and its file", async () => {

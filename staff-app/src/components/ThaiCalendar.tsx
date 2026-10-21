@@ -7,7 +7,7 @@ import {
   calendarWeeks,
   todayIso,
 } from "@systemboq/shared-types";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 // ไฟล์นี้มีสองชุดเหมือนกัน: staff-app/src/components/ThaiCalendar.tsx และ client-app/src/components/ThaiCalendar.tsx
@@ -58,7 +58,7 @@ export function ThaiCalendar({
   // วันที่ที่ลูกศรคีย์บอร์ดชี้อยู่ (ชั้นวัน) — เริ่มที่ค่าที่เลือกไว้ หรือวันนี้
   const [focusIso, setFocusIso] = useState(mode === "day" ? (value || today) : "");
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const popRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDialogElement>(null);
 
   const minDay = min ?? "";
   const maxDay = max ?? "";
@@ -121,6 +121,14 @@ export function ThaiCalendar({
     popRef.current?.querySelector<HTMLButtonElement>(`[data-iso="${focusIso}"]`)?.focus();
   }, [level, focusIso, viewYear, viewMonth]);
 
+  // ลูกศร/PageUp/PageDown ในชั้นวัน — ฟังที่ตัวกล่องโดยตรง (ไม่ผูก onKeyDown บน <dialog> ซึ่งไม่ใช่ปุ่ม)
+  useEffect(() => {
+    const el = popRef.current;
+    if (!el) return;
+    el.addEventListener("keydown", onKey);
+    return () => el.removeEventListener("keydown", onKey);
+  });
+
   /** เดือนที่ห่างจากเดือนที่กำลังดู n เดือน → [ปี ค.ศ., เดือน 0-11] */
   const monthAt = (n: number): [number, number] => {
     const d = new Date(Date.UTC(viewYear, viewMonth + n, 1));
@@ -143,7 +151,7 @@ export function ThaiCalendar({
     }
   }
 
-  function onKey(e: KeyboardEvent) {
+  function onKey(e: globalThis.KeyboardEvent) {
     if (level !== "day" || !focusIso) return;
     const steps: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
     if (e.key in steps) {
@@ -166,8 +174,8 @@ export function ThaiCalendar({
   );
 
   let header = "";
-  let prev = () => {};
-  let next = () => {};
+  let prev: () => void;
+  let next: () => void;
   let prevOff = false;
   let nextOff = false;
   let up: Level | null = null;
@@ -194,15 +202,14 @@ export function ThaiCalendar({
     nextOff = yearDisabled(yearPageStart + 12);
   }
 
+  const upLabel = up === "month" ? "เดือน" : "ปี";
   const selectedYm = mode === "month" ? value : ym(value);
   const todayYm = ym(today);
 
   return createPortal(
-    <div
+    <dialog open
       ref={popRef}
-      role="dialog"
       aria-label={mode === "month" ? "เลือกเดือน" : "เลือกวันที่"}
-      onKeyDown={onKey}
       style={{ position: "fixed", top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: WIDTH }}
       className="z-[60] rounded-xl border border-slate-200 bg-white p-2 text-slate-800 shadow-lg"
     >
@@ -214,7 +221,7 @@ export function ThaiCalendar({
           type="button"
           onClick={() => up && setLevel(up)}
           disabled={!up}
-          aria-label={up ? `เลือก${up === "month" ? "เดือน" : "ปี"}` : undefined}
+          aria-label={up ? `เลือก${upLabel}` : undefined}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent"
         >
           {header}
@@ -356,7 +363,7 @@ export function ThaiCalendar({
           </button>
         )}
       </div>
-    </div>,
+    </dialog>,
     document.body,
   );
 }

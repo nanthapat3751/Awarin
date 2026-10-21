@@ -123,7 +123,7 @@ export function QuoteApprovalControls({
     return (
       <div className="flex w-full min-w-72 flex-col gap-2">
         <label className="flex flex-col gap-1 text-xs text-slate-600">
-          เหตุผลที่ส่งกลับ (ผู้ขอจะเห็นข้อความนี้)
+          <span>เหตุผลที่ส่งกลับ (ผู้ขอจะเห็นข้อความนี้)</span>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}

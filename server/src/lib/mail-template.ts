@@ -91,7 +91,8 @@ function contactLines(brand: MailBrand): string[] {
   const reach = [brand.phone && `โทร ${brand.phone}`, brand.email && `อีเมล ${brand.email}`].filter(Boolean);
   if (reach.length) lines.push(reach.join(" · "));
   if (brand.taxId) {
-    lines.push(`เลขประจำตัวผู้เสียภาษี ${brand.taxId}${brand.branch ? ` (${brand.branch})` : ""}`);
+    const branch = brand.branch ? ` (${brand.branch})` : "";
+    lines.push(`เลขประจำตัวผู้เสียภาษี ${brand.taxId}${branch}`);
   }
   return lines;
 }

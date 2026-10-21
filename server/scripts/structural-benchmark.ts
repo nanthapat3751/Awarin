@@ -115,9 +115,11 @@ const table = [
   "|---|---|---:|---:|---:|---:|",
   ...lines.map((l) => {
     const d = diffPct(l);
-    return `| ${l.item} | ${l.unit} | ${fmt(l.system)} | ${l.engineer == null ? "—" : fmt(l.engineer)} | ${
-      d == null ? "—" : `${d > 0 ? "+" : ""}${d.toFixed(2)}%`
-    } | ${d == null ? "ยังไม่มีตัวเลขเทียบ" : `${Math.max(0, 100 - Math.abs(d)).toFixed(2)}%`} |`;
+    const engineer = l.engineer == null ? "—" : fmt(l.engineer);
+    const sign = d != null && d > 0 ? "+" : "";
+    const diff = d == null ? "—" : `${sign}${d.toFixed(2)}%`;
+    const accuracy = d == null ? "ยังไม่มีตัวเลขเทียบ" : `${Math.max(0, 100 - Math.abs(d)).toFixed(2)}%`;
+    return `| ${l.item} | ${l.unit} | ${fmt(l.system)} | ${engineer} | ${diff} | ${accuracy} |`;
   }),
 ].join("\n");
 

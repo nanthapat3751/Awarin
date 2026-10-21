@@ -82,11 +82,7 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: ViewerKind }>) {
         const [found, objectUrl] = await Promise.all([
           loadDocMeta(kind, contractId, docId),
           fetchPdfObjectUrl(
-            kind === "billing"
-              ? billingDocApiPath(contractId, docId)
-              : kind === "changeOrder"
-                ? changeOrderApiPath(contractId, docId)
-                : pdfApiPath(kind, docId),
+            docApiPath(kind, contractId, docId),
           ),
         ]);
 
@@ -158,4 +154,10 @@ export function DocumentPdfPage({ kind }: Readonly<{ kind: ViewerKind }>) {
       )}
     </div>
   );
+}
+
+function docApiPath(kind: ViewerKind, contractId: string, docId: string) {
+  if (kind === "billing") return billingDocApiPath(contractId, docId);
+  if (kind === "changeOrder") return changeOrderApiPath(contractId, docId);
+  return pdfApiPath(kind, docId);
 }

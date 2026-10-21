@@ -178,7 +178,7 @@ function headerRow(ws: ExcelJS.Worksheet, labels: string[], numericFrom: number)
     cell.font = { name: FONT, size: 10, bold: true, color: { argb: INK } };
     cell.alignment = {
       vertical: "middle",
-      horizontal: col >= numericFrom && !TEXT_HEADERS.has(String(cell.value)) ? "right" : "left",
+      horizontal: col >= numericFrom && !(typeof cell.value === "string" && TEXT_HEADERS.has(cell.value)) ? "right" : "left",
       wrapText: true,
     };
     cell.border = { bottom: { style: "medium", color: { argb: INK } } };
@@ -317,13 +317,20 @@ function summaryRow(
 const f = (formula: string, result: number): ExcelJS.CellFormulaValue => ({ formula, result });
 
 function discountLabel(p: VersionPricing): string {
-  const pct = p.discountPct != null ? ` ${p.discountPct}%` : "";
-  return `ส่วนลด${pct}${p.discountNote ? ` (${p.discountNote})` : ""}`;
+  return discountText(p.discountPct, p.discountNote);
+}
+
+/** "ส่วนลด 5% (ลูกค้าเก่า)" — ป้ายแถวส่วนลด ใช้ทั้งฉบับภายในและฉบับลูกค้า */
+function discountText(pct: number | null, note: string | null | undefined): string {
+  const pctText = pct != null ? ` ${pct}%` : "";
+  const noteText = note ? ` (${note})` : "";
+  return `ส่วนลด${pctText}${noteText}`;
 }
 
 function roundingLabel(unit: number | null): string {
   if (unit === 1) return "ส่วนลดปัดเศษ (ตัดสตางค์)";
-  return `ส่วนลดปัดเศษ (ปัดลงหลัก${{ 100: "ร้อย", 1000: "พัน", 10000: "หมื่น" }[unit ?? 0] ?? ` ${unit}`})`;
+  const place = { 100: "ร้อย", 1000: "พัน", 10000: "หมื่น" }[unit ?? 0] ?? ` ${unit}`;
+  return `ส่วนลดปัดเศษ (ปัดลงหลัก${place})`;
 }
 
 // ─────────────────────────── แบ่งชีต ───────────────────────────
@@ -365,11 +372,22 @@ function cutTo(text: string, max: number): string {
  * (ชนเมื่อไรเติมเลขต่อท้าย) · `used` = ชื่อตัวพิมพ์เล็กของชีตที่ใช้ไปแล้ว ฟังก์ชันนี้เติมให้เอง
  * `suffix` (เช่น " (2)") ไม่ถูกตัดทิ้ง — ตัดชื่อหมวดให้สั้นลงแทน
  */
+const isQuoteOrSpace = (c: string) => c === "'" || c.trim() === "";
+
+/** ตัด ' กับช่องว่างหัว-ท้าย (Excel ไม่รับชื่อชีตที่ขึ้นต้น/ลงท้ายด้วย ') — ไล่ทีละตัวแทน regex ที่ย้อนลองได้หลายทาง */
+function trimQuotesAndSpaces(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && isQuoteOrSpace(text[start])) start++;
+  while (end > start && isQuoteOrSpace(text[end - 1])) end--;
+  return text.slice(start, end);
+}
+
 export function safeSheetName(base: string, used: Set<string>, suffix = ""): string {
   const clean = base.replace(/[:\\/?*[\]]/g, "-").replace(/\s+/g, " ").trim();
   for (let n = 1; ; n++) {
-    const tail = `${n > 1 ? ` ${n}` : ""}${suffix}`;
-    const head = cutTo(clean, SHEET_NAME_MAX - tail.length).replace(/^['\s]+|['\s]+$/g, "") || "หมวด";
+    const tail = n > 1 ? ` ${n}${suffix}` : suffix;
+    const head = trimQuotesAndSpaces(cutTo(clean, SHEET_NAME_MAX - tail.length)) || "หมวด";
     const name = `${head}${tail}`;
     const key = name.toLowerCase();
     if (key !== "history" && !used.has(key)) {
@@ -474,7 +492,10 @@ function writeCategorySheets<L extends { subgroup?: SubgroupRef | null }>(
     spec.sums.forEach((s, k) => {
       const L = colLetter(s.col);
       // หมวดย่อยที่ข้ามแผ่น: บวกช่วงของแต่ละแผ่น (อ้างชีตก่อนหน้าตรง ๆ)
-      const terms = run.parts.map((part) => `SUM(${rowRanges(L, part.rows, part.sheet === sheetName ? "" : `${sheetRef(part.sheet)}!`)})`);
+      const terms = run.parts.map((part) => {
+        const prefix = part.sheet === sheetName ? "" : `${sheetRef(part.sheet)}!`;
+        return `SUM(${rowRanges(L, part.rows, prefix)})`;
+      });
       row.getCell(s.col).value = f(terms.join("+"), run.totals[k]);
       money(row.getCell(s.col));
     });
@@ -516,7 +537,7 @@ function writeCategorySheets<L extends { subgroup?: SubgroupRef | null }>(
     chunk.forEach((line, j) => {
       const sub = line.subgroup ?? null;
       const key = subKey(sub);
-      if (!open || open.key !== key) {
+      if (open?.key !== key) {
         closeRun(ws, name);
         open = { key, sub, parts: [], totals: spec.sums.map(() => 0) };
         if (sub) subgroupHeader(ws, subLabel(sub), lastCol);
@@ -577,7 +598,7 @@ function summaryGroupRow(
   grandTotal: number,
   zebra = false,
 ) {
-  const name = `${g.name}${at.parts > 1 ? ` (${at.parts} แผ่น)` : ""}`;
+  const name = at.parts > 1 ? `${g.name} (${at.parts} แผ่น)` : g.name;
   const row = ws.addRow([g.label, { text: name, hyperlink: `#${sheetRef(at.firstSheet)}!A1` }, g.lineCount]);
   row.getCell(2).font = { name: FONT, size: 10, color: { argb: NAVY }, underline: true };
   sourceCols.forEach((src, k) => {
@@ -693,11 +714,11 @@ function takeoffSheet(wb: ExcelJS.Workbook, meta: WorkbookMeta, versionNo: numbe
   headerRow(ws, ["#", "ชิ้นส่วน / ตำแหน่ง", "จำนวน", "ยาว", "กว้าง", "สูง/หนา", "เหล็ก", "กก./ม.", "ผล"], 3);
 
   for (const b of blocks) {
-    groupHeader(ws, `${b.code ? `${b.code}  ` : ""}${b.name} (${b.unit})`, 9);
+    groupHeader(ws, b.code ? `${b.code}  ${b.name} (${b.unit})` : `${b.name} (${b.unit})`, 9);
     const ton = b.unit.replace(/[\s.]/g, "") === "ตัน";
     const first = ws.rowCount + 1;
     b.rows.forEach((r, i) => {
-      const code = r.barDia == null ? "" : r.barDia === 6 || r.barDia === 9 ? `RB${r.barDia}` : `DB${r.barDia}`;
+      const code = barCodeOf(r.barDia);
       const row = ws.addRow([i + 1, r.deduct ? `(หัก) ${r.label}` : r.label, r.count, r.length, r.width, r.height, code, null, null]);
       const n = row.number;
       if (r.barDia != null) row.getCell(8).value = f(`${r.barDia}^2/162`, (r.barDia * r.barDia) / 162);
@@ -745,7 +766,7 @@ export async function buildInternalBoqWorkbook(input: {
     { text: meta.companyName, bold: true, size: 13 },
     { text: "บัญชีแสดงปริมาณวัสดุและราคา (BOQ) — ฉบับภายใน มีราคาทุน ห้ามส่งให้ลูกค้า", bold: true, size: 12, color: "FFA32020" },
     { text: `โครงการ: ${meta.projectName} (${meta.projectNo})` },
-    { text: `ลูกค้า: ${meta.customerName ?? "—"}${meta.siteAddress ? ` · สถานที่ก่อสร้าง: ${meta.siteAddress}` : ""}` },
+    { text: partyLine("ลูกค้า", meta) },
     {
       text: `เวอร์ชัน ${p.versionNo} · ต้นทุน + กำไร + VAT · ส่งออกเมื่อ ${thaiDateTime(meta.exportedAt)}`,
       color: "FF5A6078",
@@ -768,7 +789,7 @@ export async function buildInternalBoqWorkbook(input: {
         hiddenTrailing: 1,
         title: (part, parts) => [
           { text: meta.companyName, bold: true, size: 13 },
-          { text: `หมวด ${g.label}  ${g.name}${parts > 1 ? ` · แผ่นที่ ${part} จาก ${parts}` : ""}`, bold: true, size: 12, color: NAVY },
+          { text: `หมวด ${g.label}  ${g.name}${partNote(part, parts)}`, bold: true, size: 12, color: NAVY },
           { text: `โครงการ: ${meta.projectName} (${meta.projectNo}) · เวอร์ชัน ${p.versionNo}` },
           { text: "ฉบับภายใน มีราคาทุน ห้ามส่งให้ลูกค้า", color: "FFA32020" },
         ],
@@ -851,6 +872,23 @@ export interface CustomerTotals {
   withholding: { pct: number; tax: number; netTransfer: number } | null;
 }
 
+/** "RB9" / "DB12" — ว่างเมื่อแถวนั้นไม่ใช่เหล็ก */
+function barCodeOf(dia: number | null | undefined): string {
+  if (dia == null) return "";
+  return dia === 6 || dia === 9 ? `RB${dia}` : `DB${dia}`;
+}
+
+/** "ลูกค้า: … · สถานที่ก่อสร้าง: …" */
+function partyLine(label: string, meta: WorkbookMeta): string {
+  const site = meta.siteAddress ? ` · สถานที่ก่อสร้าง: ${meta.siteAddress}` : "";
+  return `${label}: ${meta.customerName ?? "—"}${site}`;
+}
+
+/** " · แผ่นที่ 2 จาก 3" เมื่อหมวดยาวจนแตกเป็นหลายแผ่น */
+function partNote(part: number, parts: number): string {
+  return parts > 1 ? ` · แผ่นที่ ${part} จาก ${parts}` : "";
+}
+
 export async function buildCustomerBoqWorkbook(input: {
   meta: WorkbookMeta;
   quote: { quoteNo: string; revisionNo: number; date: Date; validUntil: Date | null };
@@ -862,17 +900,15 @@ export async function buildCustomerBoqWorkbook(input: {
   const wb = newWorkbook(meta);
   const used = new Set(FIXED_SHEETS.map((n) => n.toLowerCase()));
   const ws = sheet(wb, SUMMARY_SHEET, [10, 44, 10, 18, 10], meta);
-  const quoteLine = `ใบเสนอราคาเลขที่ ${quote.quoteNo} (ฉบับที่ ${quote.revisionNo}) · วันที่ ${thaiDate(quote.date)}${quote.validUntil ? ` · ยืนราคาถึง ${thaiDate(quote.validUntil)}` : ""}`;
+  const validNote = quote.validUntil ? ` · ยืนราคาถึง ${thaiDate(quote.validUntil)}` : "";
+  const quoteLine = `ใบเสนอราคาเลขที่ ${quote.quoteNo} (ฉบับที่ ${quote.revisionNo}) · วันที่ ${thaiDate(quote.date)}${validNote}`;
 
   titleBlock(ws, [
     { text: meta.companyName, bold: true, size: 12 },
     { text: "ใบเสนอราคา · บัญชีปริมาณงานและราคา", size: 16, color: NAVY },
     { text: quoteLine, color: MUTED },
     { text: `โครงการ: ${meta.projectName} (${meta.projectNo})`, color: MUTED },
-    {
-      text: `ผู้ว่าจ้าง: ${meta.customerName ?? "—"}${meta.siteAddress ? ` · สถานที่ก่อสร้าง: ${meta.siteAddress}` : ""}`,
-      color: MUTED,
-    },
+    { text: partyLine("ผู้ว่าจ้าง", meta), color: MUTED },
   ]);
 
   // ยอดท้ายใบ: ป้ายคอลัมน์ C ตัวเลขคอลัมน์ D (ใต้ช่อง "ราคารวม")
@@ -890,7 +926,7 @@ export async function buildCustomerBoqWorkbook(input: {
         numericFrom: 3,
         title: (part, parts) => [
           { text: meta.companyName, bold: true, size: 12 },
-          { text: `หมวด ${g.label} · ${g.name}${parts > 1 ? ` · แผ่นที่ ${part} จาก ${parts}` : ""}`, size: 14, color: NAVY },
+          { text: `หมวด ${g.label} · ${g.name}${partNote(part, parts)}`, size: 14, color: NAVY },
           { text: quoteLine, color: MUTED },
           { text: `โครงการ: ${meta.projectName} (${meta.projectNo})`, color: MUTED },
         ],
@@ -917,14 +953,19 @@ export async function buildCustomerBoqWorkbook(input: {
     ws.addRow([]);
   }
 
-  // ยอดท้ายใบ: ตัวเลขจากระบบชุดเดียวกับใบเสนอราคา PDF (ไม่ใช่สูตร) — ห้ามคลาดจากใบที่ส่งไปแม้สตางค์เดียว
+  customerTotalRows(ws, L, t, groupsTotal);
+  ws.addRow([]);
+  const note = ws.addRow([`ราคาตามใบเสนอราคาเลขที่ ${quote.quoteNo} · ไฟล์นี้ส่งออกเมื่อ ${thaiDateTime(meta.exportedAt)}`]);
+  note.getCell(1).font = { name: FONT, size: 9, color: { argb: "FF5A6078" } };
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/** ยอดท้ายใบ: ตัวเลขจากระบบชุดเดียวกับใบเสนอราคา PDF (ไม่ใช่สูตร) — ห้ามคลาดจากใบที่ส่งไปแม้สตางค์เดียว */
+function customerTotalRows(ws: ExcelJS.Worksheet, L: number, t: CustomerTotals, groupsTotal: number | null): void {
   if (t.discountAmt > 0 || t.roundingAmt > 0) {
     // แถว "รวมทุกหมวด" ข้างบนเป็นยอดเดียวกันอยู่แล้ว ไม่พิมพ์ซ้ำ — คลาดกันเมื่อไรค่อยแสดงตัวเลขของระบบ
     if (groupsTotal == null || groupsTotal !== t.beforeDiscount) summaryRow(ws, L, "รวมมูลค่างาน", t.beforeDiscount);
-    if (t.discountAmt > 0) {
-      const pct = t.discountPct != null ? ` ${t.discountPct}%` : "";
-      summaryRow(ws, L, `ส่วนลด${pct}${t.discountNote ? ` (${t.discountNote})` : ""}`, -t.discountAmt);
-    }
+    if (t.discountAmt > 0) summaryRow(ws, L, discountText(t.discountPct, t.discountNote), -t.discountAmt);
     if (t.roundingAmt > 0) summaryRow(ws, L, "ส่วนลดปัดเศษ", -t.roundingAmt);
   }
   summaryRow(ws, L, "รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม", t.subtotalBeforeVat);
@@ -934,8 +975,4 @@ export async function buildCustomerBoqWorkbook(input: {
     summaryRow(ws, L, `หัก ภาษี ณ ที่จ่าย ${t.withholding.pct}% (ของยอดก่อน VAT)`, -t.withholding.tax);
     summaryRow(ws, L, "ยอดชำระหลังหัก ณ ที่จ่าย", t.withholding.netTransfer, { bold: true });
   }
-  ws.addRow([]);
-  const note = ws.addRow([`ราคาตามใบเสนอราคาเลขที่ ${quote.quoteNo} · ไฟล์นี้ส่งออกเมื่อ ${thaiDateTime(meta.exportedAt)}`]);
-  note.getCell(1).font = { name: FONT, size: 9, color: { argb: "FF5A6078" } };
-  return Buffer.from(await wb.xlsx.writeBuffer());
 }

@@ -237,14 +237,9 @@ function Summary({ report, sourceText }: Readonly<{ report: ProjectCostReportDto
           </p>
         </div>
       </div>
-      <div
-        className="relative mt-4"
-        role="meter"
-        aria-label="ใช้งบไปแล้ว รวมยอดที่สั่ง"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={exposurePct ?? 0}
-      >
+      {/* แถบสีวาดเอง (จ่ายแล้ว/สั่งแล้ว) — โปรแกรมอ่านหน้าจออ่านค่าจาก <meter> ที่ซ่อนไว้ */}
+      <meter className="sr-only" aria-label="ใช้งบไปแล้ว รวมยอดที่สั่ง" min={0} max={100} value={exposurePct ?? 0} />
+      <div className="relative mt-4">
         {hasBudget ? (
           <SplitBar actual={totals.actual} committed={totals.committed} budget={totals.budget} color={barColor} className="h-3" />
         ) : (
@@ -404,60 +399,38 @@ export function ProjectCostsPanel({
     }
   }
 
+  /** บันทึกบิล/ยอดสั่ง — ใหม่หรือแก้ของเดิม */
+  function saveEntry(form: FormState, common: ReturnType<typeof entryPayload>) {
+    const id = form.editingId;
+    if (form.kind === "cost") {
+      const input: ProjectCostInput = { ...common, spentOn: form.date, commitmentId: form.commitmentId || null };
+      return id ? updateProjectCost(projectId, id, input) : createProjectCost(projectId, input);
+    }
+    const input: ProjectCommitmentInput = { ...common, committedOn: form.date };
+    return id ? updateProjectCommitment(projectId, id, input) : createProjectCommitment(projectId, input);
+  }
+
   async function submit() {
     if (!form || !report) return;
-    if (!form.category) {
-      toast.error("เลือกหมวดงานก่อน (หรือ ค่าดำเนินการ/ทั่วไป)");
-      return;
-    }
-    if (!form.description.trim()) {
-      toast.error("กรอกรายการก่อน");
-      return;
-    }
     const split = splitVat(form);
-    if (split.amount <= 0) {
-      toast.error(form.kind === "cost" ? "ยอดตามบิลต้องมากกว่า 0" : "ยอดที่ตกลงต้องมากกว่า 0");
+    const problem = entryProblem(form, split.amount);
+    if (problem) {
+      toast.error(problem);
       return;
     }
     const over = formOverrun(report, form);
     const reason = over > 0 ? form.overrunReason || null : null;
-    if (over > 0 && (!reason || (reason === "OTHER" && !form.overrunNote.trim()))) {
+    if (reason === null ? over > 0 : reasonIncomplete(reason, form.overrunNote)) {
       setShowError(true);
       overrunRef.current?.focus();
       overrunRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       return;
     }
-    const overrun = {
-      overrunReason: reason,
-      overrunNote: reason ? form.overrunNote.trim() || null : null,
-      changeOrderId: reason === "CUSTOMER_CHANGE" ? form.changeOrderId || null : null,
-    };
-    const common = {
-      categoryId: form.category === OVERHEAD ? null : form.category,
-      costType: form.costType,
-      description: form.description.trim(),
-      vendor: form.vendor.trim() || null,
-      reference: form.reference.trim() || null,
-      amount: split.amount,
-      vatAmount: split.vatAmount,
-      note: form.note.trim() || null,
-      ...overrun,
-    };
     const editingId = form.editingId;
 
     setBusy(true);
     try {
-      if (form.kind === "cost") {
-        const input: ProjectCostInput = { ...common, spentOn: form.date, commitmentId: form.commitmentId || null };
-        setReport(editingId ? await updateProjectCost(projectId, editingId, input) : await createProjectCost(projectId, input));
-      } else {
-        const input: ProjectCommitmentInput = { ...common, committedOn: form.date };
-        setReport(
-          editingId
-            ? await updateProjectCommitment(projectId, editingId, input)
-            : await createProjectCommitment(projectId, input),
-        );
-      }
+      setReport(await saveEntry(form, entryPayload(form, split, reason)));
       if (editingId || form.kind === "commitment") {
         closeForm();
       } else {
@@ -654,7 +627,7 @@ export function ProjectCostsPanel({
             {report.totals.committed > 0 && (
               <p className="flex items-center gap-1.5 text-xs text-slate-500">
                 <span aria-hidden className="inline-block h-2 w-5 rounded-full bg-emerald-500 opacity-45" style={STRIPES} />
-                ช่วงจางลายเฉียง = สั่งแล้วยังไม่จ่าย นับเข้างบแล้ว
+                <span>ช่วงจางลายเฉียง = สั่งแล้วยังไม่จ่าย นับเข้างบแล้ว</span>
               </p>
             )}
             {!report.overheadBudgetKnown && (
@@ -794,14 +767,43 @@ export function ProjectCostsPanel({
   );
 }
 
+/** ข้อที่ยังไม่ครบก่อนบันทึก (null = ครบ) */
+function entryProblem(form: FormState, amount: number): string | null {
+  if (!form.category) return "เลือกหมวดงานก่อน (หรือ ค่าดำเนินการ/ทั่วไป)";
+  if (!form.description.trim()) return "กรอกรายการก่อน";
+  if (amount <= 0) return form.kind === "cost" ? "ยอดตามบิลต้องมากกว่า 0" : "ยอดที่ตกลงต้องมากกว่า 0";
+  return null;
+}
+
+/** เลือกสาเหตุเกินงบแล้วแต่ยังไม่ครบ — "อื่น ๆ" ต้องพิมพ์อธิบาย */
+function reasonIncomplete(reason: string, note: string) {
+  return reason === "OTHER" && !note.trim();
+}
+
+function entryPayload(form: FormState, split: { amount: number; vatAmount: number }, reason: FormState["overrunReason"] | null) {
+  return {
+    categoryId: form.category === OVERHEAD ? null : form.category,
+    costType: form.costType,
+    description: form.description.trim(),
+    vendor: form.vendor.trim() || null,
+    reference: form.reference.trim() || null,
+    amount: split.amount,
+    vatAmount: split.vatAmount,
+    note: form.note.trim() || null,
+    overrunReason: reason || null,
+    overrunNote: reason ? form.overrunNote.trim() || null : null,
+    changeOrderId: reason === "CUSTOMER_CHANGE" ? form.changeOrderId || null : null,
+  };
+}
+
 type CostView = "overview" | "bills" | "cash";
-const COST_VIEWS: readonly CostView[] = ["overview", "bills", "cash"];
+const COST_VIEWS: ReadonlySet<CostView> = new Set<CostView>(["overview", "bills", "cash"]);
 
 /** แท็บย่อยจำไว้ใน URL (?cost=) — รีเฟรช/ส่งลิงก์แล้วเปิดแท็บเดิม · ค่าแปลก ๆ = ภาพรวม */
 function useCostView(): [CostView, (next: CostView) => void] {
   const [params, setParams] = useSearchParams();
   const raw = params.get("cost");
-  const view = COST_VIEWS.includes(raw as CostView) ? (raw as CostView) : "overview";
+  const view = COST_VIEWS.has(raw as CostView) ? (raw as CostView) : "overview";
   const setView = (next: CostView) =>
     setParams(
       (prev) => {

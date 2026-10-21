@@ -186,7 +186,7 @@ export function Layout({ children }: Readonly<{ children: ReactNode }>) {
                 {!collapsed && item.to === "/pending-work" && showBadge && (
                   <span
                     className={`ml-auto rounded-full px-1.5 text-xs font-medium leading-5 tabular-nums text-white ${badgeColor}`}
-                    aria-label={`ต้องทำตอนนี้ ${pendingBadge.count} เรื่อง${pendingBadge.urgent > 0 ? ` (เร่ง ${pendingBadge.urgent})` : ""}`}
+                    aria-label={badgeLabel(pendingBadge.count, pendingBadge.urgent)}
                     title="เรื่องที่ต้องทำตอนนี้ (เร่ง + ควรทำวันนี้) · เรื่องระดับติดตามไม่นับ"
                   >
                     {pendingBadge.count > 99 ? "99+" : pendingBadge.count}
@@ -214,4 +214,9 @@ export function Layout({ children }: Readonly<{ children: ReactNode }>) {
       </div>
     </div>
   );
+}
+
+function badgeLabel(count: number, urgent: number) {
+  const urgentNote = urgent > 0 ? ` (เร่ง ${urgent})` : "";
+  return `ต้องทำตอนนี้ ${count} เรื่อง${urgentNote}`;
 }

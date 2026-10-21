@@ -12,6 +12,11 @@ import { SearchInput } from "./SearchInput";
  * ↑/↓ เลื่อน · Enter เลือก · Esc หรือคลิกนอกกล่อง = ปิด
  * "เลิกผูก" เป็นลิงก์เล็กสีแดงแยกไว้ขวาสุด ไม่วางคู่กับปุ่มยกเลิกให้กดพลาด
  */
+function emptyText(searching: boolean, typed: boolean, query: string) {
+  if (searching) return "กำลังค้นหา...";
+  return typed ? `ไม่พบ "${query.trim()}" — ค้นได้เฉพาะลูกค้าที่มีบัญชีแล้ว` : "ยังไม่มีลูกค้าคนอื่นในระบบ";
+}
+
 export function CustomerPicker({
   current,
   query,
@@ -40,7 +45,7 @@ export function CustomerPicker({
   embedded?: boolean;
   className?: string;
 }>) {
-  const boxRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDialogElement>(null);
   const [active, setActive] = useState(0);
   const typed = query.trim() !== "";
   // ยังไม่พิมพ์: ลูกค้าปัจจุบันแยกไว้หัวรายการ ไม่ซ้ำใน "ล่าสุด" · พิมพ์แล้ว: อยู่ในผลค้นหาพร้อมติ๊กถูก
@@ -80,18 +85,22 @@ export function CustomerPicker({
     }
   }
 
+  const rowTone = (opts: { selected?: boolean; index?: number }) => {
+    if (opts.selected) return "bg-slate-50";
+    return opts.index === active ? "bg-slate-100" : "";
+  };
+
   const row = (c: CustomerDto, opts: { selected?: boolean; index?: number }) => (
     <button
       key={c.id}
       type="button"
-      role="option"
-      aria-selected={opts.selected ?? opts.index === active}
+      aria-current={opts.selected ? "true" : undefined}
       disabled={busy || opts.selected}
       onClick={() => onPick(c)}
       onMouseEnter={() => opts.index !== undefined && setActive(opts.index)}
-      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left disabled:cursor-default ${
-        opts.selected ? "bg-slate-50" : opts.index === active ? "bg-slate-100" : ""
-      } ${busy && !opts.selected ? "opacity-50" : ""}`}
+      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left disabled:cursor-default ${rowTone(opts)} ${
+        busy && !opts.selected ? "opacity-50" : ""
+      }`}
     >
       <Avatar name={c.fullName} src={c.avatarUrl} size={28} />
       <span className="min-w-0 flex-1">
@@ -105,9 +114,8 @@ export function CustomerPicker({
   const section = (label: string) => <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-slate-400">{label}</p>;
 
   return (
-    <div
+    <dialog open
       ref={boxRef}
-      role="dialog"
       aria-label="เลือกลูกค้า"
       className={`bg-white text-sm ${
         embedded ? "border-t border-slate-200" : "w-80 max-w-full overflow-hidden rounded-lg border border-slate-200"
@@ -123,7 +131,7 @@ export function CustomerPicker({
           inputClassName="py-1"
         />
       </div>
-      <div role="listbox" aria-label="ลูกค้า" className="max-h-64 overflow-y-auto pb-1">
+      <div className="max-h-64 overflow-y-auto pb-1">
         {current && !typed && (
           <>
             {section("ลูกค้าปัจจุบัน")}
@@ -134,13 +142,7 @@ export function CustomerPicker({
         {list.length > 0 ? (
           list.map((c, i) => row(c, { index: i, selected: c.id === current?.id || undefined }))
         ) : (
-          <p className="px-3 py-2 text-xs text-slate-500">
-            {searching
-              ? "กำลังค้นหา..."
-              : typed
-                ? `ไม่พบ "${query.trim()}" — ค้นได้เฉพาะลูกค้าที่มีบัญชีแล้ว`
-                : "ยังไม่มีลูกค้าคนอื่นในระบบ"}
-          </p>
+          <p className="px-3 py-2 text-xs text-slate-500">{emptyText(searching, typed, query)}</p>
         )}
       </div>
       {(onCreateNew || onUnlink) && (
@@ -157,6 +159,6 @@ export function CustomerPicker({
           )}
         </div>
       )}
-    </div>
+    </dialog>
   );
 }

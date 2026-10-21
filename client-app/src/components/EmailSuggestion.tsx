@@ -9,7 +9,7 @@ export function EmailSuggestion({
   onUse,
 }: Readonly<{ suggestion: string; onUse: (email: string) => void }>) {
   return (
-    <p className="-mt-2 text-sm text-amber-800" role="status">
+    <output className="-mt-2 text-sm text-amber-800 block">
       หมายถึง <span className="font-medium">{suggestion}</span> หรือเปล่า?{" "}
       <button
         type="button"
@@ -18,6 +18,6 @@ export function EmailSuggestion({
       >
         ใช้อีเมลนี้
       </button>
-    </p>
+    </output>
   );
 }

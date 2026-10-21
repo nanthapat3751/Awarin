@@ -209,8 +209,7 @@ export function BoqBulkAddDialog({
         onClick={() => void requestClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="boq-bulk-title"
         className="relative flex h-[85vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl"
@@ -257,7 +256,7 @@ export function BoqBulkAddDialog({
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="กรองตามหมวด">
+          <fieldset className="flex flex-wrap gap-1.5 min-w-0" aria-label="กรองตามหมวด">
             <button
               type="button"
               aria-pressed={!reviewIds && group == null}
@@ -290,7 +289,7 @@ export function BoqBulkAddDialog({
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -357,11 +356,7 @@ export function BoqBulkAddDialog({
                           }
                         }}
                         className={`w-full rounded-md border px-2 py-1 text-right text-sm tabular-nums placeholder:text-slate-300 focus:outline-none focus:ring-1 ${
-                          bad
-                            ? "border-red-400 bg-red-50 focus:ring-red-400"
-                            : isPicked
-                              ? "border-brand bg-white font-medium text-brand focus:ring-brand"
-                              : "border-slate-200 bg-white focus:border-brand focus:ring-brand"
+                          qtyInputTone(bad, isPicked)
                         }`}
                       />
                     </td>
@@ -433,11 +428,22 @@ export function BoqBulkAddDialog({
               ยกเลิก
             </Button>
             <Button onClick={submit} disabled={saving || pickedCount === 0}>
-              {saving ? "กำลังเพิ่ม..." : pickedCount > 0 ? `เพิ่ม ${pickedCount} รายการ` : "เพิ่มรายการ"}
+              {addLabel(saving, pickedCount)}
             </Button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>
   );
+}
+
+/** ช่องจำนวน: ผิด = แดง · พิมพ์แล้ว (เลือก) = สีแบรนด์ · ว่าง = เทา */
+function qtyInputTone(bad: boolean, picked: boolean) {
+  if (bad) return "border-red-400 bg-red-50 focus:ring-red-400";
+  return picked ? "border-brand bg-white font-medium text-brand focus:ring-brand" : "border-slate-200 bg-white focus:border-brand focus:ring-brand";
+}
+
+function addLabel(saving: boolean, pickedCount: number) {
+  if (saving) return "กำลังเพิ่ม...";
+  return pickedCount > 0 ? `เพิ่ม ${pickedCount} รายการ` : "เพิ่มรายการ";
 }

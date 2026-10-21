@@ -134,7 +134,7 @@ export async function findUnverifiedCustomer(email: string) {
     where: { email: normalizeEmail(email) },
     select: { id: true, email: true, fullName: true, role: true, emailVerifiedAt: true, active: true },
   });
-  if (!user || user.role !== "CUSTOMER" || user.emailVerifiedAt !== null) return null;
+  if (user?.role !== "CUSTOMER" || user.emailVerifiedAt !== null) return null;
   return user;
 }
 
@@ -222,7 +222,7 @@ export async function changeSignupEmail(
     where: { email: normalizeEmail(currentEmail) },
     select: { id: true, role: true, emailVerifiedAt: true, signupTicketHash: true, signupEmailChanges: true, fullName: true },
   });
-  if (!user || user.role !== "CUSTOMER" || user.emailVerifiedAt !== null || !user.signupTicketHash) throw denied;
+  if (user?.role !== "CUSTOMER" || user.emailVerifiedAt !== null || !user.signupTicketHash) throw denied;
   const want = Buffer.from(user.signupTicketHash, "hex");
   const given = Buffer.from(hashSignupTicket(ticket), "hex");
   if (want.length !== given.length || !crypto.timingSafeEqual(want, given)) throw denied;

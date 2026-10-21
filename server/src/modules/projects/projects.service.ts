@@ -502,67 +502,10 @@ export async function issueCustomerAccessLink(
     throw new ProjectError("ไม่พบโครงการที่ระบุ", 404);
   }
 
-  let customer: { id: string; email: string | null; fullName: string };
-  let created = false;
-
-  if (project.customerId && project.customer) {
-    customer = project.customer;
-  } else {
-    // ไม่มีคำขอ = ลูกค้าที่โทรมา/เดินเข้ามาเอง — พนักงานต้องกรอกชื่อกับอีเมลเองทั้งหมด
-    // (เดิมโครงการแบบนี้สร้างบัญชีจากหน้าโครงการไม่ได้เลย ต้องรอให้ลูกค้าไปสมัครเอง)
-    const lead = project.lead;
-    const email = (input.email ?? lead?.email ?? "").trim().toLowerCase();
-    if (!email) {
-      throw new ProjectError("ต้องมีอีเมลของลูกค้าเพื่อสร้างบัญชีและออกลิงก์เข้าใช้", 409);
-    }
-    const fullName = (input.fullName ?? lead?.name ?? "").trim();
-    if (!fullName) {
-      throw new ProjectError("กรุณากรอกชื่อ-นามสกุลของลูกค้า", 400);
-    }
-    const phone = input.phone ?? lead?.phone ?? null;
-
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      if (existing.role !== "CUSTOMER") {
-        throw new ProjectError("อีเมลนี้ถูกใช้โดยบัญชีพนักงานอยู่แล้ว", 409);
-      }
-      customer = { id: existing.id, email, fullName: existing.fullName };
-    } else {
-      // รหัสผ่านสุ่มที่ล็อกอินไม่ได้ — ทางเข้าเดียวคือลิงก์ตั้งรหัส จนกว่าลูกค้าจะตั้งเอง
-      const passwordHash = await hashPassword(crypto.randomBytes(32).toString("hex"));
-      const user = await prisma.user.create({
-        data: {
-          email,
-          passwordHash,
-          fullName,
-          role: "CUSTOMER",
-          // ถือว่ายืนยันอีเมลแล้ว — พนักงานคุยกับลูกค้าจริงก่อนพิมพ์อีเมลนี้ และลิงก์เข้าใช้
-          // ถูกส่งทาง LINE/โทรศัพท์ ไม่ได้ส่งทางเมล ถ้าบังคับยืนยันจะกลายเป็นลูกค้าตั้งรหัสเสร็จ
-          // แล้วโดนถามหารหัสจากเมลที่ไม่เคยเปิด (ดู email-verification.service.ts)
-          emailVerifiedAt: new Date(),
-          customerProfile: { create: { phone, address: null } },
-        },
-      });
-      customer = { id: user.id, email, fullName: user.fullName };
-      created = true;
-      await writeAuditLog({
-        userId: actorId,
-        action: lead ? "CREATE_CUSTOMER_FROM_LEAD" : "CREATE_CUSTOMER_FOR_PROJECT",
-        entityType: "User",
-        entityId: user.id,
-        details: { email, leadId: project.leadId, projectId },
-      });
-    }
-
-    await prisma.project.update({ where: { id: projectId }, data: { customerId: customer.id } });
-    await writeAuditLog({
-      userId: actorId,
-      action: "UPDATE_PROJECT",
-      entityType: "Project",
-      entityId: projectId,
-      details: { linkedCustomerId: customer.id, fromLead: true },
-    });
-  }
+  const { customer, created } =
+    project.customerId && project.customer
+      ? { customer: project.customer, created: false }
+      : await attachCustomer(project, input, projectId, actorId);
 
   const { url, expiresAt } = await issueAccessTokenFor(customer.id, actorId);
 
@@ -575,6 +518,79 @@ export async function issueCustomerAccessLink(
   });
 
   return { url, expiresAt, customer: toCustomerDto(customer)!, created };
+}
+
+type ProjectWithLead = NonNullable<
+  Awaited<ReturnType<typeof prisma.project.findFirst<{ include: { lead: true; customer: { select: { id: true; email: true; fullName: true } } } }>>>
+>;
+
+/**
+ * โปรเจกต์ที่ยังไม่มีลูกค้า: สร้างบัญชีจากข้อมูลในคำขอ (หรือที่พนักงานกรอกทับ) แล้วผูกกับโปรเจกต์
+ * อีเมลเป็นของ CUSTOMER อยู่แล้ว = ผูกบัญชีเดิม (auto-match)
+ */
+async function attachCustomer(
+  project: ProjectWithLead,
+  input: IssueAccessLinkInput,
+  projectId: string,
+  actorId: string,
+): Promise<{ customer: { id: string; email: string | null; fullName: string }; created: boolean }> {
+  let customer: { id: string; email: string | null; fullName: string };
+  let created = false;
+  // ไม่มีคำขอ = ลูกค้าที่โทรมา/เดินเข้ามาเอง — พนักงานต้องกรอกชื่อกับอีเมลเองทั้งหมด
+  // (เดิมโครงการแบบนี้สร้างบัญชีจากหน้าโครงการไม่ได้เลย ต้องรอให้ลูกค้าไปสมัครเอง)
+  const lead = project.lead;
+  const email = (input.email ?? lead?.email ?? "").trim().toLowerCase();
+  if (!email) {
+    throw new ProjectError("ต้องมีอีเมลของลูกค้าเพื่อสร้างบัญชีและออกลิงก์เข้าใช้", 409);
+  }
+  const fullName = (input.fullName ?? lead?.name ?? "").trim();
+  if (!fullName) {
+    throw new ProjectError("กรุณากรอกชื่อ-นามสกุลของลูกค้า", 400);
+  }
+  const phone = input.phone ?? lead?.phone ?? null;
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    if (existing.role !== "CUSTOMER") {
+      throw new ProjectError("อีเมลนี้ถูกใช้โดยบัญชีพนักงานอยู่แล้ว", 409);
+    }
+    customer = { id: existing.id, email, fullName: existing.fullName };
+  } else {
+    // รหัสผ่านสุ่มที่ล็อกอินไม่ได้ — ทางเข้าเดียวคือลิงก์ตั้งรหัส จนกว่าลูกค้าจะตั้งเอง
+    const passwordHash = await hashPassword(crypto.randomBytes(32).toString("hex"));
+    const user = await prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        fullName,
+        role: "CUSTOMER",
+        // ถือว่ายืนยันอีเมลแล้ว — พนักงานคุยกับลูกค้าจริงก่อนพิมพ์อีเมลนี้ และลิงก์เข้าใช้
+        // ถูกส่งทาง LINE/โทรศัพท์ ไม่ได้ส่งทางเมล ถ้าบังคับยืนยันจะกลายเป็นลูกค้าตั้งรหัสเสร็จ
+        // แล้วโดนถามหารหัสจากเมลที่ไม่เคยเปิด (ดู email-verification.service.ts)
+        emailVerifiedAt: new Date(),
+        customerProfile: { create: { phone, address: null } },
+      },
+    });
+    customer = { id: user.id, email, fullName: user.fullName };
+    created = true;
+    await writeAuditLog({
+      userId: actorId,
+      action: lead ? "CREATE_CUSTOMER_FROM_LEAD" : "CREATE_CUSTOMER_FOR_PROJECT",
+      entityType: "User",
+      entityId: user.id,
+      details: { email, leadId: project.leadId, projectId },
+    });
+  }
+
+  await prisma.project.update({ where: { id: projectId }, data: { customerId: customer.id } });
+  await writeAuditLog({
+    userId: actorId,
+    action: "UPDATE_PROJECT",
+    entityType: "Project",
+    entityId: projectId,
+    details: { linkedCustomerId: customer.id, fromLead: true },
+  });
+  return { customer, created };
 }
 
 /**

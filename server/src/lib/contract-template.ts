@@ -1,4 +1,9 @@
-import type { ContractVariableGroup, ContractVariableInfo } from "@systemboq/shared-types";
+import {
+  replaceVariableTokens,
+  scanVariableTokens,
+  type ContractVariableGroup,
+  type ContractVariableInfo,
+} from "@systemboq/shared-types";
 
 import { bahtText } from "./baht-text";
 import { paymentAccountFrom, paymentAccountLine } from "./company-fields";
@@ -181,9 +186,8 @@ export function describeContractVariables(
   }));
 }
 
-// จับทั้งก้อนใน {{ }} แล้วค่อยตัดช่องว่างหัวท้ายในโค้ด (variableName) — ไม่ใช้ \s* ครอบ
-// กลุ่มแบบ lazy เพราะช่องว่างซ้อนกันทำให้ regex ย้อนรอยแบบกำลังสองเมื่อเจอข้อความที่ไม่ปิด }}
-const VARIABLE_PATTERN = /\{\{([^}]+)\}\}/g;
+// จับทั้งก้อนใน {{ }} ด้วยตัวอ่านกลาง (scanVariableTokens ใน shared-types — หน้าจอพนักงานใช้ตัวเดียวกัน)
+// แล้วค่อยตัดช่องว่างหัวท้ายในโค้ด (variableName)
 
 /** ชื่อตัวแปรใน {{ ... }} · ข้างในเป็นช่องว่างล้วน = คงไว้ตามเดิม (นับเป็นตัวแปรที่ไม่รู้จัก) */
 function variableName(inner: string): string {
@@ -220,7 +224,7 @@ export function bodyPrintsInstallments(structure: ContractStructure): boolean {
  * ส่วนช่องว่างเปล่า ๆ จะเนียนจนหลุดไปถึงลูกค้า
  */
 export function fillVariables(text: string, vars: ContractVariables): string {
-  return text.replace(VARIABLE_PATTERN, (whole, inner: string) => {
+  return replaceVariableTokens(text, (whole, inner) => {
     const value = (vars as unknown as Record<string, string>)[variableName(inner)];
     return value ?? whole;
   });
@@ -237,8 +241,8 @@ export function unknownVariables(structure: ContractStructure): string[] {
   const known = new Set<string>([...CONTRACT_VARIABLE_NAMES, ...CONTRACT_BLOCK_TOKENS]);
   const found = new Set<string>();
   for (const t of texts) {
-    for (const m of t.matchAll(VARIABLE_PATTERN)) {
-      const name = variableName(m[1]);
+    for (const token of scanVariableTokens(t)) {
+      const name = variableName(token.inner);
       if (!known.has(name)) found.add(name);
     }
   }

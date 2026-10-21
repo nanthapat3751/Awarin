@@ -18,7 +18,7 @@ export function ScrollableTabBar({
   selectedKey,
   end,
   children,
-}: {
+}: Readonly<{
   id: string;
   ariaLabel: string;
   className?: string;
@@ -27,7 +27,7 @@ export function ScrollableTabBar({
   /** ของที่ติดปลายขวาของแถบ ไม่เลื่อนไปกับแท็บ (เช่น ปุ่มยุบ/กางทั้งหมด) — ลูกศร › อยู่ก่อนหน้ามัน */
   end?: ReactNode;
   children: ReactNode;
-}) {
+}>) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);

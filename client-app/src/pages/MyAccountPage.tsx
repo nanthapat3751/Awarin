@@ -324,6 +324,71 @@ export function MyAccountPage() {
   }
 
   const tabNotice = notice?.tab === tab ? notice : null;
+
+  /** หมวดลบบัญชี — บอกผลก่อน · กดแล้วค่อยกางช่องรหัสผ่านยืนยัน */
+  function renderDeleteTab() {
+    return (
+      <div className="flex flex-col gap-5">
+        <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">
+          <li>บัญชีของคุณจะถูกปิดใช้งาน</li>
+          <li>ข้อมูลส่วนตัว (ชื่อ อีเมล เบอร์โทร ที่อยู่) จะถูกลบออก</li>
+          <li>ประวัติคำขอและใบเสนอราคาจะยังถูกเก็บไว้ตามข้อกำหนดทางกฎหมาย</li>
+          <li className="font-medium text-red-700">การลบบัญชีไม่สามารถย้อนกลับได้</li>
+        </ul>
+
+        {confirmingDelete ? (
+          <form
+            onSubmit={handleDeleteAccount}
+            className="flex flex-col gap-4 rounded-lg border border-red-200 bg-red-50/50 p-4"
+          >
+            <label className={labelClass}>
+              <span>กรอกรหัสผ่านเพื่อยืนยันการลบบัญชี</span>
+              <input
+                type="password"
+                required
+                autoComplete="current-password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+              />
+            </label>
+
+            {tabNotice && <NoticeText notice={tabNotice} />}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                disabled={deleting}
+                className="inline-flex min-h-11 items-center justify-center rounded-lg bg-red-700 px-5 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-50 lg:min-h-10"
+              >
+                {deleting ? "กำลังลบ..." : "ยืนยันลบบัญชี"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingDelete(false);
+                  setDeletePassword("");
+                  setNotice(null);
+                }}
+                className="inline-flex min-h-11 items-center px-2 text-sm text-slate-600 hover:text-slate-800 lg:min-h-10"
+              >
+                ยกเลิก
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+            className="inline-flex min-h-11 items-center self-start rounded-lg border border-red-300 px-4 text-sm font-medium text-red-700 hover:bg-red-50 lg:min-h-10"
+          >
+            ลบบัญชีของฉัน
+          </button>
+        )}
+      </div>
+    );
+  }
+
   const current = TABS.find((t) => t.id === tab)!;
 
   return (
@@ -787,66 +852,7 @@ export function MyAccountPage() {
                   </div>
                 ))}
 
-              {tab === "delete" && (
-                <div className="flex flex-col gap-5">
-                  <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">
-                    <li>บัญชีของคุณจะถูกปิดใช้งาน</li>
-                    <li>ข้อมูลส่วนตัว (ชื่อ อีเมล เบอร์โทร ที่อยู่) จะถูกลบออก</li>
-                    <li>ประวัติคำขอและใบเสนอราคาจะยังถูกเก็บไว้ตามข้อกำหนดทางกฎหมาย</li>
-                    <li className="font-medium text-red-700">การลบบัญชีไม่สามารถย้อนกลับได้</li>
-                  </ul>
-
-                  {confirmingDelete ? (
-                    <form
-                      onSubmit={handleDeleteAccount}
-                      className="flex flex-col gap-4 rounded-lg border border-red-200 bg-red-50/50 p-4"
-                    >
-                      <label className={labelClass}>
-                        <span>กรอกรหัสผ่านเพื่อยืนยันการลบบัญชี</span>
-                        <input
-                          type="password"
-                          required
-                          autoComplete="current-password"
-                          value={deletePassword}
-                          onChange={(e) => setDeletePassword(e.target.value)}
-                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
-                        />
-                      </label>
-
-                      {tabNotice && <NoticeText notice={tabNotice} />}
-
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          type="submit"
-                          disabled={deleting}
-                          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-red-700 px-5 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-50 lg:min-h-10"
-                        >
-                          {deleting ? "กำลังลบ..." : "ยืนยันลบบัญชี"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfirmingDelete(false);
-                            setDeletePassword("");
-                            setNotice(null);
-                          }}
-                          className="inline-flex min-h-11 items-center px-2 text-sm text-slate-600 hover:text-slate-800 lg:min-h-10"
-                        >
-                          ยกเลิก
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingDelete(true)}
-                      className="inline-flex min-h-11 items-center self-start rounded-lg border border-red-300 px-4 text-sm font-medium text-red-700 hover:bg-red-50 lg:min-h-10"
-                    >
-                      ลบบัญชีของฉัน
-                    </button>
-                  )}
-                </div>
-              )}
+              {tab === "delete" && renderDeleteTab()}
             </div>
           </div>
         </section>
@@ -889,7 +895,7 @@ function InfoRow({
       <span className="w-full shrink-0 text-sm text-slate-500 sm:w-36">{label}</span>
       <span className="min-w-0 flex-1">
         <span
-          className={`block text-sm ${text ? "text-slate-800" : onEdit ? "text-brand" : "text-slate-400"} ${
+          className={`block text-sm ${valueTone(Boolean(text), Boolean(onEdit))} ${
             multiline ? "line-clamp-3 whitespace-pre-line" : "truncate"
           }`}
         >
@@ -934,9 +940,9 @@ type Notice = { ok: boolean; text: string };
 
 function NoticeText({ notice }: Readonly<{ notice: Notice }>) {
   return notice.ok ? (
-    <p role="status" className="text-sm text-emerald-700">
+    <output className="text-sm text-emerald-700 block">
       {notice.text}
-    </p>
+    </output>
   ) : (
     <p role="alert" className="text-sm text-red-600">
       {notice.text}
@@ -994,4 +1000,10 @@ function passwordAge(iso: string): string {
   const months = Math.floor(days / 30);
   if (months < 12) return `${months} เดือนที่แล้ว`;
   return `${Math.floor(days / 365)} ปีที่แล้ว`;
+}
+
+/** สีค่าของแถว: มีค่า = เข้ม · ว่างแต่กดแก้ได้ = สีแบรนด์ (ชวนกรอก) · ว่างแก้ไม่ได้ = เทา */
+function valueTone(hasValue: boolean, editable: boolean) {
+  if (hasValue) return "text-slate-800";
+  return editable ? "text-brand" : "text-slate-400";
 }

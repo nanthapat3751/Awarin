@@ -44,8 +44,10 @@ const FIELD_LABEL: Record<string, string> = {
   note: "หมายเหตุ",
   category: "รหัสงาน",
 };
-const showValue = (v: string | number | null) =>
-  v == null || v === "" ? "—" : typeof v === "number" ? v.toLocaleString("th-TH", { maximumFractionDigits: 3 }) : v;
+function showValue(v: string | number | null) {
+  if (v == null || v === "") return "—";
+  return typeof v === "number" ? v.toLocaleString("th-TH", { maximumFractionDigits: 3 }) : v;
+}
 
 /** แถวที่แก้บรรทัดเดิม (โหมดอัปเดตตามไฟล์) — ไม่ต้องเลือกรหัส/คลัง เพราะเป็นบรรทัดที่มีอยู่แล้ว */
 const isExistingLine = (r: BoqImportRow, mode: ImportMode) => mode === "sync" && !!r.sync?.lineId;
@@ -69,6 +71,97 @@ function groupOf(r: BoqImportRow, d: Decision | undefined, mode: ImportMode): Ro
 
 /** "D-01-01 — หมวด > กลุ่ม > งาน" → "D-01-01" (ชื่อเต็มอยู่ใน tooltip) · ไม่มีรหัส = ชื่อชั้นสุดท้าย */
 const shortLabel = (label: string) => (label.includes(" — ") ? label.split(" — ")[0] : label.split(" > ").at(-1) ?? label);
+
+/** ตัวกรองตอนเปิดพรีวิว: มีแถวต้องดู → ต้องดู · ไม่มีแต่มีแถวพร้อม → พร้อม · นอกนั้นทั้งหมด */
+function firstFilter(attentionCount: number, anyReady: boolean): RowFilter {
+  if (attentionCount > 0) return "attention";
+  return anyReady ? "ready" : "all";
+}
+
+/** แถวนี้อยู่ในตัวกรองที่เลือกไหม — "ต้องดู" ใช้ชุดที่จำไว้ตอนเปิดตัวกรอง (แก้แล้วไม่หายไปต่อหน้า) */
+function inFilter(filter: RowFilter, inAttention: boolean, group: RowGroup) {
+  if (filter === "all") return true;
+  if (filter === "attention") return inAttention;
+  return group === filter;
+}
+
+/** ช่องรหัสงานของแถวที่จะส่งไปนำเข้า */
+function targetFields(t: NonNullable<Target>): Partial<BoqImportCommitRow> {
+  if (t.kind === "existing") return { categoryId: t.categoryId };
+  if (t.kind === "new") return { newCategory: { parentId: t.parentId, code: t.code } };
+  return {};
+}
+
+function commitRowOf(r: BoqImportRow, d: Decision): BoqImportCommitRow {
+  return {
+    ...targetFields(d.target!),
+    ...(d.library === "link" && r.materialMatch ? { materialId: r.materialMatch.id } : {}),
+    ...(d.library === "add" ? { addToLibrary: true } : {}),
+    name: r.name,
+    quantity: r.quantity!,
+    unit: r.unit,
+    materialUnitPrice: r.materialUnitPrice,
+    laborUnitPrice: r.laborUnitPrice,
+    note: r.note,
+  };
+}
+
+function updateRowOf(r: BoqImportRow): BoqImportCommitRow {
+  return {
+    lineId: r.sync!.lineId!,
+    categoryId: r.categoryId!,
+    name: r.name,
+    quantity: r.quantity!,
+    unit: r.unit,
+    materialUnitPrice: r.materialUnitPrice,
+    laborUnitPrice: r.laborUnitPrice,
+    note: r.note,
+  };
+}
+
+type CommitResult = Awaited<ReturnType<typeof commitBoqImport>>;
+
+/** ข้อความแจ้งหลังนำเข้าสำเร็จ */
+function importedMessage(res: CommitResult, syncing: boolean) {
+  const extras = [
+    res.updated ? `แก้ ${res.updated}` : "",
+    res.createdCategories.length ? `สร้างรหัสงานใหม่ ${res.createdCategories.length}` : "",
+    res.createdMaterials.length ? `เพิ่มเข้าคลัง ${res.createdMaterials.length}` : "",
+    res.linkedMaterials ? `ผูกคลัง ${res.linkedMaterials}` : "",
+    res.removed ? `ลบบรรทัดเดิม ${res.removed}` : "",
+  ].filter(Boolean);
+  if (syncing) {
+    const parts = [`เพิ่ม ${res.imported}`, ...extras].join(" · ");
+    return `อัปเดตตามไฟล์แล้ว — ${parts}`;
+  }
+  const tail = extras.length ? ` (${extras.join(" · ")})` : "";
+  return `นำเข้า ${res.imported} บรรทัดแล้ว${tail}`;
+}
+
+/** ชื่อบรรทัดที่จะถูกลบ (3 ชื่อแรก) สำหรับกล่องยืนยัน */
+function removalNames(removals: { name: string }[]) {
+  const names = removals
+    .slice(0, 3)
+    .map((x) => x.name)
+    .join(", ");
+  return removals.length > 3 ? `${names} …` : names;
+}
+
+function commitLabel(saving: boolean, syncing: boolean, actionCount: number, importCount: number) {
+  if (saving) return "กำลังนำเข้า...";
+  return syncing ? `อัปเดต ${actionCount} รายการ` : `นำเข้า ${importCount} บรรทัด`;
+}
+
+function skippedKindLabel(kind: string) {
+  if (kind === "heading") return "หัวข้อ";
+  return kind === "total" ? "ยอดรวม" : "ว่าง";
+}
+
+function rowTone(bad: boolean, unresolved: boolean, skipped: boolean) {
+  if (bad) return "bg-red-50";
+  if (unresolved) return "bg-amber-50/70";
+  return skipped ? "text-slate-400" : "";
+}
 
 function initialDecision(r: BoqImportRow): Decision {
   let target: Target = null;
@@ -150,13 +243,7 @@ export function BoqImportDialog({
       setRemoveIds(new Set(pv.sync?.removed.map((x) => x.lineId) ?? []));
       const attention = pv.rows.filter((r) => needsAttention(r, nextDecisions[rowKey(r)], nextMode)).map(rowKey);
       setAttentionKeys(new Set(attention));
-      setFilter(
-        attention.length > 0
-          ? "attention"
-          : pv.rows.some((r) => groupOf(r, nextDecisions[rowKey(r)], nextMode) === "ready")
-            ? "ready"
-            : "all",
-      );
+      setFilter(firstFilter(attention.length, pv.rows.some((r) => groupOf(r, nextDecisions[rowKey(r)], nextMode) === "ready")));
       // แถวที่ยังต้องเลือกรหัสเปิดตัวเลือกไว้เลย
       setEditing(new Set(pv.rows.filter((r) => r.errors.length === 0 && r.needsCategory).map(rowKey)));
     } catch (err) {
@@ -232,9 +319,7 @@ export function BoqImportDialog({
   const groupCount: Record<RowFilter, number> = { attention: 0, ready: 0, unchanged: 0, skipped: preview?.skippedRows.length ?? 0, all: (preview?.rows.length ?? 0) + (preview?.skippedRows.length ?? 0) };
   for (const r of preview?.rows ?? []) groupCount[groupOf(r, decisions[rowKey(r)], mode)]++;
   const visibleRows =
-    preview?.rows.filter((r) =>
-      filter === "all" ? true : filter === "attention" ? attentionKeys.has(rowKey(r)) : groupOf(r, decisions[rowKey(r)], mode) === filter,
-    ) ?? [];
+    preview?.rows.filter((r) => inFilter(filter, attentionKeys.has(rowKey(r)), groupOf(r, decisions[rowKey(r)], mode))) ?? [];
   const newCodeRows = importable.filter((r) => decisions[rowKey(r)].target?.kind === "new" && !r.materialMatch);
 
   function addAllNewToLibrary() {
@@ -254,77 +339,40 @@ export function BoqImportDialog({
     setEditing(new Set());
   }
 
+  /** ถามยืนยันก่อนลบบรรทัดเดิม (บรรทัดที่หายจากไฟล์ · โหมดแทนที่ทั้งหมด) — false = ผู้ใช้ยกเลิก */
+  async function confirmDestructive() {
+    if (removals.length > 0) {
+      const ok = await confirm(`ลบ ${removals.length} บรรทัดที่ไม่มีในไฟล์แล้วออกจากระบบ? (${removalNames(removals)})`, {
+        confirmLabel: `อัปเดตและลบ ${removals.length} บรรทัด`,
+        variant: "danger",
+      });
+      if (!ok) return false;
+    }
+    if (mode === "replace") {
+      return confirm(`ลบบรรทัด BOQ เดิมทั้งหมด ${existingLines} บรรทัด แล้วแทนที่ด้วย ${importable.length} บรรทัดจากไฟล์?`, {
+        confirmLabel: "แทนที่ทั้งหมด",
+        variant: "danger",
+      });
+    }
+    return true;
+  }
+
   async function commit() {
     if (actionCount === 0) return;
     if (unresolved.length > 0) {
       toast.error(`ยังไม่ได้เลือกรหัสงาน ${unresolved.length} บรรทัด — เลือกให้ครบ หรือกด "ไม่นำเข้าแถวที่ยังไม่เลือก"`);
       return;
     }
-    if (removals.length > 0) {
-      const ok = await confirm(
-        `ลบ ${removals.length} บรรทัดที่ไม่มีในไฟล์แล้วออกจากระบบ? (${removals
-          .slice(0, 3)
-          .map((x) => x.name)
-          .join(", ")}${removals.length > 3 ? " …" : ""})`,
-        { confirmLabel: `อัปเดตและลบ ${removals.length} บรรทัด`, variant: "danger" },
-      );
-      if (!ok) return;
-    }
-    if (mode === "replace") {
-      const ok = await confirm(
-        `ลบบรรทัด BOQ เดิมทั้งหมด ${existingLines} บรรทัด แล้วแทนที่ด้วย ${importable.length} บรรทัดจากไฟล์?`,
-        { confirmLabel: "แทนที่ทั้งหมด", variant: "danger" },
-      );
-      if (!ok) return;
-    }
+    if (!(await confirmDestructive())) return;
     setSaving(true);
     try {
-      const rows: BoqImportCommitRow[] = importable.map((r) => {
-        const d = decisions[rowKey(r)];
-        const t = d.target!;
-        return {
-          ...(t.kind === "existing"
-            ? { categoryId: t.categoryId }
-            : t.kind === "new"
-              ? { newCategory: { parentId: t.parentId, code: t.code } }
-              : {}),
-          ...(d.library === "link" && r.materialMatch ? { materialId: r.materialMatch.id } : {}),
-          ...(d.library === "add" ? { addToLibrary: true } : {}),
-          name: r.name,
-          quantity: r.quantity!,
-          unit: r.unit,
-          materialUnitPrice: r.materialUnitPrice,
-          laborUnitPrice: r.laborUnitPrice,
-          note: r.note,
-        };
-      });
-      const updateRows: BoqImportCommitRow[] = updates.map((r) => ({
-        lineId: r.sync!.lineId!,
-        categoryId: r.categoryId!,
-        name: r.name,
-        quantity: r.quantity!,
-        unit: r.unit,
-        materialUnitPrice: r.materialUnitPrice,
-        laborUnitPrice: r.laborUnitPrice,
-        note: r.note,
-      }));
+      const rows = importable.map((r) => commitRowOf(r, decisions[rowKey(r)]));
       const res = await commitBoqImport(projectId, {
         mode,
-        rows: [...updateRows, ...rows],
+        rows: [...updates.map(updateRowOf), ...rows],
         ...(syncing ? { removeLineIds: removals.map((x) => x.lineId) } : {}),
       });
-      const extras = [
-        res.updated ? `แก้ ${res.updated}` : "",
-        res.createdCategories.length ? `สร้างรหัสงานใหม่ ${res.createdCategories.length}` : "",
-        res.createdMaterials.length ? `เพิ่มเข้าคลัง ${res.createdMaterials.length}` : "",
-        res.linkedMaterials ? `ผูกคลัง ${res.linkedMaterials}` : "",
-        res.removed ? `ลบบรรทัดเดิม ${res.removed}` : "",
-      ].filter(Boolean);
-      toast.success(
-        syncing
-          ? `อัปเดตตามไฟล์แล้ว — ${[`เพิ่ม ${res.imported}`, ...extras].join(" · ")}`
-          : `นำเข้า ${res.imported} บรรทัดแล้ว${extras.length ? ` (${extras.join(" · ")})` : ""}`,
-      );
+      toast.success(importedMessage(res, syncing));
       onImported();
       onClose();
     } catch (err) {
@@ -351,8 +399,7 @@ export function BoqImportDialog({
         onClick={() => !saving && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-black/40"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="boq-import-title"
         className="relative flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg bg-white shadow-xl"
@@ -407,36 +454,16 @@ export function BoqImportDialog({
               {preview.fromOtherProject && (
                 <Notice tone="amber">ไฟล์นี้ส่งออกจากโครงการอื่น — นำเข้าเป็นบรรทัดใหม่ทั้งหมด (ไม่เทียบ ไม่ลบอะไร)</Notice>
               )}
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-slate-700">
-                {syncing ? (
-                  <span>
-                    จะแก้ <b className="text-amber-700">{updates.length}</b> · เพิ่ม <b className="text-emerald-700">{importable.length}</b>{" "}
-                    · ลบ <b className="text-red-600">{removals.length}</b> บรรทัด
-                  </span>
-                ) : (
-                  <span>
-                    พร้อมนำเข้า <b className="text-emerald-700">{importable.length}</b> บรรทัด · ต้นทุนตรงรวม{" "}
-                    <b>{money(directCost)}</b> บาท
-                  </span>
-                )}
-                {counts.newCode > 0 && <span className="text-[#000099]">สร้างรหัสงานใหม่ {counts.newCode}</span>}
-                {counts.link > 0 && <span className="text-slate-600">ผูกคลัง {counts.link}</span>}
-                {counts.add > 0 && <span className="text-slate-600">เพิ่มเข้าคลัง {counts.add}</span>}
-                {counts.skip > 0 && <span className="text-slate-500">ไม่นำเข้า {counts.skip}</span>}
-                {preview.summary.withErrors > 0 && (
-                  <span className="text-red-600">ข้อมูลมีปัญหา {preview.summary.withErrors} (จะไม่ถูกนำเข้า)</span>
-                )}
-                {preview.skippedRows.length > 0 && (
-                  <button type="button" onClick={() => showFilter("skipped")} className="link-pill -mx-2.5 -my-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
-                    ข้ามหัวข้อ/ยอดรวม/รายการว่าง {preview.skippedRows.length} แถว
-                  </button>
-                )}
-                <span className="text-slate-400">
-                  {preview.sheetNames.length === 1
-                    ? `จากชีต "${preview.sheetNames[0]}"`
-                    : `จาก ${preview.sheetNames.length} ชีต (${preview.sheetNames.join(", ")})`}
-                </span>
-              </div>
+              <ImportTotals
+                preview={preview}
+                syncing={syncing}
+                updateCount={updates.length}
+                importCount={importable.length}
+                removeCount={removals.length}
+                directCost={directCost}
+                counts={counts}
+                onShowSkipped={() => showFilter("skipped")}
+              />
               <ReadOptionsPanel preview={preview} disabled={loading || saving} onChange={changeReadOptions} />
               {preview.headerWarnings.length > 0 && (
                 <Notice tone="amber">
@@ -500,41 +527,7 @@ export function BoqImportDialog({
                 <SkippedFileRows rows={preview.skippedRows} multiSheet={preview.sheetNames.length > 1} />
               )}
               {syncing && preview.sync!.removed.length > 0 && (
-                <div className="shrink-0 rounded-md border border-red-200">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-red-100 bg-red-50/60 px-3 py-2 text-sm">
-                    <span className="font-medium text-red-800">
-                      บรรทัดที่ไม่มีในไฟล์แล้ว {preview.sync!.removed.length} บรรทัด — จะลบออกจากระบบ
-                    </span>
-                    <span className="text-xs text-slate-500">ติ๊กออกถ้าต้องการเก็บไว้</span>
-                  </div>
-                  <ul className="divide-y divide-slate-100 text-sm">
-                    {preview.sync!.removed.map((x) => (
-                      <li key={x.lineId}>
-                        <label className="flex items-center gap-2 px-3 py-1.5">
-                          <input
-                            type="checkbox"
-                            className="accent-red-600"
-                            checked={removeIds.has(x.lineId)}
-                            onChange={(e) =>
-                              setRemoveIds((cur) => {
-                                const next = new Set(cur);
-                                if (e.target.checked) next.add(x.lineId);
-                                else next.delete(x.lineId);
-                                return next;
-                              })
-                            }
-                          />
-                          <span className="w-20 shrink-0 text-xs text-slate-400">{x.code ?? "—"}</span>
-                          <span className={`flex-1 ${removeIds.has(x.lineId) ? "text-red-700 line-through" : "text-slate-700"}`}>{x.name}</span>
-                          <span className="whitespace-nowrap tabular-nums text-slate-500">
-                            {qty(x.quantity)} {x.unit}
-                          </span>
-                          <span className="w-28 text-right tabular-nums text-slate-600">{money(x.lineTotal)}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <RemovedLines removed={preview.sync!.removed} removeIds={removeIds} onChange={setRemoveIds} />
               )}
             </>
           )}
@@ -560,7 +553,7 @@ export function BoqImportDialog({
               {existingLines > 0 && (
                 <label className="flex items-center gap-2">
                   <input type="radio" name="import-mode" checked={mode === "replace"} onChange={() => changeMode("replace")} />
-                  แทนที่บรรทัดเดิมทั้งหมด
+                  <span>แทนที่บรรทัดเดิมทั้งหมด</span>
                 </label>
               )}
             </fieldset>
@@ -575,13 +568,132 @@ export function BoqImportDialog({
               ยกเลิก
             </Button>
             <Button variant="brand" onClick={commit} disabled={!preview || actionCount === 0 || saving || loading}>
-              {saving ? "กำลังนำเข้า..." : syncing ? `อัปเดต ${actionCount} รายการ` : `นำเข้า ${importable.length} บรรทัด`}
+              {commitLabel(saving, syncing, actionCount, importable.length)}
             </Button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>
   );
+}
+
+/** แถบตัวเลขสรุปเหนือตาราง — จะแก้/เพิ่ม/ลบกี่บรรทัด สร้างรหัสใหม่ ผูกคลัง และอ่านจากชีตไหน */
+function ImportTotals({
+  preview,
+  syncing,
+  updateCount,
+  importCount,
+  removeCount,
+  directCost,
+  counts,
+  onShowSkipped,
+}: Readonly<{
+  preview: BoqImportPreview;
+  syncing: boolean;
+  updateCount: number;
+  importCount: number;
+  removeCount: number;
+  directCost: number;
+  counts: { newCode: number; link: number; add: number; skip: number };
+  onShowSkipped: () => void;
+}>) {
+  const sheets = preview.sheetNames;
+  const sheetNote = sheets.length === 1 ? `จากชีต "${sheets[0]}"` : `จาก ${sheets.length} ชีต (${sheets.join(", ")})`;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-slate-700">
+      {syncing ? (
+        <span>
+          จะแก้ <b className="text-amber-700">{updateCount}</b> · เพิ่ม <b className="text-emerald-700">{importCount}</b>{" "}
+          · ลบ <b className="text-red-600">{removeCount}</b> บรรทัด
+        </span>
+      ) : (
+        <span>
+          พร้อมนำเข้า <b className="text-emerald-700">{importCount}</b> บรรทัด · ต้นทุนตรงรวม{" "}
+          <b>{money(directCost)}</b> บาท
+        </span>
+      )}
+      {counts.newCode > 0 && <span className="text-[#000099]">สร้างรหัสงานใหม่ {counts.newCode}</span>}
+      {counts.link > 0 && <span className="text-slate-600">ผูกคลัง {counts.link}</span>}
+      {counts.add > 0 && <span className="text-slate-600">เพิ่มเข้าคลัง {counts.add}</span>}
+      {counts.skip > 0 && <span className="text-slate-500">ไม่นำเข้า {counts.skip}</span>}
+      {preview.summary.withErrors > 0 && (
+        <span className="text-red-600">ข้อมูลมีปัญหา {preview.summary.withErrors} (จะไม่ถูกนำเข้า)</span>
+      )}
+      {preview.skippedRows.length > 0 && (
+        <button type="button" onClick={onShowSkipped} className="link-pill -mx-2.5 -my-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+          ข้ามหัวข้อ/ยอดรวม/รายการว่าง {preview.skippedRows.length} แถว
+        </button>
+      )}
+      <span className="text-slate-400">{sheetNote}</span>
+    </div>
+  );
+}
+
+/** บรรทัดที่หายจากไฟล์ (โหมดอัปเดต) — ค่าเริ่มต้นลบทุกบรรทัด ติ๊กออกเพื่อเก็บไว้ */
+function RemovedLines({
+  removed,
+  removeIds,
+  onChange,
+}: Readonly<{
+  removed: NonNullable<BoqImportPreview["sync"]>["removed"];
+  removeIds: Set<string>;
+  onChange: (update: (cur: Set<string>) => Set<string>) => void;
+}>) {
+  return (
+    <div className="shrink-0 rounded-md border border-red-200">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-red-100 bg-red-50/60 px-3 py-2 text-sm">
+        <span className="font-medium text-red-800">บรรทัดที่ไม่มีในไฟล์แล้ว {removed.length} บรรทัด — จะลบออกจากระบบ</span>
+        <span className="text-xs text-slate-500">ติ๊กออกถ้าต้องการเก็บไว้</span>
+      </div>
+      <ul className="divide-y divide-slate-100 text-sm">
+        {removed.map((x) => (
+          <li key={x.lineId}>
+            <label className="flex items-center gap-2 px-3 py-1.5">
+              <input
+                type="checkbox"
+                className="accent-red-600"
+                checked={removeIds.has(x.lineId)}
+                onChange={(e) =>
+                  onChange((cur) => {
+                    const next = new Set(cur);
+                    if (e.target.checked) next.add(x.lineId);
+                    else next.delete(x.lineId);
+                    return next;
+                  })
+                }
+              />
+              <span className="w-20 shrink-0 text-xs text-slate-400">{x.code ?? "—"}</span>
+              <span className={`flex-1 ${removeIds.has(x.lineId) ? "text-red-700 line-through" : "text-slate-700"}`}>{x.name}</span>
+              <span className="whitespace-nowrap tabular-nums text-slate-500">
+                {qty(x.quantity)} {x.unit}
+              </span>
+              <span className="w-28 text-right tabular-nums text-slate-600">{money(x.lineTotal)}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** ช่องรหัสงานของแถว: บรรทัดเดิม = ป้ายรหัส · ข้อมูลเสีย = รหัสในไฟล์ · นอกนั้นเลือกได้ */
+function RowTargetCell({
+  row,
+  existingLine,
+  bad,
+  ...cell
+}: Readonly<
+  {
+    row: BoqImportRow;
+    existingLine: boolean;
+    bad: boolean;
+  } & Omit<Parameters<typeof TargetCell>[0], "row">
+>) {
+  if (existingLine) {
+    return <CodeLabel label={cell.categoryOptions.find((o) => o.value === row.categoryId)?.label ?? row.categoryName ?? row.code ?? "—"} />;
+  }
+  if (bad) return <span className="text-slate-500">{row.code ?? "—"}</span>;
+  return <TargetCell row={row} {...cell} />;
 }
 
 function PreviewTable({
@@ -632,9 +744,7 @@ function PreviewTable({
             return (
               <tr
                 key={key}
-                className={`border-t border-slate-100 align-top ${
-                  bad ? "bg-red-50" : unresolved ? "bg-amber-50/70" : skipped ? "text-slate-400" : ""
-                }`}
+                className={`border-t border-slate-100 align-top ${rowTone(bad, unresolved, skipped)}`}
               >
                 <td className="px-2 py-1.5 tabular-nums text-slate-400">
                   {multiSheet && <span className="block whitespace-nowrap text-[11px]">{r.sheet}</span>}
@@ -642,21 +752,17 @@ function PreviewTable({
                   {status && status !== "error" && <SyncBadge status={status} />}
                 </td>
                 <td className="px-2 py-1.5 text-xs">
-                  {existingLine ? (
-                    <CodeLabel label={categoryOptions.find((o) => o.value === r.categoryId)?.label ?? r.categoryName ?? r.code ?? "—"} />
-                  ) : bad ? (
-                    <span className="text-slate-500">{r.code ?? "—"}</span>
-                  ) : (
-                    <TargetCell
-                      row={r}
-                      decision={d}
-                      editing={editing.has(key)}
-                      categoryOptions={categoryOptions}
-                      subgroupOptions={subgroupOptions}
-                      onDecide={(patch) => onDecide(key, patch)}
-                      onEditing={(on) => onEditing(key, on)}
-                    />
-                  )}
+                  <RowTargetCell
+                    row={r}
+                    existingLine={existingLine}
+                    bad={bad}
+                    decision={d}
+                    editing={editing.has(key)}
+                    categoryOptions={categoryOptions}
+                    subgroupOptions={subgroupOptions}
+                    onDecide={(patch) => onDecide(key, patch)}
+                    onEditing={(on) => onEditing(key, on)}
+                  />
                 </td>
                 <td className={`px-2 py-1.5 ${skipped ? "line-through" : "text-slate-800"}`}>
                   {r.name}
@@ -725,7 +831,7 @@ function FilterChips({
     ["all", "ทั้งหมด"],
   ];
   return (
-    <div role="group" aria-label="กรองแถว" className="flex flex-wrap items-center gap-1.5 text-xs">
+    <fieldset aria-label="กรองแถว" className="min-w-0 flex flex-wrap items-center gap-1.5 text-xs">
       {chips
         .filter(([key]) => counts[key] > 0 || key === filter || key === "all")
         .map(([key, label]) => {
@@ -747,7 +853,7 @@ function FilterChips({
             </button>
           );
         })}
-    </div>
+    </fieldset>
   );
 }
 
@@ -765,7 +871,7 @@ function SkippedFileRows({ rows, multiSheet }: Readonly<{ rows: BoqImportPreview
               {multiSheet && <span className="block whitespace-nowrap text-[11px]">{x.sheet}</span>}
               แถว {x.rowNumber}
             </span>
-            <span className="w-14 shrink-0 text-xs text-slate-500">{x.kind === "heading" ? "หัวข้อ" : x.kind === "total" ? "ยอดรวม" : "ว่าง"}</span>
+            <span className="w-14 shrink-0 text-xs text-slate-500">{skippedKindLabel(x.kind)}</span>
             <span className="text-slate-700">
               {x.code && <span className="mr-1.5 text-slate-400">{x.code}</span>}
               {x.name}
@@ -806,31 +912,13 @@ function TargetCell({
   onEditing: (on: boolean) => void;
 }>) {
   const t = decision?.target ?? null;
-  const labelOf = (options: SearchableOption[], id: string) => options.find((o) => o.value === id)?.label ?? id;
   // บอกใบ้หมวดบนสุดจากรหัสในไฟล์ (เช่น B) — เอาตัวเลือกในหมวดนั้นขึ้นก่อน
   const hintCode = row.hintTop?.label.split(" ")[0];
   const sortByHint = (options: SearchableOption[]) =>
     hintCode ? [...options].sort((a, b) => Number(!a.label.startsWith(`${hintCode}-`)) - Number(!b.label.startsWith(`${hintCode}-`))) : options;
   const [mode, setMode] = useState<"existing" | "new">(t?.kind === "new" || (!t && row.newCode) ? "new" : "existing");
 
-  const parentLabel =
-    t?.kind === "new"
-      ? subgroupOptions.find((o) => o.value === t.parentId)?.label ?? (row.newCode?.parentId === t.parentId ? row.newCode.parentLabel : t.parentId)
-      : "";
-  const summary =
-    t?.kind === "existing" ? (
-      <CodeLabel label={labelOf(categoryOptions, t.categoryId)} />
-    ) : t?.kind === "new" ? (
-      <span title={`สร้างรหัสงานใหม่ใต้ ${parentLabel}`}>
-        <span className="mr-1 rounded bg-[#000099]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#000099]">ใหม่</span>
-        <span className="font-medium text-slate-700">{t.code ?? "รหัสถัดไป"}</span>
-        <span className="text-slate-500"> ใต้ {shortLabel(parentLabel)}</span>
-      </span>
-    ) : t?.kind === "skip" ? (
-      <span className="text-slate-500">ไม่นำเข้า</span>
-    ) : (
-      <span className="font-medium text-amber-800">ยังไม่ได้เลือกรหัสงาน{row.hintTop ? ` (รหัสในไฟล์อยู่หมวด ${row.hintTop.label})` : ""}</span>
-    );
+  const summary = <TargetSummary row={row} target={t} categoryOptions={categoryOptions} subgroupOptions={subgroupOptions} />;
 
   if (!editing) {
     return (
@@ -889,7 +977,7 @@ function TargetCell({
           onChange={(id) => {
             if (!id) return;
             // หมวดย่อยเดียวกับที่ระบบเสนอ = ใช้รหัสจากไฟล์ · หมวดย่อยอื่น = ให้ระบบต่อเลขรหัสให้
-            const code = row.newCode && row.newCode.parentId === id ? row.newCode.code : null;
+            const code = row.newCode?.parentId === id ? row.newCode.code : null;
             onDecide({ target: { kind: "new", parentId: id, code } });
             onEditing(false);
           }}
@@ -898,6 +986,32 @@ function TargetCell({
       )}
     </div>
   );
+}
+
+const labelOf = (options: SearchableOption[], id: string) => options.find((o) => o.value === id)?.label ?? id;
+
+/** ข้อความสรุปว่าแถวนี้จะลงรหัสงานไหน */
+function TargetSummary({
+  row,
+  target: t,
+  categoryOptions,
+  subgroupOptions,
+}: Readonly<{ row: BoqImportRow; target: Target; categoryOptions: SearchableOption[]; subgroupOptions: SearchableOption[] }>) {
+  if (t?.kind === "existing") return <CodeLabel label={labelOf(categoryOptions, t.categoryId)} />;
+  if (t?.kind === "new") {
+    const fromFile = row.newCode?.parentId === t.parentId ? row.newCode.parentLabel : t.parentId;
+    const parentLabel = subgroupOptions.find((o) => o.value === t.parentId)?.label ?? fromFile;
+    return (
+      <span title={`สร้างรหัสงานใหม่ใต้ ${parentLabel}`}>
+        <span className="mr-1 rounded bg-[#000099]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#000099]">ใหม่</span>
+        <span className="font-medium text-slate-700">{t.code ?? "รหัสถัดไป"}</span>
+        <span className="text-slate-500"> ใต้ {shortLabel(parentLabel)}</span>
+      </span>
+    );
+  }
+  if (t?.kind === "skip") return <span className="text-slate-500">ไม่นำเข้า</span>;
+  const hint = row.hintTop ? ` (รหัสในไฟล์อยู่หมวด ${row.hintTop.label})` : "";
+  return <span className="font-medium text-amber-800">ยังไม่ได้เลือกรหัสงาน{hint}</span>;
 }
 
 /** ช่อง "คลังวัสดุ": ชื่อตรงคลัง = ผูก (ติ๊กไว้ให้) · ไม่ตรง = เพิ่มเข้าคลังได้ถ้าต้องการ */

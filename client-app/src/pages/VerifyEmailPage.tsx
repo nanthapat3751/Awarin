@@ -47,8 +47,6 @@ export function VerifyEmailPage() {
   const [changing, setChanging] = useState(false);
   const [changeFailure, setChangeFailure] = useState<Failure | null>(null);
   const normalizedNew = normalizeEmail(newEmail);
-  const newSuggestion =
-    newEmailTouched && looksLikeEmail(normalizedNew) ? suggestEmailFix(normalizedNew) : null;
 
   // นับถอยหลังปุ่ม "ส่งรหัสใหม่" — เซิร์ฟเวอร์กันไว้ 60 วินาทีอยู่แล้ว ปุ่มนี้แค่บอกให้เห็น
   // ว่าเหลืออีกเท่าไร จะได้ไม่กดแล้วเจอข้อความปฏิเสธเฉย ๆ
@@ -132,7 +130,10 @@ export function VerifyEmailPage() {
     }
   }
 
-  if (editingEmail && ticket) {
+  /** แก้อีเมลที่พิมพ์ผิด (เฉพาะเบราว์เซอร์ที่ถือตั๋วจากตอนสมัคร) */
+  function renderChangeEmail() {
+    const newSuggestion =
+      newEmailTouched && looksLikeEmail(normalizedNew) ? suggestEmailFix(normalizedNew) : null;
     return (
       <AuthShell note={<PrivacyNote />}>
         <div className="auth-card w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-paper p-8 shadow-card">
@@ -184,8 +185,55 @@ export function VerifyEmailPage() {
           </form>
         </div>
       </AuthShell>
+
     );
   }
+
+  /** ขอรหัสใหม่ — นับถอยหลังตามที่เซิร์ฟเวอร์กันไว้ */
+  function renderResend() {
+    return (
+      <div className="text-center text-sm text-slate-500">
+        ไม่ได้รับรหัส?{" "}
+        {cooldown > 0 ? (
+          <span className="tabular-nums">ขอรหัสใหม่ได้ในอีก {cooldown} วินาที</span>
+        ) : (
+          <button
+            type="button"
+            onClick={handleResend}
+            className="auth-link inline-flex min-h-11 items-center lg:min-h-0"
+          >
+            ส่งรหัสใหม่
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  /** กรอกอีเมลผิด: ถือตั๋ว = แก้อีเมลได้เลย · ไม่มีตั๋ว = สมัครใหม่ */
+  function renderWrongEmail() {
+    return (
+      <p className="text-center text-xs text-slate-400">
+        กรอกอีเมลผิด?{" "}
+        {ticket ? (
+          // เบราว์เซอร์ที่เพิ่งสมัคร: แก้อีเมลได้เลย ไม่ต้องกรอกฟอร์มสมัครใหม่ทั้งหมด
+          <button
+            type="button"
+            onClick={() => setEditingEmail(true)}
+            className="auth-link inline-flex min-h-11 items-center lg:min-h-0"
+          >
+            แก้อีเมล
+          </button>
+        ) : (
+          // คนละแท็บ/คนละเครื่อง (ไม่มีตั๋ว): สมัครใหม่ได้ — บัญชีที่ยังไม่ยืนยันถูกแทนที่ให้
+          <Link to="/register" className="auth-link">
+            สมัครใหม่ด้วยอีเมลที่ถูกต้อง
+          </Link>
+        )}
+      </p>
+    );
+  }
+
+  if (editingEmail && ticket) return renderChangeEmail();
 
   return (
     <AuthShell note={<PrivacyNote />}>
@@ -235,44 +283,19 @@ export function VerifyEmailPage() {
                 : "bg-brand hover:bg-brand-dark disabled:opacity-50"
             }`}
           >
-            {done ? "ยืนยันแล้ว — กำลังพาไปเข้าสู่ระบบ" : submitting ? "กำลังยืนยัน..." : "ยืนยันอีเมล"}
+            {verifyLabel(done, submitting)}
           </button>
 
-          <div className="text-center text-sm text-slate-500">
-            ไม่ได้รับรหัส?{" "}
-            {cooldown > 0 ? (
-              <span className="tabular-nums">ขอรหัสใหม่ได้ในอีก {cooldown} วินาที</span>
-            ) : (
-              <button
-                type="button"
-                onClick={handleResend}
-                className="auth-link inline-flex min-h-11 items-center lg:min-h-0"
-              >
-                ส่งรหัสใหม่
-              </button>
-            )}
-          </div>
+          {renderResend()}
 
-          <p className="text-center text-xs text-slate-400">
-            กรอกอีเมลผิด?{" "}
-            {ticket ? (
-              // เบราว์เซอร์ที่เพิ่งสมัคร: แก้อีเมลได้เลย ไม่ต้องกรอกฟอร์มสมัครใหม่ทั้งหมด
-              <button
-                type="button"
-                onClick={() => setEditingEmail(true)}
-                className="auth-link inline-flex min-h-11 items-center lg:min-h-0"
-              >
-                แก้อีเมล
-              </button>
-            ) : (
-              // คนละแท็บ/คนละเครื่อง (ไม่มีตั๋ว): สมัครใหม่ได้ — บัญชีที่ยังไม่ยืนยันถูกแทนที่ให้
-              <Link to="/register" className="auth-link">
-                สมัครใหม่ด้วยอีเมลที่ถูกต้อง
-              </Link>
-            )}
-          </p>
+          {renderWrongEmail()}
         </form>
       </div>
     </AuthShell>
   );
+}
+
+function verifyLabel(done: boolean, submitting: boolean) {
+  if (done) return "ยืนยันแล้ว — กำลังพาไปเข้าสู่ระบบ";
+  return submitting ? "กำลังยืนยัน..." : "ยืนยันอีเมล";
 }

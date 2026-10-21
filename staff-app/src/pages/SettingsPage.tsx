@@ -456,6 +456,42 @@ export function SettingsPage() {
     refresh();
   }, []);
 
+  /** ค่าที่ส่งไปบันทึก */
+  function settingsPayload() {
+    // ส่งช่องข้อความทุกครั้ง (สถานะฟอร์มใช้ร่วมกันทุกแท็บ) แต่ "อัตราราคา" ส่งเฉพาะเมื่อกรอก
+    // เป็นตัวเลขที่ใช้ได้ — กันช่องว่าง (Number("")=0) เขียนทับ margin/VAT เป็น 0% โดยไม่ตั้งใจ
+    // เมื่อกดบันทึกจากแท็บข้อมูลบริษัท หรือตอนระบบยังไม่เคยตั้งค่าอัตราราคา
+    const payload: Parameters<typeof updateSettings>[0] = {
+      ...Object.fromEntries(TEXT_KEYS.map((key) => [key, form[key].trim()])),
+      companyTaxId: formatTaxId(form.companyTaxId),
+      companyVatRegistered: form.companyVatRegistered,
+    };
+    // ว่าง = ไม่กำหนดยืนราคา ต้องส่ง null ไปล้าง (ไม่ใช่เงียบ ไม่งั้นค่าเก่าค้าง)
+    payload.quoteValidityDays =
+      form.quoteValidityDays.trim() === "" ? null : Number(form.quoteValidityDays);
+    // ว่าง = สัญญาใหม่ไม่มีเงินประกันผลงาน — ต้องส่ง null ไปล้าง
+    payload.retentionPercent = form.retentionPercent.trim() === "" ? null : Number(form.retentionPercent);
+    // ADMIN ไม่ส่งอัตรากำไรเลย — ช่องถูกล็อกอยู่แล้ว ส่งไปก็เป็นแค่ค่าเดิม
+    if (isOwner) {
+      const overhead = Number(form.overheadProfitPercent);
+      if (form.overheadProfitPercent.trim() !== "" && Number.isFinite(overhead)) {
+        payload.overheadProfitPercent = overhead;
+      }
+      // ช่องนี้ว่างได้จริง ๆ (= ยังไม่แยกค่าดำเนินการกับกำไร) จึงต้องส่ง null ไปล้างค่า
+      // ไม่ใช่เงียบไปเฉย ๆ เหมือนช่องอื่น ไม่งั้นลบค่าออกแล้วมันจะกลับมาเองตอนโหลดหน้าใหม่
+      const overheadOnly = Number(form.overheadPercent);
+      payload.overheadPercent =
+        form.overheadPercent.trim() === "" || !Number.isFinite(overheadOnly)
+          ? null
+          : overheadOnly;
+    }
+    const vat = Number(form.vatPercent);
+    if (form.vatPercent.trim() !== "" && Number.isFinite(vat)) {
+      payload.vatPercent = vat;
+    }
+    return payload;
+  }
+
   async function submitSave() {
     setSaving(true);
     setSavedMessage(null);
@@ -473,38 +509,7 @@ export function SettingsPage() {
         return;
       }
 
-      // ส่งช่องข้อความทุกครั้ง (สถานะฟอร์มใช้ร่วมกันทุกแท็บ) แต่ "อัตราราคา" ส่งเฉพาะเมื่อกรอก
-      // เป็นตัวเลขที่ใช้ได้ — กันช่องว่าง (Number("")=0) เขียนทับ margin/VAT เป็น 0% โดยไม่ตั้งใจ
-      // เมื่อกดบันทึกจากแท็บข้อมูลบริษัท หรือตอนระบบยังไม่เคยตั้งค่าอัตราราคา
-      const payload: Parameters<typeof updateSettings>[0] = {
-        ...Object.fromEntries(TEXT_KEYS.map((key) => [key, form[key].trim()])),
-        companyTaxId: formatTaxId(form.companyTaxId),
-        companyVatRegistered: form.companyVatRegistered,
-      };
-      // ว่าง = ไม่กำหนดยืนราคา ต้องส่ง null ไปล้าง (ไม่ใช่เงียบ ไม่งั้นค่าเก่าค้าง)
-      payload.quoteValidityDays =
-        form.quoteValidityDays.trim() === "" ? null : Number(form.quoteValidityDays);
-      // ว่าง = สัญญาใหม่ไม่มีเงินประกันผลงาน — ต้องส่ง null ไปล้าง
-      payload.retentionPercent = form.retentionPercent.trim() === "" ? null : Number(form.retentionPercent);
-      // ADMIN ไม่ส่งอัตรากำไรเลย — ช่องถูกล็อกอยู่แล้ว ส่งไปก็เป็นแค่ค่าเดิม
-      if (isOwner) {
-        const overhead = Number(form.overheadProfitPercent);
-        if (form.overheadProfitPercent.trim() !== "" && Number.isFinite(overhead)) {
-          payload.overheadProfitPercent = overhead;
-        }
-        // ช่องนี้ว่างได้จริง ๆ (= ยังไม่แยกค่าดำเนินการกับกำไร) จึงต้องส่ง null ไปล้างค่า
-        // ไม่ใช่เงียบไปเฉย ๆ เหมือนช่องอื่น ไม่งั้นลบค่าออกแล้วมันจะกลับมาเองตอนโหลดหน้าใหม่
-        const overheadOnly = Number(form.overheadPercent);
-        payload.overheadPercent =
-          form.overheadPercent.trim() === "" || !Number.isFinite(overheadOnly)
-            ? null
-            : overheadOnly;
-      }
-      const vat = Number(form.vatPercent);
-      if (form.vatPercent.trim() !== "" && Number.isFinite(vat)) {
-        payload.vatPercent = vat;
-      }
-      await updateSettings(payload);
+      await updateSettings(settingsPayload());
       setSavedMessage("บันทึกเรียบร้อยแล้ว");
       await refresh();
     } catch (err) {

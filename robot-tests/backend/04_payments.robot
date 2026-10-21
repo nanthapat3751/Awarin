@@ -12,7 +12,7 @@ Force Tags        backend    module:Staff Payments
 
 
 *** Variables ***
-${DIALOG}         xpath=//*[@role="dialog" or @role="alertdialog"]
+${DIALOG}         xpath=//*[self::dialog or @role="dialog" or @role="alertdialog"]
 
 
 *** Test Cases ***

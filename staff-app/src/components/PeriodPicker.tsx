@@ -105,8 +105,7 @@ export function PeriodPicker({
       </div>
 
       {open && (
-        <div
-          role="dialog"
+        <dialog open
           aria-label="เลือกช่วงเวลา"
           className="absolute right-0 z-30 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg"
         >
@@ -159,7 +158,7 @@ export function PeriodPicker({
                   className={`rounded-md py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:text-slate-300 ${
                     active
                       ? "bg-brand text-white"
-                      : `text-slate-700 hover:bg-slate-100 ${current ? "ring-1 ring-inset ring-brand/40" : ""}`
+                      : idleCellTone(current)
                   }`}
                 >
                   {label}
@@ -178,8 +177,13 @@ export function PeriodPicker({
               ทุกช่วงเวลา
             </button>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );
+}
+
+/** ช่องที่ไม่ได้เลือก — ช่วงปัจจุบันมีขอบจางให้รู้ว่าอยู่ตรงไหน */
+function idleCellTone(current: boolean) {
+  return current ? "text-slate-700 hover:bg-slate-100 ring-1 ring-inset ring-brand/40" : "text-slate-700 hover:bg-slate-100 ";
 }

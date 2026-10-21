@@ -105,31 +105,41 @@ boqRouter.get("/import/template.xlsx", async (_req, res) => {
   sendXlsx(res, await buildImportTemplate(), "แม่แบบนำเข้า-BOQ.xlsx");
 });
 
+function importUploadError(err: unknown): string {
+  if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") return "ไฟล์ใหญ่เกิน 5 MB";
+  return err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ";
+}
+
+/** ตัวเลือกจากหน้าพรีวิว (ช่องฟอร์ม): หมวดสำรอง · ชุดราคา · ชีตที่ติ๊กไว้ (JSON array ของชื่อชีต) — ผิดรูปแบบ = ใช้ที่ระบบเลือกให้ */
+function previewOptions(raw: unknown): { defaultCategoryId: string | null; priceSet: number | undefined; sheets: string[] | null } {
+  const body = (raw ?? {}) as { defaultCategoryId?: unknown; priceSet?: unknown; sheets?: unknown };
+  const defaultCategoryId =
+    typeof body.defaultCategoryId === "string" && body.defaultCategoryId.length > 0 ? body.defaultCategoryId : null;
+  const priceSet = typeof body.priceSet === "string" && /^\d{1,2}$/.test(body.priceSet) ? Number(body.priceSet) : undefined;
+  return { defaultCategoryId, priceSet, sheets: sheetList(body.sheets) };
+}
+
+function sheetList(raw: unknown): string[] | null {
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > 10_000) return null;
+  try {
+    const list: unknown = JSON.parse(raw);
+    return Array.isArray(list) && list.every((x) => typeof x === "string") ? (list as string[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 boqRouter.post("/import/preview", (req: Request<ProjectParams>, res) => {
   importUpload.single("file")(req, res, async (err: unknown) => {
     if (err) {
-      const tooBig = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE";
-      res.status(400).json({ error: tooBig ? "ไฟล์ใหญ่เกิน 5 MB" : err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ" });
+      res.status(400).json({ error: importUploadError(err) });
       return;
     }
     if (!req.file) {
       res.status(400).json({ error: "ไม่พบไฟล์ที่อัปโหลด" });
       return;
     }
-    const body = (req.body ?? {}) as { defaultCategoryId?: unknown; priceSet?: unknown; sheets?: unknown };
-    const defaultCategoryId =
-      typeof body.defaultCategoryId === "string" && body.defaultCategoryId.length > 0 ? body.defaultCategoryId : null;
-    // ตัวเลือกจากหน้าพรีวิว (ช่องฟอร์ม): ชุดราคา · ชีตที่ติ๊กไว้ (JSON array ของชื่อชีต) — ผิดรูปแบบ = ใช้ที่ระบบเลือกให้
-    const priceSet = typeof body.priceSet === "string" && /^\d{1,2}$/.test(body.priceSet) ? Number(body.priceSet) : undefined;
-    let sheets: string[] | null = null;
-    if (typeof body.sheets === "string" && body.sheets.length > 0 && body.sheets.length <= 10_000) {
-      try {
-        const list: unknown = JSON.parse(body.sheets);
-        if (Array.isArray(list) && list.every((x) => typeof x === "string")) sheets = list as string[];
-      } catch {
-        sheets = null;
-      }
-    }
+    const { defaultCategoryId, priceSet, sheets } = previewOptions(req.body);
     try {
       res.json(await previewBoqImport(req.params.projectId, req.file.buffer, defaultCategoryId, { priceSet, sheets }));
     } catch (e) {

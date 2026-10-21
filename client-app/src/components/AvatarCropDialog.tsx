@@ -105,8 +105,7 @@ export function AvatarCropDialog({
         onClick={() => !saving && onCancel()}
         className="absolute inset-0 h-full w-full cursor-default bg-slate-900/50"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="avatar-crop-title"
         className="relative w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-xl"
@@ -181,7 +180,7 @@ export function AvatarCropDialog({
             {saving ? "กำลังบันทึก..." : "ใช้รูปนี้"}
           </button>
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }

@@ -176,11 +176,9 @@ export function ProfilePhotoEditor({
           )}
         </div>
 
-        {status && (
-          <p
-            role={status.ok ? "status" : "alert"}
-            className={`mt-2 text-sm ${status.ok ? "text-emerald-700" : "text-red-600"}`}
-          >
+        {status?.ok && <output className="mt-2 block text-sm text-emerald-700">{status.text}</output>}
+        {status && !status.ok && (
+          <p role="alert" className="mt-2 text-sm text-red-600">
             {status.text}
           </p>
         )}

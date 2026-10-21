@@ -170,8 +170,7 @@ export function customerLineMultiplier(version: { contingencyPct: unknown; overh
 }
 
 /** ค่างานต้นทุน = ต้นทุนตรง + ค่าเผื่อเหลือเผื่อขาด */
-function resolveBaseCost(directCost: number, contingencyPercent: number | null | undefined) {
-  const percent = contingencyPercent ?? 0;
+function resolveBaseCost(directCost: number, percent: number) {
   assertNonNegative(percent, "contingencyPercent");
   const amount = round2(directCost * (percent / 100));
   return { percent, amount, baseCost: round2(directCost + amount) };
@@ -193,7 +192,8 @@ function markupChain(
 ) {
   assertNonNegative(overheadProfitPercent, "overheadProfitPercent");
   assertNonNegative(vatPercent, "vatPercent");
-  const contingency = resolveBaseCost(directCost, contingencyPercent);
+  // ไม่ได้ตั้งค่าเผื่อ = 0%
+  const contingency = resolveBaseCost(directCost, contingencyPercent ?? 0);
 
   const overheadProfitAmount = round2(contingency.baseCost * (overheadProfitPercent / 100));
   const beforeDiscount = round2(contingency.baseCost + overheadProfitAmount);

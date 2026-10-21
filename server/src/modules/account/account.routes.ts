@@ -177,7 +177,8 @@ accountRouter.delete("/sessions/:handle", async (req: Request<{ handle: string }
 
 const signatureUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  // 8,000,000 ไบต์ (8 MB ฐานสิบ) — เพดานที่ SonarQube ถือว่าปลอดภัย (S5693) · รูปลายเซ็นจริงเล็กกว่านี้มาก
+  limits: { fileSize: 8_000_000, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) cb(null, true);
     else cb(new SignatureImageError("รองรับเฉพาะไฟล์ JPEG / PNG / WEBP"));

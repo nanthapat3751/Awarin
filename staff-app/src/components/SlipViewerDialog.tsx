@@ -182,8 +182,7 @@ export function SlipViewerDialog({
         onClick={() => !busy && onClose()}
         className="absolute inset-0 h-full w-full cursor-default bg-slate-900/60"
       />
-      <div
-        role="dialog"
+      <dialog open
         aria-modal="true"
         aria-labelledby="slip-viewer-title"
         className="relative grid h-[min(88vh,760px)] w-full max-w-5xl grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-white shadow-2xl md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-1"
@@ -364,7 +363,7 @@ export function SlipViewerDialog({
             <p className="px-4 py-4 text-sm text-slate-500">หลักฐานของรายการรับเงินที่บันทึกแล้ว</p>
           )}
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body,
   );

@@ -26,6 +26,21 @@ function taxIdText(id: string | null): string {
   return `${digits[0]}-${digits.slice(1, 5)}-${digits.slice(5, 10)}-${digits.slice(10, 12)}-${digits[12]}`;
 }
 
+/** คอลัมน์เงิน (7–9) ชิดขวา · ลำดับ (1) กลาง · ที่เหลือชิดซ้าย */
+function headerAlign(col: number): "right" | "center" | "left" {
+  if (col >= 7 && col <= 9) return "right";
+  return col === 1 ? "center" : "left";
+}
+
+/** หมายเหตุท้ายแถว: ใบที่ยกเลิกบอกยอดเดิม+เหตุผล · ใบปกติบอกเลขโครงการ */
+function rowNote(r: SalesTaxReportDto["rows"][number], voided: boolean): string {
+  if (voided) {
+    const reason = r.voidReason ? ` — ${r.voidReason}` : "";
+    return `ยกเลิก (ยอดเดิม ${r.total.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท)${reason}`;
+  }
+  return r.projectNo ? `โครงการ ${r.projectNo}` : "";
+}
+
 export interface SalesTaxCompany {
   companyName: string;
   companyAddress: string;
@@ -115,7 +130,7 @@ export async function buildSalesTaxWorkbook(input: {
   header.height = 40;
   header.eachCell((cell, col) => {
     cell.font = font({ bold: true });
-    cell.alignment = { vertical: "middle", horizontal: col >= 7 && col <= 9 ? "right" : col === 1 ? "center" : "left", wrapText: true };
+    cell.alignment = { vertical: "middle", horizontal: headerAlign(col), wrapText: true };
     cell.border = { top: { style: "thin", color: { argb: INK } }, bottom: { style: "medium", color: { argb: INK } } };
   });
   ws.views = [{ state: "frozen", ySplit: header.number }];
@@ -140,11 +155,7 @@ export async function buildSalesTaxWorkbook(input: {
       taxIdText(r.customerTaxId),
       r.customerBranch ?? "",
       ...values,
-      voided
-        ? `ยกเลิก (ยอดเดิม ${r.total.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท)${r.voidReason ? ` — ${r.voidReason}` : ""}`
-        : r.projectNo
-          ? `โครงการ ${r.projectNo}`
-          : "",
+      rowNote(r, voided),
     ]);
     row.getCell(1).alignment = { horizontal: "center" };
     for (const c of [7, 8, 9]) {
@@ -162,7 +173,8 @@ export async function buildSalesTaxWorkbook(input: {
   }
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  const sum = ws.addRow(["", "", "", "รวมทั้งสิ้น", "", "", round2(base), round2(vat), round2(total), `${report.totals.count} ใบ${report.totals.voidedCount > 0 ? ` · ยกเลิก ${report.totals.voidedCount} ใบ` : ""}`]);
+  const voidedNote = report.totals.voidedCount > 0 ? ` · ยกเลิก ${report.totals.voidedCount} ใบ` : "";
+  const sum = ws.addRow(["", "", "", "รวมทั้งสิ้น", "", "", round2(base), round2(vat), round2(total), `${report.totals.count} ใบ${voidedNote}`]);
   sum.eachCell({ includeEmpty: true }, (cell, col) => {
     cell.font = font({ bold: col <= 9 });
     cell.border = { top: { style: "thin", color: { argb: INK } }, bottom: { style: "double", color: { argb: INK } } };

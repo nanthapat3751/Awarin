@@ -60,6 +60,21 @@ export function splitToStock(lengthMm: number, stockMm: number): { full: number;
   return { full, remainder: lengthMm - full * stockMm };
 }
 
+/** First-Fit Decreasing — ชิ้นที่เรียงยาวไปสั้นแล้ว ลงเส้นแรกที่ยังเหลือพอ ไม่พอก็เปิดเส้นใหม่ */
+function firstFitDecreasing(pieces: number[], stockMm: number): { free: number; cuts: number[] }[] {
+  const bins: { free: number; cuts: number[] }[] = [];
+  for (const p of pieces) {
+    const bin = bins.find((b) => b.free >= p);
+    if (bin) {
+      bin.free -= p;
+      bin.cuts.push(p);
+    } else {
+      bins.push({ free: stockMm - p, cuts: [p] });
+    }
+  }
+  return bins;
+}
+
 export function cutPlan(requests: CutRequest[], stock: number, keepMin = OFFCUT_KEEP_MIN): CutPlan {
   const stockMm = mm(stock);
   const keepMm = mm(keepMin);
@@ -73,18 +88,7 @@ export function cutPlan(requests: CutRequest[], stock: number, keepMin = OFFCUT_
     for (let i = 0; i < r.count; i++) if (remainder > 0) pieces.push(remainder);
   }
   pieces.sort((a, b) => b - a);
-
-  // First-Fit Decreasing
-  const bins: { free: number; cuts: number[] }[] = [];
-  for (const p of pieces) {
-    const bin = bins.find((b) => b.free >= p);
-    if (bin) {
-      bin.free -= p;
-      bin.cuts.push(p);
-    } else {
-      bins.push({ free: stockMm - p, cuts: [p] });
-    }
-  }
+  const bins = firstFitDecreasing(pieces, stockMm);
 
   // รวมเส้นที่ตัดแบบเดียวกันเป็นแบบเดียว
   const byPattern = new Map<string, CutPattern>();

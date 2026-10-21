@@ -269,6 +269,12 @@ const isContractView = (v: string | null): v is ContractView => v != null && (CO
 /** ลิงก์เก่า ?tab=contracts / ?tab=payments (แดชบอร์ด บุ๊กมาร์ก) → แท็บรวม + มุมมองย่อยที่ตรงกัน */
 const LEGACY_CONTRACT_TABS: Record<string, ContractView> = { contracts: "documents", payments: "payments" };
 
+/** แท็บจาก ?tab= — ลิงก์เก่าของแท็บสัญญา/การเงินพาเข้าแท็บสัญญา · ค่าที่ไม่รู้จัก = ภาพรวม */
+function tabFromUrl(rawTab: string | null, legacyContractView: ContractView | undefined): ProjectTab {
+  if (legacyContractView) return "contract";
+  return isProjectTab(rawTab) ? rawTab : "overview";
+}
+
 /** หัวข้อที่ปุ่มอื่นในหน้าเลื่อนไปหา อยู่แท็บไหน — ใช้สลับแท็บให้ก่อนเลื่อน ไม่งั้นเลื่อนไปหาของที่ไม่ได้เรนเดอร์ */
 const SECTION_TAB: Record<string, ProjectTab> = {
   "project-details": "overview",
@@ -370,41 +376,62 @@ const BOQ_PAGE_SIZE = 15;
  * หัวหมวดย่อยที่ตกท้ายหน้าพอดีถูกยกไปหน้าถัดไปพร้อมบรรทัดของมัน ไม่ทิ้งหัวลอยไว้ท้ายหน้า
  */
 function paginateBoqRows(rows: BoqRenderRow[], size: number): BoqRenderRow[][] {
-  const pages: BoqRenderRow[][] = [];
-  let page: BoqRenderRow[] = [];
-  let count = 0;
-  let sub: SubheaderRow | null = null;
-  let head: SubheaderRow | null = null;
-  let posInSub = 0;
-  const flush = () => {
-    pages.push(page);
-    page = [];
-    count = 0;
-    head = null;
-  };
+  const pager = new BoqRowPaginator(size);
   for (const row of rows) {
-    if (row.type === "subheader") {
-      if (count >= size) flush();
-      sub = row;
-      posInSub = 0;
-      head = { ...row, from: 1, to: 0 };
-      page.push(head);
-      continue;
-    }
-    if (count >= size) {
-      flush();
-      if (sub && !sub.collapsed) {
-        head = { ...sub, from: posInSub + 1, to: posInSub, continued: true };
-        page.push(head);
+    if (row.type === "subheader") pager.startSub(row);
+    else pager.addLine(row);
+  }
+  return pager.done();
+}
+
+/** ตัวแบ่งหน้าของ paginateBoqRows — จำหน้าปัจจุบัน หมวดย่อยที่กำลังเดิน และหัวหมวดย่อยของหน้านี้ */
+class BoqRowPaginator {
+  private readonly size: number;
+  private readonly pages: BoqRenderRow[][] = [];
+  private page: BoqRenderRow[] = [];
+  private count = 0;
+  private sub: SubheaderRow | null = null;
+  private head: SubheaderRow | null = null;
+  private posInSub = 0;
+
+  constructor(size: number) {
+    this.size = size;
+  }
+
+  private flush() {
+    this.pages.push(this.page);
+    this.page = [];
+    this.count = 0;
+    this.head = null;
+  }
+
+  startSub(row: SubheaderRow) {
+    if (this.count >= this.size) this.flush();
+    this.sub = row;
+    this.posInSub = 0;
+    this.head = { ...row, from: 1, to: 0 };
+    this.page.push(this.head);
+  }
+
+  addLine(row: BoqRenderRow) {
+    if (this.count >= this.size) {
+      this.flush();
+      // หมวดย่อยที่ข้ามหน้า → หัวซ้ำ "(ต่อ)" ที่ต้นหน้าถัดไป
+      if (this.sub && !this.sub.collapsed) {
+        this.head = { ...this.sub, from: this.posInSub + 1, to: this.posInSub, continued: true };
+        this.page.push(this.head);
       }
     }
-    page.push(row);
-    count++;
-    posInSub++;
-    if (head) head.to = posInSub;
+    this.page.push(row);
+    this.count++;
+    this.posInSub++;
+    if (this.head) this.head.to = this.posInSub;
   }
-  if (page.length > 0) pages.push(page);
-  return pages.length > 0 ? pages : [[]];
+
+  done(): BoqRenderRow[][] {
+    if (this.page.length > 0) this.pages.push(this.page);
+    return this.pages.length > 0 ? this.pages : [[]];
+  }
 }
 
 // เรียงตัวเลือก dropdown ตามรหัสงาน/วัสดุ เพื่อให้รายการอ่านตามลำดับหมวดงาน
@@ -769,6 +796,70 @@ function ProjectNextAction({
   return null;
 }
 
+/** กลับขึ้นไปที่แถบหมวด — กดจากท้ายตารางยาว ๆ แล้วเนื้อหาใหม่จะได้ไม่เริ่มกลางจอ */
+function scrollToBoqTop() {
+  requestAnimationFrame(() => {
+    // วัดจากหมุดที่ไม่ติดจอ — ตัวแถบเองติดจออยู่ ตำแหน่งของมันไม่บอกว่าเลื่อนมาไกลแค่ไหน
+    const anchor = document.getElementById("boq-group-anchor");
+    // 48 = แถบหัวโครงการที่ติดจออยู่ (StickyPageHeader h-12)
+    const top = anchor ? anchor.getBoundingClientRect().top - 48 : 0;
+    if (top < 0) window.scrollTo({ top: window.scrollY + top });
+  });
+}
+
+const positiveNumber = (v: string) => Number(v) > 0;
+
+/** ช่องที่ยังขาดในฟอร์มเพิ่มบรรทัด — null = ส่งได้ */
+function addFormProblem(f: AddFormState, hasMaterial: boolean, sheetRowCount: number): string | null {
+  const usesSheet = f.qtyBasis === "SHEET";
+  const usesDriver = f.qtyBasis !== "MANUAL" && !usesSheet;
+  if (!f.categoryId) return "เลือกหมวดงานก่อน";
+  if (!hasMaterial && !f.name.trim()) return "กรอกชื่อรายการ หรือเลือกวัสดุจากคลัง";
+  if (!hasMaterial && !f.unit.trim()) return "เลือกหน่วยนับ";
+  if (usesSheet && sheetRowCount === 0) return "กรอกใบถอดแบบก่อนบันทึก";
+  if (usesDriver && !positiveNumber(f.qtyCoefficient)) return "กรอกปริมาณต่อ 1 หน่วยของค่าวัด";
+  if (!usesSheet && !usesDriver && !positiveNumber(f.quantity)) return "กรอกจำนวน (มากกว่า 0)";
+  return null;
+}
+
+/**
+ * คำขอเพิ่มบรรทัดจากฟอร์ม
+ * - สูตรที่พนักงานกรอกเอง: ถ้ามี ให้ส่งไป (ทับราคาวัสดุ); ถ้าไม่กรอกและเลือกวัสดุแคตตาล็อกที่มีสูตร
+ *   ปล่อยเป็น undefined เพื่อให้เซิร์ฟเวอร์ดึงสูตรจากแคตตาล็อกมาให้เอง
+ * - ผูกวัสดุในคลัง: ส่งราคาเฉพาะช่องที่แก้ทับราคาคลังจริง — เดิมไม่ส่งเลย ราคาที่พิมพ์แก้จึงหายเงียบ
+ *   (เซิร์ฟเวอร์ถือว่าค่าที่ส่งมาชนะค่าคลัง · ไม่ได้แก้ = ปล่อยให้ใช้ค่าคลังตามเดิม)
+ */
+function addItemPayload(
+  f: AddFormState,
+  material: MaterialDto | undefined,
+  recipe: ReturnType<typeof componentRowsToInput>,
+  sheetRows: TakeoffRowInput[],
+): Parameters<typeof addBoqItem>[1] {
+  const usesSheet = f.qtyBasis === "SHEET";
+  const usesDriver = f.qtyBasis !== "MANUAL" && !usesSheet;
+  const hasRecipe = recipe.length > 0;
+  const overrides = (field: "materialUnitPrice" | "laborUnitPrice") =>
+    material !== undefined && Number(f[field] || 0) !== Number(material[field]);
+  return {
+    categoryId: f.categoryId,
+    materialId: material?.id,
+    name: material ? undefined : f.name.trim(),
+    unit: material ? undefined : f.unit.trim(),
+    materialUnitPrice:
+      !material || (overrides("materialUnitPrice") && !hasRecipe) ? Number(f.materialUnitPrice || 0) : undefined,
+    laborUnitPrice: !material || overrides("laborUnitPrice") ? Number(f.laborUnitPrice || 0) : undefined,
+    qtyBasis: f.qtyBasis,
+    quantity: usesDriver || usesSheet ? undefined : Number(f.quantity),
+    qtyCoefficient: usesDriver ? Number(f.qtyCoefficient) : undefined,
+    wasteFactorPct: usesDriver || usesSheet ? Number(f.wasteFactorPct || 0) : undefined,
+    takeoffRows: usesSheet ? sheetRows : undefined,
+    note: f.note.trim() || undefined,
+    // ผูกวัสดุคลัง: ส่งเสมอ — [] = ผู้ใช้เลือก "ใส่ราคาเอง" (เซิร์ฟเวอร์ถือว่าตั้งใจไม่แตกวัสดุ
+    // ไม่ดึงสูตรคลังมาทับ) · กรอกเอง: ไม่มีสูตรก็ไม่ต้องส่ง
+    components: material || hasRecipe ? recipe : undefined,
+  };
+}
+
 interface AddFormState {
   categoryId: string;
   materialId: string;
@@ -947,11 +1038,7 @@ function DiscountMarginHint({ margin }: Readonly<{ margin: { remaining: number; 
   if (margin.remaining < 0) {
     return <span className="text-red-600">เกินกำไรที่มี {money(String(-margin.remaining))}</span>;
   }
-  return (
-    <>
-      กินกำไรไป {margin.eatenPct ?? 0}% · เหลือ {money(String(margin.remaining))}
-    </>
-  );
+  return `กินกำไรไป ${margin.eatenPct ?? 0}% · เหลือ ${money(String(margin.remaining))}`;
 }
 
 /**
@@ -1712,50 +1799,15 @@ function useProjectDetailState() {
 
   /** คืน true เมื่อบันทึกสำเร็จ · keepOpen = ล้างฟอร์มไว้กรอกบรรทัดถัดไป (หมวดงานเดิมคงไว้) */
   async function submitAdd(opts: { keepOpen?: boolean } = {}): Promise<boolean> {
-    const usesSheet = addForm.qtyBasis === "SHEET";
-    const usesDriver = addForm.qtyBasis !== "MANUAL" && !usesSheet;
     const material = addForm.materialId ? materials.find((m) => m.id === addForm.materialId) : undefined;
     // เดิมกดบันทึกแล้วเงียบไปเฉย ๆ เมื่อขาดช่อง — บอกให้รู้ว่าขาดอะไร
-    const problem = (() => {
-      if (!addForm.categoryId) return "เลือกหมวดงานก่อน";
-      if (!material && !addForm.name.trim()) return "กรอกชื่อรายการ หรือเลือกวัสดุจากคลัง";
-      if (!material && !addForm.unit.trim()) return "เลือกหน่วยนับ";
-      if (usesSheet && addSheetRows.length === 0) return "กรอกใบถอดแบบก่อนบันทึก";
-      if (usesDriver && !(Number(addForm.qtyCoefficient) > 0)) return "กรอกปริมาณต่อ 1 หน่วยของค่าวัด";
-      if (!usesSheet && !usesDriver && !(Number(addForm.quantity) > 0)) return "กรอกจำนวน (มากกว่า 0)";
-      return null;
-    })();
+    const problem = addFormProblem(addForm, material !== undefined, addSheetRows.length);
     if (problem) {
       toast.error(problem);
       return false;
     }
-    // สูตรที่พนักงานกรอกเอง: ถ้ามี ให้ส่งไป (ทับราคาวัสดุ); ถ้าไม่กรอกและเลือกวัสดุแคตตาล็อกที่มีสูตร
-    // ปล่อยเป็น undefined เพื่อให้เซิร์ฟเวอร์ดึงสูตรจากแคตตาล็อกมาให้เอง
-    const addRecipe = componentRowsToInput(addComponents);
-    const hasRecipe = addRecipe.length > 0;
-    // ผูกวัสดุในคลัง: ส่งราคาเฉพาะช่องที่แก้ทับราคาคลังจริง — เดิมไม่ส่งเลย ราคาที่พิมพ์แก้จึงหายเงียบ
-    // (เซิร์ฟเวอร์ถือว่าค่าที่ส่งมาชนะค่าคลัง · ไม่ได้แก้ = ปล่อยให้ใช้ค่าคลังตามเดิม)
-    const overrides = (field: "materialUnitPrice" | "laborUnitPrice") =>
-      material !== undefined && Number(addForm[field] || 0) !== Number(material[field]);
     try {
-      const added = await addBoqItem(projectId, {
-        categoryId: addForm.categoryId,
-        materialId: material?.id,
-        name: material ? undefined : addForm.name.trim(),
-        unit: material ? undefined : addForm.unit.trim(),
-        materialUnitPrice:
-          !material || (overrides("materialUnitPrice") && !hasRecipe) ? Number(addForm.materialUnitPrice || 0) : undefined,
-        laborUnitPrice: !material || overrides("laborUnitPrice") ? Number(addForm.laborUnitPrice || 0) : undefined,
-        qtyBasis: addForm.qtyBasis,
-        quantity: usesDriver || usesSheet ? undefined : Number(addForm.quantity),
-        qtyCoefficient: usesDriver ? Number(addForm.qtyCoefficient) : undefined,
-        wasteFactorPct: usesDriver || usesSheet ? Number(addForm.wasteFactorPct || 0) : undefined,
-        takeoffRows: usesSheet ? addSheetRows : undefined,
-        note: addForm.note.trim() || undefined,
-        // ผูกวัสดุคลัง: ส่งเสมอ — [] = ผู้ใช้เลือก "ใส่ราคาเอง" (เซิร์ฟเวอร์ถือว่าตั้งใจไม่แตกวัสดุ
-        // ไม่ดึงสูตรคลังมาทับ) · กรอกเอง: ไม่มีสูตรก็ไม่ต้องส่ง
-        components: material || hasRecipe ? addRecipe : undefined,
-      });
+      const added = await addBoqItem(projectId, addItemPayload(addForm, material, componentRowsToInput(addComponents), addSheetRows));
       const addedCategoryId = addForm.categoryId;
       setAddForm(opts.keepOpen ? { ...EMPTY_ADD_FORM, categoryId: addedCategoryId } : EMPTY_ADD_FORM);
       setAddComponents([]);
@@ -2120,7 +2172,7 @@ function useProjectDetailState() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
   const legacyContractView = rawTab ? LEGACY_CONTRACT_TABS[rawTab] : undefined;
-  const tab: ProjectTab = legacyContractView ? "contract" : isProjectTab(rawTab) ? rawTab : "overview";
+  const tab: ProjectTab = tabFromUrl(rawTab, legacyContractView);
   // มุมมองย่อย/สัญญาที่เลือกในแท็บสัญญาและการเงิน อยู่ใน URL เหมือนแท็บ (รีเฟรช/ส่งลิงก์แล้วอยู่ที่เดิม)
   const rawView = searchParams.get("view");
   const requestedContractView: ContractView | null = isContractView(rawView) ? rawView : (legacyContractView ?? null);
@@ -2137,17 +2189,6 @@ function useProjectDetailState() {
   const boqPageParam = Math.max(1, Math.floor(Number(searchParams.get("page"))) || 1);
   // บรรทัดที่ต้องพาไปให้เห็น (เพิ่งเพิ่ม/เลื่อนลำดับ/เปิดแก้จากแท็บอื่น) — ตารางหาหน้าของมันแล้วเปิดให้
   const [boqFocusId, setBoqFocusId] = useState<string | null>(null);
-
-  /** กลับขึ้นไปที่แถบหมวด — กดจากท้ายตารางยาว ๆ แล้วเนื้อหาใหม่จะได้ไม่เริ่มกลางจอ */
-  function scrollToBoqTop() {
-    requestAnimationFrame(() => {
-      // วัดจากหมุดที่ไม่ติดจอ — ตัวแถบเองติดจออยู่ ตำแหน่งของมันไม่บอกว่าเลื่อนมาไกลแค่ไหน
-      const anchor = document.getElementById("boq-group-anchor");
-      // 48 = แถบหัวโครงการที่ติดจออยู่ (StickyPageHeader h-12)
-      const top = anchor ? anchor.getBoundingClientRect().top - 48 : 0;
-      if (top < 0) window.scrollTo({ top: window.scrollY + top });
-    });
-  }
 
   function openBoqGroup(key: string | null, scroll = false) {
     // แผงแก้ไขเป็นแถวในตาราง สลับหมวดแล้วแถวหายไปทั้งที่ยังไม่บันทึก จึงปิดให้ก่อน
@@ -2724,7 +2765,7 @@ function recipeSourcesOf(materials: MaterialDto[], items: BoqItemDto[]): RecipeS
     .filter((m) => m.active && m.components.length > 0)
     .map((m) => ({
       value: `m:${m.id}`,
-      label: `คลัง · ${m.code ? `${m.code} ` : ""}${m.name} (${m.components.length} วัสดุ)`,
+      label: `คลัง · ${[m.code, m.name].filter(Boolean).join(" ")} (${m.components.length} วัสดุ)`,
       rows: componentRowsFrom(m.components),
     }));
   const fromProject = items
@@ -2752,18 +2793,20 @@ function visibleTabsOf(
 ): { key: ProjectTab; label: string; count?: number; badge?: string }[] {
   const isCustom = project.type === "CUSTOM";
   const tabs: { key: ProjectTab; label: string; count?: number; badge?: string }[] = [{ key: "overview", label: "ภาพรวม" }];
-  if (!isCustom) tabs.push({ key: "boq", label: "BOQ", count: itemCount });
-  tabs.push({ key: "quotes", label: "ใบเสนอราคา", count: quoteCount });
+  if (!isCustom) tabs.push({ key: "boq", label: "BOQ", count: itemCount }, { key: "quotes", label: "ใบเสนอราคา", count: quoteCount });
+  else tabs.push({ key: "quotes", label: "ใบเสนอราคา", count: quoteCount });
   if (CONTRACT_ELIGIBLE_STATUSES.has(project.status)) {
     // เรื่องของสัญญาทั้งหมดอยู่แท็บเดียว (เอกสาร · งวดรับเงิน · งานเพิ่ม-ลด) — เดิมแยก "สัญญา" กับ "รับเงิน"
     // แล้วงานเพิ่ม-ลดไปอยู่ใต้สัญญา ผู้ใช้สับสนว่าอะไรอยู่ไหน · นับเลขเฉพาะตอนยังไม่ลงนาม (ฉบับร่างที่รอเลือก)
-    tabs.push({
-      key: "contract",
-      label: "สัญญาและการเงิน",
-      count: signedContractCount === 0 && contractCount > 0 ? contractCount : undefined,
-    });
-    // ต้นทุนจริงเริ่มมีความหมายเมื่อลูกค้าตกลงราคาแล้ว (ก่อนนั้นยังไม่มีงานให้จ่าย)
-    tabs.push({ key: "costs", label: "ต้นทุนจริง" });
+    tabs.push(
+      {
+        key: "contract",
+        label: "สัญญาและการเงิน",
+        count: signedContractCount === 0 && contractCount > 0 ? contractCount : undefined,
+      },
+      // ต้นทุนจริงเริ่มมีความหมายเมื่อลูกค้าตกลงราคาแล้ว (ก่อนนั้นยังไม่มีงานให้จ่าย)
+      { key: "costs", label: "ต้นทุนจริง" },
+    );
   }
   return tabs;
 }
@@ -2836,7 +2879,7 @@ function discountCell(version: ProjectVersionDto, hint?: ReactNode): PriceCell {
  * (ไม่ปัด = ไม่มีช่องนี้ ทางเข้าคือตัวเลือกในแผงแก้ราคา ซึ่งเปิดจากป้าย "ส่วนลด" อยู่แล้ว)
  */
 function roundingCells(version: ProjectVersionDto): PriceCell[] {
-  if (!(Number(version.roundingAmt) > 0)) return [];
+  if (!positiveNumber(String(version.roundingAmt))) return [];
   return [
     {
       label: "ปัดเศษ",
@@ -2909,15 +2952,12 @@ function ratesPreviewOf(s: ProjectState, version: ProjectVersionDto, isCustom: b
   const overheadOk = overhead != null && Number.isFinite(overhead);
 
   /** กำไรกี่ % ตามตัวเลขที่กำลังพิมพ์ — null = ยังไม่ได้แยก หรือกรอกเกินอัตรารวม */
-  let ratesSplitPreview: number | null = null;
-  if (overheadOk) {
-    const rest = Math.round((totalPct - overhead) * 100) / 100;
-    ratesSplitPreview = rest >= 0 ? rest : null;
-  }
+  const ratesSplitPreview = overheadOk ? profitLeftPct(totalPct, overhead) : null;
 
   const discount = typedDiscount(s);
   const contingency = s.contingencyInput === "" ? 0 : Number(s.contingencyInput);
   const contingencyOk = Number.isFinite(contingency) && contingency >= 0;
+  const netPct = isCustom ? 0 : totalPct;
   return {
     ratesSplitPreview,
     ratesPreviewMargin:
@@ -2927,8 +2967,14 @@ function ratesPreviewOf(s: ProjectState, version: ProjectVersionDto, isCustom: b
             roundingUnit: s.roundInput === "" ? null : Number(s.roundInput),
           })
         : null,
-    ratesPreviewNet: s.showRates && discount ? netPreviewOf(s, version, isCustom ? 0 : totalPct, discount) : null,
+    ratesPreviewNet: s.showRates && discount ? netPreviewOf(s, version, netPct, discount) : null,
   };
+}
+
+/** กำไรที่เหลือหลังหักค่าดำเนินการจากอัตรารวม — ติดลบ (กรอกเกิน) = null */
+function profitLeftPct(totalPct: number, overhead: number): number | null {
+  const rest = Math.round((totalPct - overhead) * 100) / 100;
+  return rest >= 0 ? rest : null;
 }
 
 /**
@@ -3117,14 +3163,12 @@ function projectViewActions(s: ProjectState, detail: ProjectDetailDto, v: Projec
     if (!pos || s.reordering) return;
     const target = pos.index + direction;
     if (target < 0 || target >= pos.group.items.length) return;
-    const nextItems = v.boqGroups
-      .map((g) => {
-        if (g !== pos.group) return g.items;
-        const list = [...g.items];
-        [list[pos.index], list[target]] = [list[target], list[pos.index]];
-        return list;
-      })
-      .flat();
+    const nextItems = v.boqGroups.flatMap((g) => {
+      if (g !== pos.group) return g.items;
+      const list = [...g.items];
+      [list[pos.index], list[target]] = [list[target], list[pos.index]];
+      return list;
+    });
     const previous = detail;
     // เลื่อนบนจอทันที ไม่ต้องรอเซิร์ฟเวอร์ — พลาดค่อยดึงของจริงกลับมา
     s.setDetail({ ...detail, items: nextItems });
@@ -3440,7 +3484,7 @@ function RatesPanel({ vm }: Readonly<{ vm: ProjectVM }>) {
             </Button>
             {ratesPreviewNet != null && (
               <span className="text-xs tabular-nums text-slate-600">
-                ราคาสุทธิใหม่ ≈{" "}
+                <span>ราคาสุทธิใหม่ ≈{" "}</span>
                 <span className="font-semibold text-brand">{money(ratesPreviewNet)}</span>
               </span>
             )}
@@ -3515,12 +3559,248 @@ function AddStep({ n, title, children }: Readonly<{ n: number; title: string; ch
   );
 }
 
+/** ขั้น ① ของฟอร์มเพิ่มบรรทัด — เลือกวัสดุจากคลัง หรือกรอกชื่อ/หน่วยเอง + หมวดงาน */
+function AddItemStep({ vm, material }: Readonly<{ vm: ProjectVM; material: MaterialDto | undefined }>) {
+  const { materialOptions, addForm, selectMaterial, categoryOptions, setAddForm, unitsInUse } = vm;
+  return (
+    <AddStep n={1} title="รายการ">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+        <label className={`${addLabelClass} sm:col-span-3`}>
+          <span>
+            วัสดุจากคลัง <span className="text-slate-400">(หรือเว้นว่างแล้วกรอกชื่อเอง)</span>
+          </span>
+          <SearchableSelect
+            options={materialOptions}
+            value={addForm.materialId}
+            onChange={selectMaterial}
+            placeholder="พิมพ์รหัส/ชื่อวัสดุ"
+            clearable
+          />
+        </label>
+        <label className={`${addLabelClass} sm:col-span-2`}>
+          หมวดงาน
+          <SearchableSelect
+            options={categoryOptions}
+            value={addForm.categoryId}
+            onChange={(next) => setAddForm((f) => ({ ...f, categoryId: next }))}
+            placeholder="พิมพ์รหัส/ชื่อหมวดงาน"
+          />
+        </label>
+      </div>
+
+      {material ? (
+        // ผูกกับคลัง: ชื่อและหน่วยมาจากคลัง — โชว์เป็นข้อความแทนช่องสีเทาที่กดไม่ได้แต่ไม่บอกว่าทำไม
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-slate-600">
+            หน่วย: <span className="font-medium text-slate-800">{material.unit}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => selectMaterial("")}
+            title="เก็บชื่อ หน่วย และราคาที่เติมไว้ แต่บรรทัดนี้จะไม่ผูกกับคลังแล้ว (ไม่เตือนเมื่อราคาคลังเปลี่ยน)"
+            className="text-slate-500 underline underline-offset-2 hover:text-slate-800"
+          >
+            แก้ชื่อ/หน่วยเอง (ไม่ผูกกับคลัง)
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+          <label className={`${addLabelClass} sm:col-span-3`}>
+            <span>ชื่อรายการ</span>
+            <input
+              value={addForm.name}
+              onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="เช่น งานรื้อถอนผนังเดิม"
+              className={addInputClass}
+            />
+          </label>
+          <label className={`${addLabelClass} sm:col-span-2`}>
+            หน่วยนับ
+            {/* ใช้ตัวเดียวกับหน้าวัสดุ/ค่าแรง — กันหน่วยสะกดเพี้ยน เช่น "ตรม." กับ "ตร.ม." */}
+            <UnitSelect
+              value={addForm.unit}
+              onChange={(unit) => setAddForm((f) => ({ ...f, unit }))}
+              options={UNIT_OPTIONS}
+              inUse={unitsInUse}
+            />
+          </label>
+        </div>
+      )}
+    </AddStep>
+  );
+}
+
+/** ขั้น ② ของฟอร์มเพิ่มบรรทัด — วิธีคิดปริมาณ (กรอกเอง / ใบถอดแบบ / ค่าวัดโครงการ) */
+function AddQuantityStep({ vm, mode }: Readonly<{ vm: ProjectVM; mode: QtyMode }>) {
+  const { addForm, setAddForm, rebarOpen, setRebarOpen, rebarDia, setRebarDia, rebarLen, setRebarLen, addSheetRows, setAddSheetRows } = vm;
+  return (
+    <AddStep n={2} title="ปริมาณ">
+      <div role="radiogroup" aria-label="วิธีคิดปริมาณ" className="inline-flex w-fit overflow-hidden rounded-md border border-slate-300 text-sm">
+        {(
+          [
+            ["MANUAL", "กรอกเอง"],
+            ["SHEET", "ถอดจากแบบ"],
+            ["DRIVER", "คิดจากค่าวัดโครงการ"],
+          ] as [QtyMode, string][]
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={mode === value}
+            onClick={() =>
+              setAddForm((f) => ({
+                ...f,
+                qtyBasis: basisForMode(value, f.qtyBasis),
+              }))
+            }
+            className={`border-r border-slate-300 px-3 py-1.5 last:border-r-0 ${
+              mode === value ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "MANUAL" && (
+        <>
+          <label className={`${addLabelClass} w-48`}>
+            <span>จำนวน{addForm.unit && ` (${addForm.unit})`}</span>
+            <input
+              type="number"
+              step="any"
+              value={addForm.quantity}
+              onChange={(e) => setAddForm((f) => ({ ...f, quantity: e.target.value }))}
+              className={addInputClass}
+            />
+          </label>
+          {/* เครื่องมือคิดน้ำหนักเหล็กอยู่ใต้ช่องจำนวนที่มันเติมค่าให้ — โชว์เฉพาะโหมดกรอกเอง
+              เพราะโหมดอื่นปริมาณมาจากสูตร การใส่ทับจะล้างสูตรทิ้ง */}
+          <RebarCalculator
+            open={rebarOpen}
+            onToggle={() => setRebarOpen((v) => !v)}
+            diameterMm={rebarDia}
+            onDiameterChange={setRebarDia}
+            lengthM={rebarLen}
+            onLengthChange={setRebarLen}
+            unit={addForm.unit}
+            // ผูกวัสดุจากแคตตาล็อกอยู่ = หน่วยนับมาจากคลัง แก้ให้ไม่ได้ ได้แค่เตือน
+            onUnitChange={addForm.materialId ? undefined : (unit) => setAddForm((f) => ({ ...f, unit }))}
+            onInsert={(kg) => {
+              setAddForm((f) => ({ ...f, quantity: String(kg) }));
+              setRebarOpen(false);
+            }}
+          />
+        </>
+      )}
+
+      {mode === "SHEET" &&
+        (addForm.unit ? (
+          <SheetQuantityBlock
+            lineName={addForm.name}
+            unit={addForm.unit}
+            rows={addSheetRows}
+            waste={addForm.wasteFactorPct}
+            onChange={(rows, waste) => {
+              setAddSheetRows(rows);
+              setAddForm((f) => ({ ...f, wasteFactorPct: waste }));
+            }}
+            onUseManual={(q) =>
+              setAddForm((f) => ({ ...f, qtyBasis: "MANUAL", quantity: q == null ? f.quantity : String(q) }))
+            }
+          />
+        ) : (
+          <span className="text-xs text-amber-700">เลือกวัสดุหรือหน่วยนับในขั้นที่ 1 ก่อน แล้วค่อยเปิดใบถอดแบบ</span>
+        ))}
+
+      {mode === "DRIVER" && <DriverQuantityFields vm={vm} />}
+    </AddStep>
+  );
+}
+
+/** ปริมาณที่คิดจากค่าวัดของโครงการ — ฐาน · ต่อ 1 หน่วย · เผื่อเสีย · ผลที่คิดได้ */
+function DriverQuantityFields({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { addForm, setAddForm, driverValueOf } = vm;
+  return (
+    <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-4">
+      <label className={addLabelClass}>
+        <span>คิดจาก</span>
+        <select
+          value={addForm.qtyBasis}
+          onChange={(e) => setAddForm((f) => ({ ...f, qtyBasis: e.target.value as QtyBasis }))}
+          className={addInputClass}
+        >
+          {DRIVER_BASES.map((b) => {
+            const dv = driverValueOf(b.value);
+            return (
+              <option key={b.value} value={b.value}>
+                {b.measureLabel} {dv == null ? "(ยังไม่ได้ตั้ง)" : `= ${dv.toLocaleString("th-TH")}`}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      <label className={addLabelClass}>
+        {basisConfig(addForm.qtyBasis).perLabel}
+        <input
+          type="number"
+          step="0.0001"
+          value={addForm.qtyCoefficient}
+          onChange={(e) => setAddForm((f) => ({ ...f, qtyCoefficient: e.target.value }))}
+          className={addInputClass}
+        />
+      </label>
+      <label className={addLabelClass}>
+        <span>เผื่อเสีย (%)</span>
+        <input
+          type="number"
+          step="0.01"
+          value={addForm.wasteFactorPct}
+          onChange={(e) => setAddForm((f) => ({ ...f, wasteFactorPct: e.target.value }))}
+          className={addInputClass}
+        />
+      </label>
+      <div className="flex flex-col gap-1 text-xs">
+        <span className="text-slate-600">ปริมาณที่คิดได้</span>
+        {(() => {
+          const dv = driverValueOf(addForm.qtyBasis);
+          if (dv == null) {
+            return (
+              <span className="py-1.5 text-amber-700">
+                ตั้ง “{basisConfig(addForm.qtyBasis).measureLabel}” ในรายละเอียดโครงการก่อน
+              </span>
+            );
+          }
+          const q = previewTakeoffQty(Number(addForm.qtyCoefficient), Number(addForm.wasteFactorPct), dv);
+          return q == null ? (
+            <span className="py-1.5 text-slate-400">—</span>
+          ) : (
+            <span className="py-1.5 text-slate-500">
+              {dv} × {addForm.qtyCoefficient || 0} × (1+{addForm.wasteFactorPct || 0}%) ={" "}
+              <span className="font-semibold text-slate-800">
+                {q.toLocaleString("th-TH")} {addForm.unit}
+              </span>
+            </span>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
 /**
  * ฟอร์มเพิ่มบรรทัด BOQ — เรียงตามลำดับที่คิดจริง: ① รายการอะไร ② เท่าไร ③ ราคาเท่าไร
  * ยอดรวมของบรรทัดอยู่ข้างปุ่มบันทึก · หมายเหตุ/สูตรวัสดุย่อยพับไว้ (บรรทัดส่วนใหญ่ไม่ใช้)
  */
+/** กดเลือกวิธีคิดปริมาณ — "คิดจากค่าวัด" คงฐานเดิมถ้าเป็นค่าวัดอยู่แล้ว ไม่งั้นเริ่มที่ต่อพื้นที่ */
+function basisForMode(mode: QtyMode, current: QtyBasis): QtyBasis {
+  if (mode !== "DRIVER") return mode;
+  return qtyModeOf(current) === "DRIVER" ? current : "PER_AREA";
+}
+
 function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { showAddForm, setShowAddForm, submitAdd, materialOptions, addForm, selectMaterial, categoryOptions, setAddForm, unitsInUse, addHasRecipe, addDerivedPrice, driverValueOf, rebarOpen, setRebarOpen, rebarDia, setRebarDia, rebarLen, setRebarLen, addComponents, setAddComponents, materialById, editingItem, previewLineTotal, showNetPreview, previewNet, previewQty, recipeSources, addSheetRows, setAddSheetRows } = vm;
+  const { showAddForm, setShowAddForm, submitAdd, addForm, setAddForm, addHasRecipe, addDerivedPrice, addComponents, setAddComponents, materialById, editingItem, previewLineTotal, showNetPreview, previewNet, previewQty, recipeSources } = vm;
   const formRef = useRef<HTMLFormElement>(null);
   const [showNote, setShowNote] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -3565,7 +3845,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
     const differs = Number(current || 0) !== Number(catalogValue);
     return differs ? (
       <span className="text-[11px] text-amber-700">
-        แก้จากราคาคลัง {money(catalogValue)} ·{" "}
+        <span>แก้จากราคาคลัง {money(catalogValue)} ·{" "}</span>
         <button type="button" onClick={reset} className="underline underline-offset-2 hover:text-amber-900">
           คืนค่า
         </button>
@@ -3598,219 +3878,11 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
         </button>
       </div>
 
-      <AddStep n={1} title="รายการ">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
-          <label className={`${addLabelClass} sm:col-span-3`}>
-            <span>
-              วัสดุจากคลัง <span className="text-slate-400">(หรือเว้นว่างแล้วกรอกชื่อเอง)</span>
-            </span>
-            <SearchableSelect
-              options={materialOptions}
-              value={addForm.materialId}
-              onChange={selectMaterial}
-              placeholder="พิมพ์รหัส/ชื่อวัสดุ"
-              clearable
-            />
-          </label>
-          <label className={`${addLabelClass} sm:col-span-2`}>
-            หมวดงาน
-            <SearchableSelect
-              options={categoryOptions}
-              value={addForm.categoryId}
-              onChange={(next) => setAddForm((f) => ({ ...f, categoryId: next }))}
-              placeholder="พิมพ์รหัส/ชื่อหมวดงาน"
-            />
-          </label>
-        </div>
+      <AddItemStep vm={vm} material={material} />
 
-        {material ? (
-          // ผูกกับคลัง: ชื่อและหน่วยมาจากคลัง — โชว์เป็นข้อความแทนช่องสีเทาที่กดไม่ได้แต่ไม่บอกว่าทำไม
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-slate-600">
-              หน่วย: <span className="font-medium text-slate-800">{material.unit}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => selectMaterial("")}
-              title="เก็บชื่อ หน่วย และราคาที่เติมไว้ แต่บรรทัดนี้จะไม่ผูกกับคลังแล้ว (ไม่เตือนเมื่อราคาคลังเปลี่ยน)"
-              className="text-slate-500 underline underline-offset-2 hover:text-slate-800"
-            >
-              แก้ชื่อ/หน่วยเอง (ไม่ผูกกับคลัง)
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
-            <label className={`${addLabelClass} sm:col-span-3`}>
-              ชื่อรายการ
-              <input
-                value={addForm.name}
-                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="เช่น งานรื้อถอนผนังเดิม"
-                className={addInputClass}
-              />
-            </label>
-            <label className={`${addLabelClass} sm:col-span-2`}>
-              หน่วยนับ
-              {/* ใช้ตัวเดียวกับหน้าวัสดุ/ค่าแรง — กันหน่วยสะกดเพี้ยน เช่น "ตรม." กับ "ตร.ม." */}
-              <UnitSelect
-                value={addForm.unit}
-                onChange={(unit) => setAddForm((f) => ({ ...f, unit }))}
-                options={UNIT_OPTIONS}
-                inUse={unitsInUse}
-              />
-            </label>
-          </div>
-        )}
-      </AddStep>
+      <AddQuantityStep vm={vm} mode={mode} />
 
-      <AddStep n={2} title="ปริมาณ">
-        <div role="radiogroup" aria-label="วิธีคิดปริมาณ" className="inline-flex w-fit overflow-hidden rounded-md border border-slate-300 text-sm">
-          {(
-            [
-              ["MANUAL", "กรอกเอง"],
-              ["SHEET", "ถอดจากแบบ"],
-              ["DRIVER", "คิดจากค่าวัดโครงการ"],
-            ] as [QtyMode, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={mode === value}
-              onClick={() =>
-                setAddForm((f) => ({
-                  ...f,
-                  qtyBasis: value === "DRIVER" ? (qtyModeOf(f.qtyBasis) === "DRIVER" ? f.qtyBasis : "PER_AREA") : value,
-                }))
-              }
-              className={`border-r border-slate-300 px-3 py-1.5 last:border-r-0 ${
-                mode === value ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {mode === "MANUAL" && (
-          <>
-            <label className={`${addLabelClass} w-48`}>
-              จำนวน{addForm.unit && ` (${addForm.unit})`}
-              <input
-                type="number"
-                step="any"
-                value={addForm.quantity}
-                onChange={(e) => setAddForm((f) => ({ ...f, quantity: e.target.value }))}
-                className={addInputClass}
-              />
-            </label>
-            {/* เครื่องมือคิดน้ำหนักเหล็กอยู่ใต้ช่องจำนวนที่มันเติมค่าให้ — โชว์เฉพาะโหมดกรอกเอง
-                เพราะโหมดอื่นปริมาณมาจากสูตร การใส่ทับจะล้างสูตรทิ้ง */}
-            <RebarCalculator
-              open={rebarOpen}
-              onToggle={() => setRebarOpen((v) => !v)}
-              diameterMm={rebarDia}
-              onDiameterChange={setRebarDia}
-              lengthM={rebarLen}
-              onLengthChange={setRebarLen}
-              unit={addForm.unit}
-              // ผูกวัสดุจากแคตตาล็อกอยู่ = หน่วยนับมาจากคลัง แก้ให้ไม่ได้ ได้แค่เตือน
-              onUnitChange={addForm.materialId ? undefined : (unit) => setAddForm((f) => ({ ...f, unit }))}
-              onInsert={(kg) => {
-                setAddForm((f) => ({ ...f, quantity: String(kg) }));
-                setRebarOpen(false);
-              }}
-            />
-          </>
-        )}
-
-        {mode === "SHEET" &&
-          (addForm.unit ? (
-            <SheetQuantityBlock
-              lineName={addForm.name}
-              unit={addForm.unit}
-              rows={addSheetRows}
-              waste={addForm.wasteFactorPct}
-              onChange={(rows, waste) => {
-                setAddSheetRows(rows);
-                setAddForm((f) => ({ ...f, wasteFactorPct: waste }));
-              }}
-              onUseManual={(q) =>
-                setAddForm((f) => ({ ...f, qtyBasis: "MANUAL", quantity: q == null ? f.quantity : String(q) }))
-              }
-            />
-          ) : (
-            <span className="text-xs text-amber-700">เลือกวัสดุหรือหน่วยนับในขั้นที่ 1 ก่อน แล้วค่อยเปิดใบถอดแบบ</span>
-          ))}
-
-        {mode === "DRIVER" && (
-          <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-4">
-            <label className={addLabelClass}>
-              คิดจาก
-              <select
-                value={addForm.qtyBasis}
-                onChange={(e) => setAddForm((f) => ({ ...f, qtyBasis: e.target.value as QtyBasis }))}
-                className={addInputClass}
-              >
-                {DRIVER_BASES.map((b) => {
-                  const dv = driverValueOf(b.value);
-                  return (
-                    <option key={b.value} value={b.value}>
-                      {b.measureLabel} {dv == null ? "(ยังไม่ได้ตั้ง)" : `= ${dv.toLocaleString("th-TH")}`}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <label className={addLabelClass}>
-              {basisConfig(addForm.qtyBasis).perLabel}
-              <input
-                type="number"
-                step="0.0001"
-                value={addForm.qtyCoefficient}
-                onChange={(e) => setAddForm((f) => ({ ...f, qtyCoefficient: e.target.value }))}
-                className={addInputClass}
-              />
-            </label>
-            <label className={addLabelClass}>
-              เผื่อเสีย (%)
-              <input
-                type="number"
-                step="0.01"
-                value={addForm.wasteFactorPct}
-                onChange={(e) => setAddForm((f) => ({ ...f, wasteFactorPct: e.target.value }))}
-                className={addInputClass}
-              />
-            </label>
-            <div className="flex flex-col gap-1 text-xs">
-              <span className="text-slate-600">ปริมาณที่คิดได้</span>
-              {(() => {
-                const dv = driverValueOf(addForm.qtyBasis);
-                if (dv == null) {
-                  return (
-                    <span className="py-1.5 text-amber-700">
-                      ตั้ง “{basisConfig(addForm.qtyBasis).measureLabel}” ในรายละเอียดโครงการก่อน
-                    </span>
-                  );
-                }
-                const q = previewTakeoffQty(Number(addForm.qtyCoefficient), Number(addForm.wasteFactorPct), dv);
-                return q == null ? (
-                  <span className="py-1.5 text-slate-400">—</span>
-                ) : (
-                  <span className="py-1.5 text-slate-500">
-                    {dv} × {addForm.qtyCoefficient || 0} × (1+{addForm.wasteFactorPct || 0}%) ={" "}
-                    <span className="font-semibold text-slate-800">
-                      {q.toLocaleString("th-TH")} {addForm.unit}
-                    </span>
-                  </span>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-      </AddStep>
-
-      <AddStep n={3} title={`ราคาต่อหน่วย${addForm.unit ? ` (บาท/${addForm.unit})` : ""}`}>
+      <AddStep n={3} title={addForm.unit ? `ราคาต่อหน่วย (บาท/${addForm.unit})` : "ราคาต่อหน่วย"}>
         <MaterialComponentsEditor
           rows={addComponents}
           onChange={setAddComponents}
@@ -3844,7 +3916,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
             )}
           </label>
           <label className={addLabelClass}>
-            ค่าแรง
+            <span>ค่าแรง</span>
             <input
               type="number"
               step="any"
@@ -3857,7 +3929,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
             )}
           </label>
           <div className={addLabelClass}>
-            รวมต่อหน่วย
+            <span>รวมต่อหน่วย</span>
             <span className="rounded-md border border-transparent px-2.5 py-1.5 text-sm font-medium text-slate-800 tabular-nums">
               {money(unitTotal)}
             </span>
@@ -3875,7 +3947,7 @@ function BoqAddForm({ vm }: Readonly<{ vm: ProjectVM }>) {
         </div>
         {noteOpen && (
           <label className={addLabelClass}>
-            หมายเหตุ
+            <span>หมายเหตุ</span>
             <input
               autoFocus={showNote && addForm.note === ""}
               value={addForm.note}
@@ -3932,6 +4004,13 @@ const looksLikeTile = (name: string) => /กระเบื้อง|แกร�
  * ลิงก์ตัวคิดกระเบื้องใต้จำนวน — ใช้อยู่ = บอกจำนวนแผ่น/กล่องที่ได้ · ยังไม่ใช้ = ชวนเฉพาะบรรทัดที่ชื่อเป็นงานกระเบื้อง
  * (บรรทัด ตร.ม. อื่นเปิดได้จากแผงแก้ไข ไม่โชว์ทุกบรรทัดให้รก)
  */
+/** ป้ายปุ่มตัวคิดกระเบื้องของบรรทัด: "120 แผ่น · 15 กล่อง" · ค่าที่กรอกใช้ไม่ได้ = ชื่อตัวคิดเฉย ๆ */
+function tileButtonLabel(r: ReturnType<typeof tileTakeoff>): string {
+  if (r.errors.length > 0) return "ตัวคิดกระเบื้อง";
+  const boxes = r.boxes != null ? ` · ${r.boxes.toLocaleString("th-TH")} กล่อง` : "";
+  return `${r.pieces.toLocaleString("th-TH")} แผ่น${boxes}`;
+}
+
 function TileLink({ item, onOpen }: Readonly<{ item: BoqItemDto; onOpen: () => void }>) {
   if (!isAreaUnit(item.unit)) return null;
   const c = item.tileCalc;
@@ -3942,7 +4021,7 @@ function TileLink({ item, onOpen }: Readonly<{ item: BoqItemDto; onOpen: () => v
       rows: item.qtyBasis === "SHEET" ? takeoffInputsOf(item.takeoffRows) : null,
       area: Number(item.quantity) / (1 + Number(item.wasteFactorPct ?? 0) / 100),
     });
-    label = r.errors.length > 0 ? "ตัวคิดกระเบื้อง" : `${r.pieces.toLocaleString("th-TH")} แผ่น${r.boxes != null ? ` · ${r.boxes.toLocaleString("th-TH")} กล่อง` : ""}`;
+    label = tileButtonLabel(r);
   }
   return (
     <button
@@ -4029,7 +4108,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
           {missingDriverLabels.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
               <span>
-                ⚠ บางบรรทัดยังไม่ได้ตั้งค่าวัด:{" "}
+                <span>⚠ บางบรรทัดยังไม่ได้ตั้งค่าวัด:{" "}</span>
                 <span className="font-medium">{missingDriverLabels.join(" · ")}</span> — ปริมาณจะยังไม่คิด/ไม่สเกลจนกว่าจะกรอก
               </span>
               <button
@@ -4325,7 +4404,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
                         const arrow =
                           "rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-800 disabled:pointer-events-none disabled:opacity-25";
                         return (
-                          <div className="flex flex-col" role="group" aria-label="เลื่อนลำดับ">
+                          <fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" aria-label="เลื่อนลำดับ">
                             <button
                               type="button"
                               className={arrow}
@@ -4346,7 +4425,7 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
                             >
                               <ChevronDown size={14} />
                             </button>
-                          </div>
+                          </fieldset>
                         );
                       })()}
                       {narrow ? (
@@ -4452,233 +4531,240 @@ function BoqTable({ vm }: Readonly<{ vm: ProjectVM }>) {
 
 /** รายละเอียดโครงการ: ดูอย่างเดียว หรือฟอร์มแก้ไข */
 function ProjectInfoCard({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { showEditInfo, infoForm, setInfoForm, handleSaveInfo, savingInfo, setShowEditInfo, project } = vm;
+  return vm.showEditInfo ? <ProjectInfoEdit vm={vm} /> : <ProjectInfoView vm={vm} />;
+}
+
+/** แก้รายละเอียดโครงการ (ชื่อ · ที่อยู่หน้างาน · ค่าวัด · ช่องเปิด · วันที่) */
+function ProjectInfoEdit({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { infoForm, setInfoForm, handleSaveInfo, savingInfo, setShowEditInfo, project } = vm;
   const { infoOpenings, setInfoOpenings, showOpenings, setShowOpenings } = vm;
   // รายการที่จะบันทึก: ที่แก้ในฟอร์มนี้ ไม่งั้นของเดิมในโครงการ
   const openings = infoOpenings ?? project.openings ?? [];
   const wallInput = infoForm.wallAreaSqm.trim() === "" ? null : Number(infoForm.wallAreaSqm);
   return (
-    <>
-      {showEditInfo ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
-            <span>ชื่อโครงการ</span>
-            <input
-              value={infoForm.name}
-              onChange={(e) => setInfoForm((f) => ({ ...f, name: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
-            <span>สถานที่ก่อสร้าง / ที่อยู่หน้างาน</span>
-            <input
-              value={infoForm.siteAddress}
-              onChange={(e) => setInfoForm((f) => ({ ...f, siteAddress: e.target.value }))}
-              placeholder="เช่น 99/1 ต.ในเมือง อ.เมือง จ.ขอนแก่น"
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            />
-          </label>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
+        <span>ชื่อโครงการ</span>
+        <input
+          value={infoForm.name}
+          onChange={(e) => setInfoForm((f) => ({ ...f, name: e.target.value }))}
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
+        <span>สถานที่ก่อสร้าง / ที่อยู่หน้างาน</span>
+        <input
+          value={infoForm.siteAddress}
+          onChange={(e) => setInfoForm((f) => ({ ...f, siteAddress: e.target.value }))}
+          placeholder="เช่น 99/1 ต.ในเมือง อ.เมือง จ.ขอนแก่น"
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-700">
+        <span>พื้นที่ใช้สอย (ตร.ม.)</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={infoForm.areaSqm}
+          onChange={(e) => setInfoForm((f) => ({ ...f, areaSqm: e.target.value }))}
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+      <div className="hidden sm:block" />
+      {/* ค่าวัดสำหรับถอดปริมาณ (Phase 2) — ตัวขับของบรรทัด BOQ ที่ผูกกับผนัง/รอบรูป/ปริมาตร */}
+      <div className="sm:col-span-2 rounded-md bg-slate-50 border border-slate-200 p-2.5">
+        <p className="text-xs font-medium text-slate-500 mb-2">
+          ค่าวัดสำหรับถอดปริมาณ{" "}
+          <span className="font-normal text-slate-400">(ใช้กับบรรทัด BOQ แบบ “ต่อผนัง/รอบรูป/ปริมาตร/ห้องน้ำ/ชั้น”)</span>
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>พื้นที่ใช้สอย (ตร.ม.)</span>
+            <span>พื้นที่ผนัง (ตร.ม.)</span>
             <input
               type="number"
               min="0"
               step="0.01"
-              value={infoForm.areaSqm}
-              onChange={(e) => setInfoForm((f) => ({ ...f, areaSqm: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-            />
-          </label>
-          <div className="hidden sm:block" />
-          {/* ค่าวัดสำหรับถอดปริมาณ (Phase 2) — ตัวขับของบรรทัด BOQ ที่ผูกกับผนัง/รอบรูป/ปริมาตร */}
-          <div className="sm:col-span-2 rounded-md bg-slate-50 border border-slate-200 p-2.5">
-            <p className="text-xs font-medium text-slate-500 mb-2">
-              ค่าวัดสำหรับถอดปริมาณ{" "}
-              <span className="font-normal text-slate-400">(ใช้กับบรรทัด BOQ แบบ “ต่อผนัง/รอบรูป/ปริมาตร/ห้องน้ำ/ชั้น”)</span>
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>พื้นที่ผนัง (ตร.ม.)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={infoForm.wallAreaSqm}
-                  onChange={(e) => setInfoForm((f) => ({ ...f, wallAreaSqm: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>ความยาวรอบรูป (ม.)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={infoForm.perimeterM}
-                  onChange={(e) => setInfoForm((f) => ({ ...f, perimeterM: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>ปริมาตรคอนกรีต (ลบ.ม.)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.001"
-                  value={infoForm.concreteVolumeM3}
-                  onChange={(e) => setInfoForm((f) => ({ ...f, concreteVolumeM3: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>พื้นที่ตั้งอาคาร/หลังคา (ตร.ม.)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={infoForm.footprintSqm}
-                  onChange={(e) => setInfoForm((f) => ({ ...f, footprintSqm: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>จำนวนห้องน้ำ (ห้อง)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={infoForm.bathrooms}
-                  onChange={(e) => setInfoForm((f) => ({ ...f, bathrooms: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-slate-700">
-                <span>จำนวนชั้น (ชั้น)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={infoForm.floors}
-                  onChange={(e) => setInfoForm((f) => ({ ...f, floors: e.target.value }))}
-                  className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-                />
-              </label>
-            </div>
-            {/* ช่องเปิดหักจากพื้นที่ผนัง — งานก่อ/ฉาบ/ทาสีทุกบรรทัดที่คิดต่อผนังลดตาม */}
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-xs">
-              <span className="text-slate-700">ช่องเปิดประตู/หน้าต่าง</span>
-              <span className="text-slate-800 tabular-nums">
-                {openings.length > 0
-                  ? `${openingsTotal(openings).toLocaleString("th-TH", { minimumFractionDigits: 2 })} ตร.ม. (${openings.reduce((n, o) => n + o.count, 0)} ช่อง)`
-                  : "ยังไม่ได้ใส่ — ผนังคิดเต็มพื้นที่"}
-              </span>
-              <Button variant="ghost" size="sm" onClick={() => setShowOpenings(true)}>
-                {openings.length > 0 ? "แก้รายการ" : "ใส่รายการช่องเปิด"}
-              </Button>
-              {showOpenings && (
-                <OpeningsDialog
-                  initial={openings}
-                  wallArea={wallInput}
-                  onApply={(next) => {
-                    setInfoOpenings(next);
-                    setShowOpenings(false);
-                  }}
-                  onClose={() => setShowOpenings(false)}
-                />
-              )}
-            </div>
-          </div>
-          <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>วันเริ่มก่อสร้าง</span>
-            <DateInput
-              value={infoForm.startDate}
-              onChange={(v) => setInfoForm((f) => ({ ...f, startDate: v }))}
+              value={infoForm.wallAreaSqm}
+              onChange={(e) => setInfoForm((f) => ({ ...f, wallAreaSqm: e.target.value }))}
               className="border border-slate-300 rounded-md px-2 py-1 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-700">
-            <span>วันคาดว่าแล้วเสร็จ</span>
-            <DateInput
-              value={infoForm.targetEndDate}
-              onChange={(v) => setInfoForm((f) => ({ ...f, targetEndDate: v }))}
+            <span>ความยาวรอบรูป (ม.)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={infoForm.perimeterM}
+              onChange={(e) => setInfoForm((f) => ({ ...f, perimeterM: e.target.value }))}
               className="border border-slate-300 rounded-md px-2 py-1 text-sm"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
-            <span>หมายเหตุ / ขอบเขตงาน</span>
-            <textarea
-              rows={2}
-              value={infoForm.description}
-              onChange={(e) => setInfoForm((f) => ({ ...f, description: e.target.value }))}
-              className="border border-slate-300 rounded-md px-2 py-1 text-sm resize-y"
+          <label className="flex flex-col gap-1 text-xs text-slate-700">
+            <span>ปริมาตรคอนกรีต (ลบ.ม.)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.001"
+              value={infoForm.concreteVolumeM3}
+              onChange={(e) => setInfoForm((f) => ({ ...f, concreteVolumeM3: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
             />
           </label>
-          <div className="sm:col-span-2 flex gap-2 border-t border-slate-100 pt-3">
-            <Button size="sm" onClick={handleSaveInfo} disabled={savingInfo || !infoForm.name.trim()}>
-              <Check size={14} /> บันทึก
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowEditInfo(false)}>
-              <X size={14} /> ยกเลิก
-            </Button>
-          </div>
+          <label className="flex flex-col gap-1 text-xs text-slate-700">
+            <span>พื้นที่ตั้งอาคาร/หลังคา (ตร.ม.)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={infoForm.footprintSqm}
+              onChange={(e) => setInfoForm((f) => ({ ...f, footprintSqm: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-slate-700">
+            <span>จำนวนห้องน้ำ (ห้อง)</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={infoForm.bathrooms}
+              onChange={(e) => setInfoForm((f) => ({ ...f, bathrooms: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-slate-700">
+            <span>จำนวนชั้น (ชั้น)</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={infoForm.floors}
+              onChange={(e) => setInfoForm((f) => ({ ...f, floors: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            />
+          </label>
         </div>
-      ) : (
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
-          <div>
-            <dt className="text-xs text-slate-500">สถานที่ก่อสร้าง</dt>
-            <dd className="text-slate-800">{project.siteAddress || "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-slate-500">พื้นที่ใช้สอย</dt>
-            <dd className="text-slate-800">
-              {project.areaSqm
-                ? `${Number(project.areaSqm).toLocaleString("th-TH")} ตร.ม.`
-                : "—"}
-            </dd>
-          </div>
-          {(project.wallAreaSqm ||
-            project.perimeterM ||
-            project.concreteVolumeM3 ||
-            project.footprintSqm ||
-            project.bathrooms != null ||
-            project.floors != null) && (
-            <div className="sm:col-span-2">
-              <dt className="text-xs text-slate-500">ค่าวัดถอดปริมาณ</dt>
-              <dd className="text-slate-800">
-                {[
-                  project.wallAreaSqm &&
-                    (project.openingAreaSqm
-                      ? `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} − ช่องเปิด ${Number(project.openingAreaSqm).toLocaleString("th-TH")} = ${(Number(project.wallAreaSqm) - Number(project.openingAreaSqm)).toLocaleString("th-TH", { maximumFractionDigits: 2 })} ตร.ม.`
-                      : `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} ตร.ม.`),
-                  project.perimeterM &&
-                    `รอบรูป ${Number(project.perimeterM).toLocaleString("th-TH")} ม.`,
-                  project.concreteVolumeM3 &&
-                    `ปริมาตร ${Number(project.concreteVolumeM3).toLocaleString("th-TH")} ลบ.ม.`,
-                  project.footprintSqm &&
-                    `ตั้งอาคาร ${Number(project.footprintSqm).toLocaleString("th-TH")} ตร.ม.`,
-                  project.bathrooms != null && `ห้องน้ำ ${project.bathrooms} ห้อง`,
-                  project.floors != null && `${project.floors} ชั้น`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </dd>
-            </div>
+        {/* ช่องเปิดหักจากพื้นที่ผนัง — งานก่อ/ฉาบ/ทาสีทุกบรรทัดที่คิดต่อผนังลดตาม */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-xs">
+          <span className="text-slate-700">ช่องเปิดประตู/หน้าต่าง</span>
+          <span className="text-slate-800 tabular-nums">
+            {openings.length > 0
+              ? `${openingsTotal(openings).toLocaleString("th-TH", { minimumFractionDigits: 2 })} ตร.ม. (${openings.reduce((n, o) => n + o.count, 0)} ช่อง)`
+              : "ยังไม่ได้ใส่ — ผนังคิดเต็มพื้นที่"}
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setShowOpenings(true)}>
+            {openings.length > 0 ? "แก้รายการ" : "ใส่รายการช่องเปิด"}
+          </Button>
+          {showOpenings && (
+            <OpeningsDialog
+              initial={openings}
+              wallArea={wallInput}
+              onApply={(next) => {
+                setInfoOpenings(next);
+                setShowOpenings(false);
+              }}
+              onClose={() => setShowOpenings(false)}
+            />
           )}
-          <div>
-            <dt className="text-xs text-slate-500">วันเริ่มก่อสร้าง</dt>
-            <dd className="text-slate-800">{formatDateOnly(project.startDate)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-slate-500">วันคาดว่าแล้วเสร็จ</dt>
-            <dd className="text-slate-800">{formatDateOnly(project.targetEndDate)}</dd>
-          </div>
-          <div className="sm:col-span-2">
-            <dt className="text-xs text-slate-500">หมายเหตุ / ขอบเขตงาน</dt>
-            <dd className="text-slate-800 whitespace-pre-wrap">{project.description || "—"}</dd>
-          </div>
-        </dl>
+        </div>
+      </div>
+      <label className="flex flex-col gap-1 text-xs text-slate-700">
+        <span>วันเริ่มก่อสร้าง</span>
+        <DateInput
+          value={infoForm.startDate}
+          onChange={(v) => setInfoForm((f) => ({ ...f, startDate: v }))}
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-700">
+        <span>วันคาดว่าแล้วเสร็จ</span>
+        <DateInput
+          value={infoForm.targetEndDate}
+          onChange={(v) => setInfoForm((f) => ({ ...f, targetEndDate: v }))}
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-700 sm:col-span-2">
+        <span>หมายเหตุ / ขอบเขตงาน</span>
+        <textarea
+          rows={2}
+          value={infoForm.description}
+          onChange={(e) => setInfoForm((f) => ({ ...f, description: e.target.value }))}
+          className="border border-slate-300 rounded-md px-2 py-1 text-sm resize-y"
+        />
+      </label>
+      <div className="sm:col-span-2 flex gap-2 border-t border-slate-100 pt-3">
+        <Button size="sm" onClick={handleSaveInfo} disabled={savingInfo || !infoForm.name.trim()}>
+          <Check size={14} /> บันทึก
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setShowEditInfo(false)}>
+          <X size={14} /> ยกเลิก
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** รายละเอียดโครงการแบบอ่าน */
+function ProjectInfoView({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { project } = vm;
+  return (
+    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+      <div>
+        <dt className="text-xs text-slate-500">สถานที่ก่อสร้าง</dt>
+        <dd className="text-slate-800">{project.siteAddress || "—"}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-slate-500">พื้นที่ใช้สอย</dt>
+        <dd className="text-slate-800">
+          {project.areaSqm
+            ? `${Number(project.areaSqm).toLocaleString("th-TH")} ตร.ม.`
+            : "—"}
+        </dd>
+      </div>
+      {(project.wallAreaSqm ||
+        project.perimeterM ||
+        project.concreteVolumeM3 ||
+        project.footprintSqm ||
+        project.bathrooms != null ||
+        project.floors != null) && (
+        <div className="sm:col-span-2">
+          <dt className="text-xs text-slate-500">ค่าวัดถอดปริมาณ</dt>
+          <dd className="text-slate-800">
+            {[
+              project.wallAreaSqm &&
+                (project.openingAreaSqm
+                  ? `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} − ช่องเปิด ${Number(project.openingAreaSqm).toLocaleString("th-TH")} = ${(Number(project.wallAreaSqm) - Number(project.openingAreaSqm)).toLocaleString("th-TH", { maximumFractionDigits: 2 })} ตร.ม.`
+                  : `ผนัง ${Number(project.wallAreaSqm).toLocaleString("th-TH")} ตร.ม.`),
+              project.perimeterM &&
+                `รอบรูป ${Number(project.perimeterM).toLocaleString("th-TH")} ม.`,
+              project.concreteVolumeM3 &&
+                `ปริมาตร ${Number(project.concreteVolumeM3).toLocaleString("th-TH")} ลบ.ม.`,
+              project.footprintSqm &&
+                `ตั้งอาคาร ${Number(project.footprintSqm).toLocaleString("th-TH")} ตร.ม.`,
+              project.bathrooms != null && `ห้องน้ำ ${project.bathrooms} ห้อง`,
+              project.floors != null && `${project.floors} ชั้น`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </dd>
+        </div>
       )}
-    </>
+      <div>
+        <dt className="text-xs text-slate-500">วันเริ่มก่อสร้าง</dt>
+        <dd className="text-slate-800">{formatDateOnly(project.startDate)}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-slate-500">วันคาดว่าแล้วเสร็จ</dt>
+        <dd className="text-slate-800">{formatDateOnly(project.targetEndDate)}</dd>
+      </div>
+      <div className="sm:col-span-2">
+        <dt className="text-xs text-slate-500">หมายเหตุ / ขอบเขตงาน</dt>
+        <dd className="text-slate-800 whitespace-pre-wrap">{project.description || "—"}</dd>
+      </div>
+    </dl>
   );
 }
 
@@ -4913,8 +4999,65 @@ const money2 = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits:
  * ยังไม่ลงนามสักฉบับ = มีแต่งานเอกสาร จึงแสดงรายการสัญญาตรง ๆ ไม่มีหัวการ์ดกับมุมมองย่อย
  * มีสัญญาที่ลงนามหลายฉบับ (เช่น ออกแบบ + ก่อสร้างแยกกัน) = หัวการ์ดกลายเป็นช่องเลือกฉบับ
  */
+/** มูลค่าสัญญา (และที่เปลี่ยนไปเพราะงานเพิ่ม-ลด) */
+function ContractValueText({ original, current, delta }: Readonly<{ original: number | null; current: number | null; delta: number }>) {
+  if (original == null) return <span className="text-slate-500">สัญญาเก่าที่ไม่ได้บันทึกมูลค่าไว้</span>;
+  if (Math.abs(delta) < 0.01 || current == null) {
+    return (
+      <>
+        มูลค่าสัญญา <b className="font-semibold text-slate-800">{money2(original)}</b> บาท
+      </>
+    );
+  }
+  return (
+    <>
+      มูลค่าตามสัญญา {money2(original)} → ปัจจุบัน <b className="font-semibold text-slate-800">{money2(current)}</b> บาท{" "}
+      <span className={delta > 0 ? "text-emerald-700" : "text-red-700"}>
+        (งานเพิ่ม-ลด {delta > 0 ? "+" : "−"}
+        {money2(Math.abs(delta))})
+      </span>
+    </>
+  );
+}
+
+/** เลือกสัญญาที่ลงนามแล้ว (มีฉบับเดียว = แสดงเลขที่เฉย ๆ) + วันลงนาม */
+function ActiveContractPicker({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { signedContracts, activeContract, setContractParams } = vm;
+  if (!activeContract) return null;
+  return (
+    <div className="min-w-0">
+      {signedContracts.length > 1 ? (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <span>สัญญา</span>
+          <select
+            value={activeContract.id}
+            onChange={(e) => setContractParams({ contract: e.target.value })}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-medium text-slate-800"
+          >
+            {signedContracts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.contractNo}
+                {c.templateName ? ` · ${c.templateName}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className="text-sm text-slate-700">
+          สัญญา <span className="font-semibold text-slate-800">{activeContract.contractNo}</span>
+        </p>
+      )}
+      <p className="mt-0.5 text-xs text-slate-500">
+        ลงนาม {formatDateTime(activeContract.signedAt)}
+        {/* มีช่องเลือกฉบับ = ชื่อแม่แบบอยู่ในตัวเลือกแล้ว ไม่พิมพ์ซ้ำ */}
+        {signedContracts.length === 1 && activeContract.templateName && ` · ${activeContract.templateName}`}
+      </p>
+    </div>
+  );
+}
+
 function ContractFinanceTab({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { contracts, contractMoney, projectId, signedContracts, activeContract, contractView, setContractParams, silentRefresh, goTab } = vm;
+  const { contracts, contractMoney, projectId, activeContract, contractView, setContractParams, silentRefresh, goTab } = vm;
 
   if (!activeContract) {
     return (
@@ -4942,34 +5085,7 @@ function ContractFinanceTab({ vm }: Readonly<{ vm: ProjectVM }>) {
     <div id="contracts-section" className="scroll-mt-16">
       <div className="mb-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            {signedContracts.length > 1 ? (
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <span>สัญญา</span>
-                <select
-                  value={activeContract.id}
-                  onChange={(e) => setContractParams({ contract: e.target.value })}
-                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-medium text-slate-800"
-                >
-                  {signedContracts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.contractNo}
-                      {c.templateName ? ` · ${c.templateName}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <p className="text-sm text-slate-700">
-                สัญญา <span className="font-semibold text-slate-800">{activeContract.contractNo}</span>
-              </p>
-            )}
-            <p className="mt-0.5 text-xs text-slate-500">
-              ลงนาม {formatDateTime(activeContract.signedAt)}
-              {/* มีช่องเลือกฉบับ = ชื่อแม่แบบอยู่ในตัวเลือกแล้ว ไม่พิมพ์ซ้ำ */}
-              {signedContracts.length === 1 && activeContract.templateName && ` · ${activeContract.templateName}`}
-            </p>
-          </div>
+          <ActiveContractPicker vm={vm} />
           <a
             href={pdfViewerPath("contract", projectId, activeContract.id)}
             target="_blank"
@@ -4980,26 +5096,12 @@ function ContractFinanceTab({ vm }: Readonly<{ vm: ProjectVM }>) {
           </a>
         </div>
         <p className="mt-2 text-sm text-slate-700 tabular-nums">
-          {original == null ? (
-            <span className="text-slate-500">สัญญาเก่าที่ไม่ได้บันทึกมูลค่าไว้</span>
-          ) : Math.abs(delta) >= 0.01 && current != null ? (
-            <>
-              มูลค่าตามสัญญา {money2(original)} → ปัจจุบัน <b className="font-semibold text-slate-800">{money2(current)}</b> บาท{" "}
-              <span className={delta > 0 ? "text-emerald-700" : "text-red-700"}>
-                (งานเพิ่ม-ลด {delta > 0 ? "+" : "−"}
-                {money2(Math.abs(delta))})
-              </span>
-            </>
-          ) : (
-            <>
-              มูลค่าสัญญา <b className="font-semibold text-slate-800">{money2(original)}</b> บาท
-            </>
-          )}
+          <ContractValueText original={original} current={current} delta={delta} />
         </p>
       </div>
 
       {/* มุมมองย่อย — ปุ่มแคปซูล ไม่ใช่แท็บซ้อนแท็บ (เส้นใต้ซ้อนสองชั้นอ่านยาก) */}
-      <div role="group" aria-label="เรื่องของสัญญา" className="mb-3 flex flex-wrap gap-1.5">
+      <fieldset aria-label="เรื่องของสัญญา" className="mb-3 flex min-w-0 flex-wrap gap-1.5">
         {views.map((v) => {
           const on = v.key === contractView;
           return (
@@ -5016,7 +5118,7 @@ function ContractFinanceTab({ vm }: Readonly<{ vm: ProjectVM }>) {
             </button>
           );
         })}
-      </div>
+      </fieldset>
 
       {contractView === "payments" &&
         (legacy ? (
@@ -5221,10 +5323,10 @@ function OwnerChoice({
 }
 
 /** หัวโครงการ: ชื่อ/สถานะ/ผู้ติดต่อ + ผูกลูกค้า/คำขอ/ออกลิงก์เข้าใช้ + ปุ่มยกเลิกโครงการ */
-function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
-  const { project, isCustom, currentVersion, editable, contactName, contactEmail, contactPhone, differentRequester, lead, pendingLeadCount, openCustomerSearch, handleIssueAccessLink, issuingLink, openCreateCustomer, openLeadPicker, showLeadPicker, loadingLeads, unlinkedLeads, linkingLead, handleLinkLead, setShowLeadPicker, showCreateCustomer, accessLinkForm, setAccessLinkForm, setShowCreateCustomer, accessLink, copyAccessLink, linkCopied, showCustomerSearch, customerQuery, setCustomerQuery, searchingCustomers, customerResults, assigningCustomer, handleAssignCustomer, setShowCustomerSearch, nextStatuses, handleTransition, transitioning } = vm;
-  // "สร้างลูกค้าใหม่" ใช้กับโครงการที่ยังไม่มีลูกค้าเท่านั้น (ออกลิงก์ตอนผูกอยู่ เซิร์ฟเวอร์ใช้ลูกค้าเดิม)
-  const customerPicker = (embedded: boolean) => (
+/** กล่องเลือก/เปลี่ยนลูกค้าของโครงการ — "สร้างลูกค้าใหม่" ใช้กับโครงการที่ยังไม่มีลูกค้าเท่านั้น (ออกลิงก์ตอนผูกอยู่ เซิร์ฟเวอร์ใช้ลูกค้าเดิม) */
+function ProjectCustomerPicker({ vm, embedded }: Readonly<{ vm: ProjectVM; embedded: boolean }>) {
+  const { project, openCreateCustomer, customerQuery, setCustomerQuery, searchingCustomers, customerResults, assigningCustomer, handleAssignCustomer, setShowCustomerSearch } = vm;
+  return (
     <CustomerPicker
       embedded={embedded}
       className={embedded ? "" : "mt-2"}
@@ -5240,260 +5342,274 @@ function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
       onClose={() => setShowCustomerSearch(false)}
     />
   );
+}
+
+/** การ์ดผู้ติดต่อ (ผูกลูกค้าแล้ว หรือมีแค่คำขอ): ชื่อเด่น ช่องทางติดต่อ ที่มาของงาน */
+function ProjectContactCard({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { project, contactName, contactEmail, contactPhone, differentRequester, lead, openCustomerSearch, handleIssueAccessLink, issuingLink, openCreateCustomer, openLeadPicker, showCustomerSearch } = vm;
   return (
-    <>
-      <div className="flex items-start justify-between mb-4 mt-3">
-        <div>
-          <p className="text-sm text-slate-500">{project.projectNo}</p>
-          <h1 className="text-2xl font-semibold text-slate-800">{project.name}</h1>
-          <div className="flex items-center flex-wrap gap-2 mt-1.5 text-sm text-slate-500">
-            <span className={badgeClass(STATUS_COLOR[project.status])}>
-              {STATUS_LABEL[project.status]}
-            </span>
-            {isCustom && <span className={badgeClass("indigo")}>กำหนดเอง</span>}
-            <span>· เวอร์ชัน {currentVersion.versionNo}</span>
-            {!editable && (
-              <span className="text-slate-500">(ส่งใบเสนอราคาแล้ว — แก้ไขจะสร้างเวอร์ชันใหม่)</span>
+    // E: ผูกแล้ว (หรือมีแค่คำขอ) — การ์ดคน: ชื่อเด่น ช่องทางติดต่อเป็นแถว ที่มาของงานเป็นบรรทัดเล็กล่าง
+    <div className="mt-3 max-w-xl overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5">
+        <div className="flex min-w-0 items-start gap-3">
+          <Avatar name={contactName ?? ""} src={project.customer?.avatarUrl} size={36} />
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500">
+              {project.customer ? "ลูกค้า" : "ผู้ยื่นคำขอ · ยังไม่มีบัญชีลูกค้า"}
+            </p>
+            <p className="truncate font-semibold text-slate-800">{contactName}</p>
+            {(contactEmail || contactPhone) && (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {contactEmail && (
+                  <InfoChip>
+                    <Mail size={12} className="text-brand" /> {contactEmail}
+                  </InfoChip>
+                )}
+                {contactPhone && (
+                  <InfoChip>
+                    <Phone size={12} className="text-brand" /> {contactPhone}
+                  </InfoChip>
+                )}
+              </div>
+            )}
+            {/* คนยื่นคำขอไม่ใช่เจ้าของบัญชีลูกค้า — ต้องบอก ไม่งั้นข้อมูลหายไปตอนรวมการ์ด */}
+            {differentRequester && (
+              <p className="mt-1.5 text-xs text-slate-500">
+                ผู้ยื่นคำขอ: <span className="text-slate-700">{lead!.name}</span>
+                {lead!.email && lead!.email !== contactEmail ? ` (${lead!.email})` : ""}
+              </p>
+            )}
+            {!project.customer && (
+              <p className="mt-1.5">
+                <span className={WARN_PILL}>ลูกค้ายังมองไม่เห็นโครงการนี้</span>
+              </p>
             )}
           </div>
-          {project.customer || lead ? (
-            // E: ผูกแล้ว (หรือมีแค่คำขอ) — การ์ดคน: ชื่อเด่น ช่องทางติดต่อเป็นแถว ที่มาของงานเป็นบรรทัดเล็กล่าง
-            <div className="mt-3 max-w-xl overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5">
-                <div className="flex min-w-0 items-start gap-3">
-                  <Avatar name={contactName ?? ""} src={project.customer?.avatarUrl} size={36} />
-                  <div className="min-w-0">
-                    <p className="text-xs text-slate-500">
-                      {project.customer ? "ลูกค้า" : "ผู้ยื่นคำขอ · ยังไม่มีบัญชีลูกค้า"}
-                    </p>
-                    <p className="truncate font-semibold text-slate-800">{contactName}</p>
-                    {(contactEmail || contactPhone) && (
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        {contactEmail && (
-                          <InfoChip>
-                            <Mail size={12} className="text-brand" /> {contactEmail}
-                          </InfoChip>
-                        )}
-                        {contactPhone && (
-                          <InfoChip>
-                            <Phone size={12} className="text-brand" /> {contactPhone}
-                          </InfoChip>
-                        )}
-                      </div>
-                    )}
-                    {/* คนยื่นคำขอไม่ใช่เจ้าของบัญชีลูกค้า — ต้องบอก ไม่งั้นข้อมูลหายไปตอนรวมการ์ด */}
-                    {differentRequester && (
-                      <p className="mt-1.5 text-xs text-slate-500">
-                        ผู้ยื่นคำขอ: <span className="text-slate-700">{lead!.name}</span>
-                        {lead!.email && lead!.email !== contactEmail ? ` (${lead!.email})` : ""}
-                      </p>
-                    )}
-                    {!project.customer && (
-                      <p className="mt-1.5">
-                        <span className={WARN_PILL}>ลูกค้ายังมองไม่เห็นโครงการนี้</span>
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex shrink-0 flex-wrap gap-1">
-                  {project.customer ? (
-                    <>
-                      {/* ทางเข้าหลักของแฟ้มลูกค้า — จุดที่พนักงานกำลังมองชื่อลูกค้าอยู่พอดี */}
-                      <Link to={`/customers/${project.customer.id}`} className={buttonClasses("ghost", "sm")}>
-                        <UserRound size={14} /> ดูแฟ้มลูกค้า
-                      </Link>
-                      <Button variant="ghost" size="sm" onClick={openCustomerSearch} aria-expanded={showCustomerSearch} data-customer-picker-trigger>
-                        เปลี่ยนลูกค้า <ChevronDown size={14} className={`transition-transform ${showCustomerSearch ? "rotate-180" : ""}`} />
-                      </Button>
-                      <Button variant="brand" size="sm" onClick={() => handleIssueAccessLink(false)} disabled={issuingLink}>
-                        {issuingLink ? "กำลังสร้าง..." : "ออกลิงก์เข้าใช้"}
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={openCustomerSearch} aria-expanded={showCustomerSearch} data-customer-picker-trigger>
-                        เลือกลูกค้าที่มีบัญชี <ChevronDown size={14} className={`transition-transform ${showCustomerSearch ? "rotate-180" : ""}`} />
-                      </Button>
-                      <Button variant="brand" size="sm" onClick={openCreateCustomer}>
-                        สร้างบัญชีจากคำขอ
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* กล่องเลือกลูกค้ากางในการ์ด (ดันเนื้อหาข้างล่างลง) — แบบลอยเคยทับเมนูข้างและการ์ดราคา */}
-              {showCustomerSearch && customerPicker(true)}
-
-              {/* ที่มาของงาน: ข้อมูลประกอบ จึงเป็นบรรทัดเล็กล่างการ์ด */}
-              <div className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
-                {lead ? (
-                  <>
-                    <span>
-                      มาจากคำขอ · สนใจ {lead.serviceType}
-                      {lead.houseDesignName && ` · แบบ ${lead.houseDesignName}`}
-                    </span>
-                    {lead.message && (
-                      <p className="mt-0.5 line-clamp-2 text-slate-600" title={lead.message}>
-                        “{lead.message}”
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <span className="flex flex-wrap items-center gap-x-2">
-                    ไม่ได้มาจากคำขอ
-                    <button type="button" onClick={openLeadPicker} className="text-brand underline-offset-2 hover:underline">
-                      ผูกกับคำขอ
-                    </button>
-                  </span>
-                )}
-              </div>
-            </div>
-          ) : (
-            // A: ยังไม่ผูกอะไรเลย — ถามคำถามเดียว แต่ละทางบอกว่ากดแล้วได้อะไร
-            <div className="mt-3 max-w-2xl rounded-lg border border-slate-200 bg-white p-3 text-sm">
-              <div className="mb-2.5 flex flex-wrap items-center gap-2">
-                <p className="font-semibold text-slate-800">งานนี้ของลูกค้าคนไหน?</p>
-                <span className={WARN_PILL}>ลูกค้ายังมองไม่เห็นโครงการนี้</span>
-              </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <OwnerChoice
-                  title="มาจากคำขอ"
-                  description="ดึงชื่อ เบอร์ และแบบบ้านที่ลูกค้าส่งเข้ามาให้"
-                  action={
-                    pendingLeadCount == null
-                      ? "เลือกคำขอ"
-                      : pendingLeadCount > 0
-                        ? `รอโครงการ ${pendingLeadCount} คำขอ`
-                        : "ยังไม่มีคำขอที่รอโครงการ"
-                  }
-                  active={showLeadPicker}
-                  onClick={openLeadPicker}
-                />
-                <OwnerChoice
-                  title="ลูกค้าที่มีบัญชีแล้ว"
-                  description="ค้นจากชื่อหรืออีเมล — ใบเสนอราคาที่ส่งจะเข้าพอร์ทัลของลูกค้าคนนี้"
-                  action="ค้นหาลูกค้า"
-                  active={showCustomerSearch}
-                  onClick={openCustomerSearch}
-                />
-                <OwnerChoice
-                  title="ลูกค้าใหม่ ไม่มีคำขอ"
-                  description="ลูกค้าที่โทรมาหรือเดินเข้ามาเอง — กรอกชื่อ อีเมล แล้วออกลิงก์ให้ตั้งรหัสผ่าน"
-                  action="สร้างบัญชีลูกค้า"
-                  active={showCreateCustomer}
-                  onClick={openCreateCustomer}
-                />
-              </div>
-            </div>
-          )}
-
-          {showLeadPicker && (
-            <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white">
-              <p className="text-xs text-slate-700 mb-2">
-                เลือกคำขอของลูกค้าที่ตรงกับโครงการนี้ — ระบบจะดึงชื่อลูกค้าและแบบบ้านมาให้อัตโนมัติ
-              </p>
-              <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-                {loadingLeads && <PanelSkeleton lines={2} />}
-                {!loadingLeads && unlinkedLeads.length === 0 && (
-                  <p className="text-xs text-slate-500">ยังไม่มีคำขอที่ว่างให้เลือก</p>
-                )}
-                {unlinkedLeads.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    disabled={linkingLead}
-                    onClick={() => handleLinkLead(l.id)}
-                    className="text-left text-sm px-2 py-1 rounded-md hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    {l.name} <span className="text-slate-500">· {l.phone} · {l.serviceType}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2 border-t border-slate-100 pt-2">
-                <Button variant="ghost" size="sm" onClick={() => setShowLeadPicker(false)}>
-                  ยกเลิก
-                </Button>
-              </div>
-            </div>
-          )}
-          {showCreateCustomer && !project.customer && (
-            <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white flex flex-col gap-2">
-              <p className="text-xs text-slate-700">
-                {lead
-                  ? "สร้างบัญชีให้ลูกค้าจากข้อมูลในคำขอ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง"
-                  : "สร้างบัญชีให้ลูกค้าใหม่ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง"}{" "}
-                (ถ้าอีเมลนี้มีบัญชีอยู่แล้ว ระบบจะผูกบัญชีเดิมให้)
-              </p>
-              <input
-                placeholder="อีเมล"
-                value={accessLinkForm.email}
-                onChange={(e) => setAccessLinkForm((f) => ({ ...f, email: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              />
-              <input
-                placeholder="ชื่อ-นามสกุล"
-                value={accessLinkForm.fullName}
-                onChange={(e) => setAccessLinkForm((f) => ({ ...f, fullName: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              />
-              <input
-                placeholder="เบอร์โทรศัพท์"
-                value={accessLinkForm.phone}
-                onChange={(e) => setAccessLinkForm((f) => ({ ...f, phone: e.target.value }))}
-                className="border border-slate-300 rounded-md px-2 py-1 text-sm"
-              />
-              <div className="flex gap-2 border-t border-slate-100 pt-2">
-                <Button variant="brand" size="sm" onClick={() => handleIssueAccessLink(true)} disabled={issuingLink}>
-                  {issuingLink ? "กำลังสร้าง..." : "สร้างบัญชี + ลิงก์เข้าใช้"}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setShowCreateCustomer(false)}>
-                  ยกเลิก
-                </Button>
-              </div>
-            </div>
-          )}
-          {accessLink && (
-            <div className="mt-2 max-w-md border border-brand/30 rounded-lg p-3 bg-brand/5 flex flex-col gap-2">
-              <p className="text-xs text-slate-700">
-                {accessLink.created ? "สร้างบัญชีลูกค้าแล้ว — " : ""}
-                ส่งลิงก์นี้ให้ลูกค้า ({accessLink.customer.email}) ทาง LINE หรือช่องที่คุยกัน
-                ลูกค้าจะตั้งรหัสผ่านเองแล้วเข้าดูใบเสนอราคาได้ทันที
-              </p>
-              <div className="flex gap-2">
-                <input
-                  readOnly
-                  value={accessLink.url}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="flex-1 min-w-0 border border-slate-300 rounded-md px-2 py-1 text-xs font-mono bg-white"
-                />
-                <Button size="sm" onClick={copyAccessLink}>
-                  {linkCopied ? "คัดลอกแล้ว ✓" : "คัดลอกลิงก์"}
-                </Button>
-              </div>
-              <p className="text-xs text-slate-500">
-                ลิงก์ใช้ได้ครั้งเดียว หมดอายุ{" "}
-                {new Date(accessLink.expiresAt).toLocaleDateString("th-TH")}
-              </p>
-            </div>
-          )}
-          {showCustomerSearch && !project.customer && !lead && customerPicker(false)}
         </div>
-        {/* การเดินหน้าสถานะทำผ่าน auto (ส่งใบเสนอราคา/ลูกค้ายอมรับ) + การ์ด "ขั้นตอนถัดไป" แล้ว
-            จึงเหลือเฉพาะ "ยกเลิกโครงการ" ที่เป็นการตัดสินใจของคน — ทำให้เงียบ (danger เบา ๆ) */}
-        {nextStatuses.includes("CANCELLED") && (
-          <button
-            type="button"
-            onClick={() => handleTransition("CANCELLED")}
-            disabled={transitioning}
-            className="text-sm text-red-600 border border-red-200 rounded-md px-3 py-1.5 hover:bg-red-50 disabled:opacity-50"
-          >
-            ยกเลิกโครงการ
-          </button>
+
+        <div className="flex shrink-0 flex-wrap gap-1">
+          {project.customer ? (
+            <>
+              {/* ทางเข้าหลักของแฟ้มลูกค้า — จุดที่พนักงานกำลังมองชื่อลูกค้าอยู่พอดี */}
+              <Link to={`/customers/${project.customer.id}`} className={buttonClasses("ghost", "sm")}>
+                <UserRound size={14} /> ดูแฟ้มลูกค้า
+              </Link>
+              <Button variant="ghost" size="sm" onClick={openCustomerSearch} aria-expanded={showCustomerSearch} data-customer-picker-trigger>
+                เปลี่ยนลูกค้า <ChevronDown size={14} className={`transition-transform ${showCustomerSearch ? "rotate-180" : ""}`} />
+              </Button>
+              <Button variant="brand" size="sm" onClick={() => handleIssueAccessLink(false)} disabled={issuingLink}>
+                {issuingLink ? "กำลังสร้าง..." : "ออกลิงก์เข้าใช้"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" onClick={openCustomerSearch} aria-expanded={showCustomerSearch} data-customer-picker-trigger>
+                เลือกลูกค้าที่มีบัญชี <ChevronDown size={14} className={`transition-transform ${showCustomerSearch ? "rotate-180" : ""}`} />
+              </Button>
+              <Button variant="brand" size="sm" onClick={openCreateCustomer}>
+                สร้างบัญชีจากคำขอ
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* กล่องเลือกลูกค้ากางในการ์ด (ดันเนื้อหาข้างล่างลง) — แบบลอยเคยทับเมนูข้างและการ์ดราคา */}
+      {showCustomerSearch && <ProjectCustomerPicker vm={vm} embedded />}
+
+      {/* ที่มาของงาน: ข้อมูลประกอบ จึงเป็นบรรทัดเล็กล่างการ์ด */}
+      <div className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
+        {lead ? (
+          <>
+            <span>
+              มาจากคำขอ · สนใจ {lead.serviceType}
+              {lead.houseDesignName && ` · แบบ ${lead.houseDesignName}`}
+            </span>
+            {lead.message && (
+              <p className="mt-0.5 line-clamp-2 text-slate-600" title={lead.message}>
+                “{lead.message}”
+              </p>
+            )}
+          </>
+        ) : (
+          <span className="flex flex-wrap items-center gap-x-2">
+            <span>ไม่ได้มาจากคำขอ</span>
+            <button type="button" onClick={openLeadPicker} className="text-brand underline-offset-2 hover:underline">
+              ผูกกับคำขอ
+            </button>
+          </span>
         )}
       </div>
-    </>
+    </div>
+  );
+}
+
+/** ปุ่มของทาง "มาจากคำขอ" — บอกจำนวนคำขอที่รอโครงการ (ยังไม่รู้ = ข้อความกลาง) */
+function leadChoiceAction(pending: number | null): string {
+  if (pending == null) return "เลือกคำขอ";
+  return pending > 0 ? `รอโครงการ ${pending} คำขอ` : "ยังไม่มีคำขอที่รอโครงการ";
+}
+
+/** ยังไม่ผูกอะไรเลย — ถามคำถามเดียว แต่ละทางบอกว่ากดแล้วได้อะไร */
+function ProjectOwnerChoices({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { pendingLeadCount, openCustomerSearch, openCreateCustomer, openLeadPicker, showLeadPicker, showCreateCustomer, showCustomerSearch } = vm;
+  return (
+    // A: ยังไม่ผูกอะไรเลย — ถามคำถามเดียว แต่ละทางบอกว่ากดแล้วได้อะไร
+    <div className="mt-3 max-w-2xl rounded-lg border border-slate-200 bg-white p-3 text-sm">
+      <div className="mb-2.5 flex flex-wrap items-center gap-2">
+        <p className="font-semibold text-slate-800">งานนี้ของลูกค้าคนไหน?</p>
+        <span className={WARN_PILL}>ลูกค้ายังมองไม่เห็นโครงการนี้</span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <OwnerChoice
+          title="มาจากคำขอ"
+          description="ดึงชื่อ เบอร์ และแบบบ้านที่ลูกค้าส่งเข้ามาให้"
+          action={leadChoiceAction(pendingLeadCount)}
+          active={showLeadPicker}
+          onClick={openLeadPicker}
+        />
+        <OwnerChoice
+          title="ลูกค้าที่มีบัญชีแล้ว"
+          description="ค้นจากชื่อหรืออีเมล — ใบเสนอราคาที่ส่งจะเข้าพอร์ทัลของลูกค้าคนนี้"
+          action="ค้นหาลูกค้า"
+          active={showCustomerSearch}
+          onClick={openCustomerSearch}
+        />
+        <OwnerChoice
+          title="ลูกค้าใหม่ ไม่มีคำขอ"
+          description="ลูกค้าที่โทรมาหรือเดินเข้ามาเอง — กรอกชื่อ อีเมล แล้วออกลิงก์ให้ตั้งรหัสผ่าน"
+          action="สร้างบัญชีลูกค้า"
+          active={showCreateCustomer}
+          onClick={openCreateCustomer}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ProjectTitleBlock({ vm }: Readonly<{ vm: ProjectVM }>) {
+  const { project, isCustom, currentVersion, editable, lead, handleIssueAccessLink, issuingLink, showLeadPicker, loadingLeads, unlinkedLeads, linkingLead, handleLinkLead, setShowLeadPicker, showCreateCustomer, accessLinkForm, setAccessLinkForm, setShowCreateCustomer, accessLink, copyAccessLink, linkCopied, showCustomerSearch, nextStatuses, handleTransition, transitioning } = vm;
+  return (
+    <div className="flex items-start justify-between mb-4 mt-3">
+      <div>
+        <p className="text-sm text-slate-500">{project.projectNo}</p>
+        <h1 className="text-2xl font-semibold text-slate-800">{project.name}</h1>
+        <div className="flex items-center flex-wrap gap-2 mt-1.5 text-sm text-slate-500">
+          <span className={badgeClass(STATUS_COLOR[project.status])}>
+            {STATUS_LABEL[project.status]}
+          </span>
+          {isCustom && <span className={badgeClass("indigo")}>กำหนดเอง</span>}
+          <span>· เวอร์ชัน {currentVersion.versionNo}</span>
+          {!editable && (
+            <span className="text-slate-500">(ส่งใบเสนอราคาแล้ว — แก้ไขจะสร้างเวอร์ชันใหม่)</span>
+          )}
+        </div>
+        {project.customer || lead ? <ProjectContactCard vm={vm} /> : <ProjectOwnerChoices vm={vm} />}
+
+        {showLeadPicker && (
+          <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white">
+            <p className="text-xs text-slate-700 mb-2">
+              เลือกคำขอของลูกค้าที่ตรงกับโครงการนี้ — ระบบจะดึงชื่อลูกค้าและแบบบ้านมาให้อัตโนมัติ
+            </p>
+            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+              {loadingLeads && <PanelSkeleton lines={2} />}
+              {!loadingLeads && unlinkedLeads.length === 0 && (
+                <p className="text-xs text-slate-500">ยังไม่มีคำขอที่ว่างให้เลือก</p>
+              )}
+              {unlinkedLeads.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  disabled={linkingLead}
+                  onClick={() => handleLinkLead(l.id)}
+                  className="text-left text-sm px-2 py-1 rounded-md hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {l.name} <span className="text-slate-500">· {l.phone} · {l.serviceType}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 border-t border-slate-100 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowLeadPicker(false)}>
+                ยกเลิก
+              </Button>
+            </div>
+          </div>
+        )}
+        {showCreateCustomer && !project.customer && (
+          <div className="mt-2 max-w-sm border border-slate-200 rounded-lg p-3 bg-white flex flex-col gap-2">
+            <p className="text-xs text-slate-700">
+              {lead
+                ? "สร้างบัญชีให้ลูกค้าจากข้อมูลในคำขอ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง"
+                : "สร้างบัญชีให้ลูกค้าใหม่ แล้วออกลิงก์ให้ลูกค้าตั้งรหัสผ่านเอง"}{" "}
+              (ถ้าอีเมลนี้มีบัญชีอยู่แล้ว ระบบจะผูกบัญชีเดิมให้)
+            </p>
+            <input
+              placeholder="อีเมล"
+              value={accessLinkForm.email}
+              onChange={(e) => setAccessLinkForm((f) => ({ ...f, email: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            />
+            <input
+              placeholder="ชื่อ-นามสกุล"
+              value={accessLinkForm.fullName}
+              onChange={(e) => setAccessLinkForm((f) => ({ ...f, fullName: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            />
+            <input
+              placeholder="เบอร์โทรศัพท์"
+              value={accessLinkForm.phone}
+              onChange={(e) => setAccessLinkForm((f) => ({ ...f, phone: e.target.value }))}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm"
+            />
+            <div className="flex gap-2 border-t border-slate-100 pt-2">
+              <Button variant="brand" size="sm" onClick={() => handleIssueAccessLink(true)} disabled={issuingLink}>
+                {issuingLink ? "กำลังสร้าง..." : "สร้างบัญชี + ลิงก์เข้าใช้"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowCreateCustomer(false)}>
+                ยกเลิก
+              </Button>
+            </div>
+          </div>
+        )}
+        {accessLink && (
+          <div className="mt-2 max-w-md border border-brand/30 rounded-lg p-3 bg-brand/5 flex flex-col gap-2">
+            <p className="text-xs text-slate-700">
+              {accessLink.created ? "สร้างบัญชีลูกค้าแล้ว — " : ""}
+              ส่งลิงก์นี้ให้ลูกค้า ({accessLink.customer.email}) ทาง LINE หรือช่องที่คุยกัน
+              ลูกค้าจะตั้งรหัสผ่านเองแล้วเข้าดูใบเสนอราคาได้ทันที
+            </p>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={accessLink.url}
+                onFocus={(e) => e.currentTarget.select()}
+                className="flex-1 min-w-0 border border-slate-300 rounded-md px-2 py-1 text-xs font-mono bg-white"
+              />
+              <Button size="sm" onClick={copyAccessLink}>
+                {linkCopied ? "คัดลอกแล้ว ✓" : "คัดลอกลิงก์"}
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">
+              ลิงก์ใช้ได้ครั้งเดียว หมดอายุ{" "}
+              {new Date(accessLink.expiresAt).toLocaleDateString("th-TH")}
+            </p>
+          </div>
+        )}
+        {showCustomerSearch && !project.customer && !lead && <ProjectCustomerPicker vm={vm} embedded={false} />}
+      </div>
+      {/* การเดินหน้าสถานะทำผ่าน auto (ส่งใบเสนอราคา/ลูกค้ายอมรับ) + การ์ด "ขั้นตอนถัดไป" แล้ว
+          จึงเหลือเฉพาะ "ยกเลิกโครงการ" ที่เป็นการตัดสินใจของคน — ทำให้เงียบ (danger เบา ๆ) */}
+      {nextStatuses.includes("CANCELLED") && (
+        <button
+          type="button"
+          onClick={() => handleTransition("CANCELLED")}
+          disabled={transitioning}
+          className="text-sm text-red-600 border border-red-200 rounded-md px-3 py-1.5 hover:bg-red-50 disabled:opacity-50"
+        >
+          ยกเลิกโครงการ
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -5599,7 +5715,7 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
           {/* บล็อกปริมาณ — ตามฐานคำนวณเดิมของบรรทัด (MANUAL = จำนวน + เครื่องมือเหล็ก;
               อื่น ๆ = สัมประสิทธิ์ + เผื่อเสีย + พรีวิวปริมาณสด) */}
           <div className="mt-3 rounded-lg bg-slate-50 p-3">
-            {editBasis === "SHEET" ? (
+            {editBasis === "SHEET" && (
               <SheetQuantityBlock
                 lineName={editName}
                 unit={editUnit}
@@ -5615,7 +5731,8 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
                   if (q != null) setEditQuantity(String(q));
                 }}
               />
-            ) : editBasis !== "MANUAL" ? (
+            )}
+            {editBasis !== "SHEET" && editBasis !== "MANUAL" && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-end">
                 <label className="flex flex-col gap-1 text-xs text-slate-700">
                   {basisConfig(editBasis).perLabel}
@@ -5660,7 +5777,8 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
                   })()}
                 </div>
               </div>
-            ) : (
+            )}
+            {editBasis === "MANUAL" && (
               // วางเรียงลงมาเป็นแถว ไม่ใช่วางข้าง ๆ กัน — กล่องเครื่องมือกว้างกว่าช่องจำนวนมาก
               // ถ้าวางข้างกันช่องจำนวนจะลอยอยู่ซ้ายห่างจากกล่อง จนดูเหมือนคนละเรื่อง
               <div className="flex flex-col items-start gap-2">
@@ -5746,7 +5864,7 @@ function BoqEditRow({ vm, item }: Readonly<{ vm: ProjectVM; item: BoqItemDto }>)
           {/* แถบล่าง: ยอดรวมสด + ปุ่มบันทึก/ยกเลิก (ชิดขวา) */}
           <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-3">
             <span className="text-sm text-slate-500">
-              รวมบรรทัด:{" "}
+              <span>รวมบรรทัด:{" "}</span>
               <span className="font-semibold text-brand" title="ยอดสด (ยังไม่บันทึก)">
                 {money(previewLineTotal ?? item.lineTotal)}
               </span>
@@ -5784,7 +5902,7 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
         {/* ราคาสุทธิตามลงมาด้วย — แท็บ BOQ ยาว 5,700px และเป็นที่เดียวที่ยอดนี้เปลี่ยนจริง
             ถ้าไม่ติดมากับแถบ คนแก้ราคาจะมองไม่เห็นผลของสิ่งที่ตัวเองทำเลย */}
         <span className="hidden shrink-0 whitespace-nowrap text-sm text-slate-500 sm:inline">
-          สุทธิ{" "}
+          <span>สุทธิ{" "}</span>
           <span className="font-semibold text-slate-800">{money(currentVersion.netPrice)}</span>
           {showNetPreview && (
             <span className="ml-1 font-semibold text-brand">→ {money(previewNet!)}</span>
@@ -5993,7 +6111,7 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
                 { key: "import", label: "นำเข้า Excel", onSelect: () => setShowImport(true) },
                 ...(items.length > 0
                   ? [
-                      { key: "export", label: "ส่งออก Excel (ฉบับภายใน)", onSelect: () => void exportBoqExcel() },
+                      { key: "export", label: "ส่งออก Excel (ฉบับภายใน)", onSelect: exportBoqExcel },
                       { key: "template", label: "บันทึกเป็นแม่แบบ", onSelect: () => setShowSaveTemplateForm((v) => !v) },
                     ]
                   : []),
@@ -6130,7 +6248,7 @@ function ProjectDetailView({ vm }: Readonly<{ vm: ProjectVM }>) {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-700">
-            คำอธิบาย <span className="text-slate-400">(ไม่บังคับ — ใช้กับงานแบบไหน)</span>
+            <span>คำอธิบาย <span className="text-slate-400">(ไม่บังคับ — ใช้กับงานแบบไหน)</span></span>
             <textarea
               rows={2}
               placeholder="เช่น สำหรับบ้านชั้นเดียว 2 ห้องนอน พื้นที่ราว 80 ตร.ม."

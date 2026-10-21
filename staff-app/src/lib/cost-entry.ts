@@ -196,5 +196,6 @@ export function formOverrun(report: ProjectCostReportDto, form: FormState): numb
 export function categoryLabelOf(report: ProjectCostReportDto, category: string): string {
   if (category === OVERHEAD) return "ค่าดำเนินการ/ทั่วไป";
   const c = report.categories.find((x) => x.id === category);
-  return c ? `${c.code ? `${c.code} ` : ""}${c.name}` : "หมวดนี้";
+  if (!c) return "หมวดนี้";
+  return c.code ? `${c.code} ${c.name}` : c.name;
 }

@@ -1,0 +1,126 @@
+{
+ "fetchedAt": "2026-10-21T12:55:54.705Z",
+ "scannedAt": "2026-10-21T12:52:44Z",
+ "tests": "1,537/1,537 เคส (137 ชุด)",
+ "e2e": "457/457 เคส (หน้าจอ 119 + API 338)",
+ "fixedFrom": "443",
+ "serverVersion": "26.9.0.129388",
+ "project": {
+  "coverage": "90.5",
+  "reliability_rating": "1.0",
+  "duplicated_lines_density": "2.2",
+  "code_smells": "22",
+  "security_rating": "1.0",
+  "new_coverage": "90.5",
+  "violations": "22",
+  "security_hotspots": "0",
+  "sqale_rating": "1.0",
+  "bugs": "0",
+  "alert_status": "OK",
+  "lines_to_cover": "13445",
+  "uncovered_conditions": "1216",
+  "uncovered_lines": "716",
+  "branch_coverage": "82.3",
+  "new_violations": "0",
+  "ncloc": "91598",
+  "vulnerabilities": "0",
+  "line_coverage": "94.7",
+  "conditions_to_cover": "6884"
+ },
+ "parts": [
+  {
+   "dir": "server/src",
+   "label": "server/src — API (Express + Prisma)",
+   "excluded": null,
+   "m": {
+    "coverage": "90.5",
+    "lines_to_cover": "12183",
+    "uncovered_lines": "647",
+    "ncloc": "28911",
+    "violations": "0"
+   }
+  },
+  {
+   "dir": "packages/shared-types/src",
+   "label": "packages/shared-types — กติกากลางที่ server กับหน้าจอใช้ร่วมกัน",
+   "excluded": null,
+   "m": {
+    "coverage": "90.5",
+    "lines_to_cover": "1262",
+    "uncovered_lines": "69",
+    "ncloc": "4460",
+    "violations": "0"
+   }
+  },
+  {
+   "dir": "staff-app/src",
+   "label": "staff-app — หน้าจอพนักงาน (React)",
+   "excluded": "หน้าจอ — ทดสอบผ่านเบราว์เซอร์ด้วย Robot Framework",
+   "m": {
+    "ncloc": "41726",
+    "violations": "10"
+   }
+  },
+  {
+   "dir": "client-app/src",
+   "label": "client-app — หน้าจอลูกค้า (React)",
+   "excluded": "หน้าจอ — ทดสอบผ่านเบราว์เซอร์ด้วย Robot Framework",
+   "m": {
+    "ncloc": "15794",
+    "violations": "2"
+   }
+  },
+  {
+   "dir": "server/scripts",
+   "label": "server/scripts — สคริปต์สั่งรันเอง",
+   "excluded": "สคริปต์บรรทัดคำสั่ง ไม่ใช่โค้ดที่ระบบเรียกตอนทำงาน",
+   "m": {
+    "ncloc": "312",
+    "violations": "0"
+   }
+  },
+  {
+   "dir": "server/prisma",
+   "label": "server/prisma — seed / ตั้งค่าฐานข้อมูลทดสอบ",
+   "excluded": "สคริปต์บรรทัดคำสั่ง ไม่ใช่โค้ดที่ระบบเรียกตอนทำงาน",
+   "m": {
+    "ncloc": "395",
+    "violations": "0"
+   }
+  }
+ ],
+ "gate": {
+  "status": "OK",
+  "conditions": [
+   {
+    "status": "OK",
+    "metricKey": "new_coverage",
+    "comparator": "LT",
+    "errorThreshold": "80",
+    "actualValue": "90.5"
+   },
+   {
+    "status": "OK",
+    "metricKey": "new_duplicated_lines_density",
+    "comparator": "GT",
+    "errorThreshold": "3",
+    "actualValue": "1.73901"
+   },
+   {
+    "status": "OK",
+    "metricKey": "new_violations",
+    "comparator": "GT",
+    "errorThreshold": "0",
+    "actualValue": "0"
+   }
+  ],
+  "ignoredConditions": false,
+  "period": {
+   "mode": "PREVIOUS_VERSION",
+   "date": "2026-09-18T08:07:21+0000"
+  },
+  "caycStatus": "compliant"
+ },
+ "openIssues": 22,
+ "issuesIncludingClosed": 998
+}

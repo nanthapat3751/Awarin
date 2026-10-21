@@ -142,7 +142,7 @@ async function findResettableCustomer(email: string) {
   });
   // พนักงานตั้งใจไม่ให้รีเซ็ตทางนี้ — ฝั่งบริษัทล็อกอินด้วย username ไม่ใช่อีเมล และอีเมลพนักงาน
   // เป็นช่องที่แก้ได้ในหน้าบัญชี ถ้าเปิดทางนี้ไว้ อีเมลจะกลายเป็นกุญแจสำรองของบัญชีพนักงานโดยปริยาย
-  if (!user || user.role !== "CUSTOMER" || !user.active || !user.email) return null;
+  if (user?.role !== "CUSTOMER" || !user.active || !user.email) return null;
   return user;
 }
 

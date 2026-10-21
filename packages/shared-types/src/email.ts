@@ -90,7 +90,7 @@ const REAL_LOOKALIKE_DOMAINS = new Set([
 
 /** ระยะแก้ไขแบบนับการสลับตัวอักษรติดกันเป็นหนึ่งครั้ง (gmial → gmail = 1) */
 function editDistance(a: string, b: string): number {
-  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
   for (let j = 1; j <= b.length; j++) d[0][j] = j;
   for (let i = 1; i <= a.length; i++) {
     for (let j = 1; j <= b.length; j++) {

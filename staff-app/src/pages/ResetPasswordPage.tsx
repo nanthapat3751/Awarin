@@ -34,7 +34,7 @@ export function ResetPasswordPage() {
 
   const personal = [account?.username];
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const problem =
       (!password && "กรอกรหัสผ่านใหม่") ||

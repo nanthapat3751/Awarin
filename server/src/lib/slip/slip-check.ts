@@ -99,36 +99,7 @@ export async function checkNoticeSlips(
 
   const seen = new Set<string>();
   const checks: FileCheck[] = [];
-  for (const file of files) {
-    const base = { storedName: file.filename, slip: null, message: null };
-    if (!isCheckableImage(file.mimetype)) {
-      checks.push({ ...base, status: "UNCHECKED", message: "ไฟล์ PDF ตรวจอัตโนมัติไม่ได้" });
-      continue;
-    }
-    let read;
-    try {
-      read = await provider.read(file);
-    } catch (err) {
-      read = { kind: "unreadable" as const, message: `ตรวจสลิปไม่สำเร็จ (${err instanceof Error ? err.message : "error"})` };
-    }
-    if (read.kind === "unreadable") {
-      checks.push({ ...base, status: "UNCHECKED", message: read.message });
-      continue;
-    }
-    if (read.kind === "fake") {
-      checks.push({ ...base, status: "FAKE", message: read.message });
-      continue;
-    }
-    const slip = read.slip;
-    if (receiverVerdict(slip, ctx.account) === "other") {
-      checks.push({ ...base, slip, status: "WRONG_ACCOUNT", message: null });
-      continue;
-    }
-    // ซ้ำกับสลิปที่ถูกใช้อยู่ในระบบ หรือแนบสลิปเดียวกันมาสองไฟล์ในการแจ้งเดียว
-    const used = seen.has(slip.transRef) || (await prisma.slipVerification.findUnique({ where: { activeRef: slip.transRef }, select: { id: true } }));
-    seen.add(slip.transRef);
-    checks.push({ ...base, slip, status: used ? "DUPLICATE" : "PASSED", message: null });
-  }
+  for (const file of files) checks.push(await checkOneSlip(provider, file, ctx.account, seen));
 
   const verified = checks.filter((c) => c.status === "PASSED" && c.slip);
   const verifiedTotal = Math.round(verified.reduce((sum, c) => sum + c.slip!.amount, 0) * 100) / 100;
@@ -149,8 +120,44 @@ export async function checkNoticeSlips(
     return result("UNCHECKED", [...new Set(checks.map((c) => c.message).filter((m): m is string => Boolean(m)))]);
   }
 
+  const unique = [...new Set(mismatchFlags(checks.length, verified, verifiedTotal, ctx))];
+  return result(unique.length > 0 ? "MISMATCH" : "PASSED", unique);
+}
+
+/** ตรวจสลิปไฟล์เดียว — PDF/อ่านไม่ได้ = ตรวจไม่ได้ · ปลอม · ผิดบัญชี · ซ้ำ (ในระบบหรือในการแจ้งเดียวกัน) · ผ่าน */
+async function checkOneSlip(
+  provider: NonNullable<ReturnType<typeof slipProvider>>,
+  file: SlipFileInput & { filename: string },
+  account: PaymentAccountDto | null,
+  seen: Set<string>,
+): Promise<FileCheck> {
+  const base = { storedName: file.filename, slip: null, message: null };
+  if (!isCheckableImage(file.mimetype)) return { ...base, status: "UNCHECKED", message: "ไฟล์ PDF ตรวจอัตโนมัติไม่ได้" };
+  let read;
+  try {
+    read = await provider.read(file);
+  } catch (err) {
+    read = { kind: "unreadable" as const, message: `ตรวจสลิปไม่สำเร็จ (${err instanceof Error ? err.message : "error"})` };
+  }
+  if (read.kind === "unreadable") return { ...base, status: "UNCHECKED", message: read.message };
+  if (read.kind === "fake") return { ...base, status: "FAKE", message: read.message };
+  const slip = read.slip;
+  if (receiverVerdict(slip, account) === "other") return { ...base, slip, status: "WRONG_ACCOUNT", message: null };
+  // ซ้ำกับสลิปที่ถูกใช้อยู่ในระบบ หรือแนบสลิปเดียวกันมาสองไฟล์ในการแจ้งเดียว
+  const used = seen.has(slip.transRef) || (await prisma.slipVerification.findUnique({ where: { activeRef: slip.transRef }, select: { id: true } }));
+  seen.add(slip.transRef);
+  return { ...base, slip, status: used ? "DUPLICATE" : "PASSED", message: null };
+}
+
+/** จุดที่ไม่ตรง (ไม่ปฏิเสธ แต่ขึ้นป้ายให้พนักงานตัดสิน) — ว่าง = ผ่าน */
+function mismatchFlags(
+  fileCount: number,
+  verified: FileCheck[],
+  verifiedTotal: number,
+  ctx: { customerAmount: number; customerPaidOn: string; expectedNet: number; account: PaymentAccountDto | null },
+): string[] {
   const flags: string[] = [];
-  if (verified.length < checks.length) flags.push(`ตรวจอัตโนมัติได้ ${verified.length} จาก ${checks.length} ไฟล์`);
+  if (verified.length < fileCount) flags.push(`ตรวจอัตโนมัติได้ ${verified.length} จาก ${fileCount} ไฟล์`);
   if (!ctx.account) {
     flags.push("ยังไม่ได้ตั้งบัญชีรับเงินในหน้าตั้งค่า — เทียบบัญชีปลายทางไม่ได้");
   } else if (verified.some((c) => receiverVerdict(c.slip!, ctx.account) === "unknown")) {
@@ -162,14 +169,14 @@ export async function checkNoticeSlips(
   if (Math.abs(verifiedTotal - ctx.expectedNet) > 0.009) {
     flags.push(`ยอดในสลิป ${money(verifiedTotal)} ไม่ตรงกับยอดที่ต้องโอน ${money(ctx.expectedNet)}`);
   }
-  for (const c of verified) {
-    const d = c.slip!.transDate;
-    if (!d) {
-      flags.push("สลิปไม่มีวันที่โอน");
-    } else if (d !== ctx.customerPaidOn) {
-      flags.push(`วันที่โอนในสลิป (${thaiDate(d)}) ไม่ตรงกับที่ลูกค้าแจ้ง (${thaiDate(ctx.customerPaidOn)})`);
-    }
+  for (const c of verified) flags.push(...dateFlag(c.slip!.transDate, ctx.customerPaidOn));
+  return flags;
+}
+
+function dateFlag(transDate: string | null, customerPaidOn: string): string[] {
+  if (!transDate) return ["สลิปไม่มีวันที่โอน"];
+  if (transDate !== customerPaidOn) {
+    return [`วันที่โอนในสลิป (${thaiDate(transDate)}) ไม่ตรงกับที่ลูกค้าแจ้ง (${thaiDate(customerPaidOn)})`];
   }
-  const unique = [...new Set(flags)];
-  return result(unique.length > 0 ? "MISMATCH" : "PASSED", unique);
+  return [];
 }

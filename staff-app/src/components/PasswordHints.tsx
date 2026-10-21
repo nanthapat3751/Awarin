@@ -18,8 +18,8 @@ import {
 export function CapsLockHint({ on }: Readonly<{ on: boolean }>) {
   if (!on) return null;
   return (
-    // role=status ให้โปรแกรมอ่านหน้าจอประกาศตอนมันโผล่ระหว่างพิมพ์ โดยไม่ต้องย้ายโฟกัสออกจากช่อง
-    <p role="status" className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
+    // <output> (role=status ในตัว) ให้โปรแกรมอ่านหน้าจอประกาศตอนมันโผล่ระหว่างพิมพ์ โดยไม่ต้องย้ายโฟกัสออกจากช่อง
+    <output className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
       <svg
         viewBox="0 0 24 24"
         fill="none"
@@ -34,7 +34,7 @@ export function CapsLockHint({ on }: Readonly<{ on: boolean }>) {
         <path d="M9 19h6" />
       </svg>
       เปิด Caps Lock อยู่ — ตัวพิมพ์ใหญ่ทั้งหมด
-    </p>
+    </output>
   );
 }
 
@@ -45,12 +45,12 @@ export function CapsLockHint({ on }: Readonly<{ on: boolean }>) {
 export function ThaiKeyboardHint({ value }: Readonly<{ value: string }>) {
   if (!hasThaiChars(value)) return null;
   return (
-    <p role="status" className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
+    <output className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
       <span aria-hidden className="rounded border border-amber-300 px-1 text-[10px] font-semibold leading-4">
         ก
       </span>
-      กำลังพิมพ์ภาษาไทย — ถ้าตั้งใจพิมพ์ภาษาอังกฤษ ให้สลับแป้นพิมพ์ก่อน
-    </p>
+      <span>กำลังพิมพ์ภาษาไทย — ถ้าตั้งใจพิมพ์ภาษาอังกฤษ ให้สลับแป้นพิมพ์ก่อน</span>
+    </output>
   );
 }
 
@@ -155,18 +155,18 @@ export function PasswordRules({
             className={`flex items-start gap-1.5 text-xs leading-relaxed ${rule.id === "special" ? "sm:col-span-2" : ""}`}
           >
             <TickIcon ok={rule.ok} />
-            <span className={rule.ok ? "text-emerald-700" : rule.optional ? "text-slate-400" : "text-slate-600"}>
+            <span className={ruleTone(rule.ok, rule.optional)}>
               {rule.label}
             </span>
-            <span className="sr-only">{rule.ok ? " — ผ่านแล้ว" : rule.optional ? "" : " — ยังไม่ผ่าน"}</span>
+            <span className="sr-only">{ruleStatusText(rule.ok, rule.optional)}</span>
           </li>
         ))}
       </ul>
       {blocking && (
         // ข้อห้ามใช้ส้มไม่ใช่แดง — แดงสงวนให้ข้อความผิดพลาดจากเซิร์ฟเวอร์หลังกดส่งจริง
-        <p role="status" className="text-xs leading-relaxed text-amber-700">
+        <output className="text-xs leading-relaxed text-amber-700 block">
           {PASSWORD_PROBLEM_MESSAGES[blocking]}
-        </p>
+        </output>
       )}
     </div>
   );
@@ -179,9 +179,21 @@ export function PasswordMatchHint({ password, confirm }: Readonly<{ password: st
   if (confirm === "") return null;
   const ok = confirm === password;
   return (
-    <p role="status" className={`mt-1.5 flex items-start gap-1.5 text-xs ${ok ? "text-emerald-700" : "text-amber-700"}`}>
+    <output className={`mt-1.5 flex items-start gap-1.5 text-xs ${ok ? "text-emerald-700" : "text-amber-700"}`}>
       {ok ? <TickIcon ok /> : <span aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-center leading-3">✕</span>}
       {ok ? "รหัสผ่านตรงกัน" : "รหัสผ่านทั้งสองช่องยังไม่ตรงกัน"}
-    </p>
+    </output>
   );
+}
+
+/** สีป้ายของข้อกำหนด: ผ่าน = เขียว · ข้อแนะนำที่ยังไม่ผ่าน = เทาจาง · ข้อบังคับที่ยังไม่ผ่าน = เทา */
+function ruleTone(ok: boolean, optional: boolean | undefined) {
+  if (ok) return "text-emerald-700";
+  return optional ? "text-slate-400" : "text-slate-600";
+}
+
+/** ข้อความสำหรับโปรแกรมอ่านหน้าจอ (ข้อแนะนำที่ยังไม่ผ่านไม่ต้องอ่านว่าไม่ผ่าน) */
+function ruleStatusText(ok: boolean, optional: boolean | undefined) {
+  if (ok) return " — ผ่านแล้ว";
+  return optional ? "" : " — ยังไม่ผ่าน";
 }

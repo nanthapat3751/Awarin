@@ -547,8 +547,8 @@ describe("ชุดกฎการถอดปริมาณ", () => {
       topFloor,
       settings,
     });
-    expect(valueOf(structuralTakeoff(col(tender(0.035), true)).rows, "เหล็กยืน").row.length).toBe(3);
-    expect(valueOf(structuralTakeoff(col(tender(0.035), false)).rows, "เหล็กยืน").row.length).toBe(3);
+    expect(valueOf(structuralTakeoff(col(tender(0.035), true)).rows, "เหล็กยืน").row).toMatchObject({ length: 3 });
+    expect(valueOf(structuralTakeoff(col(tender(0.035), false)).rows, "เหล็กยืน").row).toMatchObject({ length: 3 });
     // สั่งตัด: 3 + ฝัง 0.425 + งอ 0.144 + ทาบ 0.48
     expect(valueOf(structuralTakeoff(col(site(0.035), false)).rows, "เหล็กยืน").row.length).toBeCloseTo(4.049, 6);
   });
@@ -663,7 +663,7 @@ describe("ชิ้นส่วนเพิ่มเติม", () => {
       settings: tender(0.075),
     };
     expect(valueOf(structuralTakeoff(input).rows, "เหล็กเดือย").row).toMatchObject({ count: 60, length: 1, barDia: 20 });
-    expect(valueOf(structuralTakeoff({ ...input, settings: site(0.075) }).rows, "เหล็กเดือย").row.length).toBe(1);
+    expect(valueOf(structuralTakeoff({ ...input, settings: site(0.075) }).rows, "เหล็กเดือย").row).toMatchObject({ length: 1 });
   });
 
   it("บันได: คอนกรีตท้องเอียง + ขั้น · ไม้แบบท้อง/ลูกตั้ง/ข้าง · เหล็กหลัก/กันร้าว ตามชุดกฎ", () => {

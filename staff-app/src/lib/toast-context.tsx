@@ -86,10 +86,18 @@ export function ToastProvider({ children }: Readonly<{ children: ReactNode }>) {
 
   const api = useMemo<ToastApi>(
     () => ({
-      success: (m) => void push("success", m),
-      error: (m) => void push("error", m),
-      info: (m) => void push("info", m),
-      undo: (m, onUndo) => void push("success", m, onUndo),
+      success: (m) => {
+        push("success", m);
+      },
+      error: (m) => {
+        push("error", m);
+      },
+      info: (m) => {
+        push("info", m);
+      },
+      undo: (m, onUndo) => {
+        push("success", m, onUndo);
+      },
     }),
     [push],
   );

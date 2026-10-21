@@ -473,80 +473,85 @@ export function TwoFactorSettings({
     setError(null);
   }
 
-  // เนื้อหาหลักของการ์ด: รหัสสำรองที่เพิ่งได้ > กำลังตั้งค่า > กำลังโหลด > เปิดใช้อยู่ > ยังไม่เปิด
-  let body: ReactNode;
-  if (backupCodes) {
-    body = <BackupCodesPanel codes={backupCodes} onDone={() => setBackupCodes(null)} />;
-  } else if (setup) {
-    body = (
-      <SetupPanel
-        setup={setup}
-        token={activateToken}
-        onToken={setActivateToken}
-        busy={busy}
-        onConfirm={confirmActivate}
-        onCancel={cancelSetup}
-      />
-    );
-  } else if (status === null) {
-    body = <PanelSkeleton lines={3} />;
-  } else if (status.enabled) {
-    body = (
-      <div className="flex flex-col gap-3">
-        {/* แบบแถวมีสถานะในหัวแถวแล้ว ไม่ต้องพูดซ้ำ */}
-        {!collapsible && (
-          <p className="flex items-center gap-1.5 text-sm text-emerald-700">
-            <Check size={15} /> เปิดใช้งานอยู่ · รหัสสำรองเหลือ {status.backupCodesRemaining} ชุด
-          </p>
-        )}
+  /** เนื้อหาหลักของการ์ด: รหัสสำรองที่เพิ่งได้ > กำลังตั้งค่า > กำลังโหลด > เปิดใช้อยู่ > ยังไม่เปิด */
+  function renderBody(): ReactNode {
+    if (backupCodes) {
+      return <BackupCodesPanel codes={backupCodes} onDone={() => setBackupCodes(null)} />;
+    }
+    if (setup) {
+      return (
+        <SetupPanel
+          setup={setup}
+          token={activateToken}
+          onToken={setActivateToken}
+          busy={busy}
+          onConfirm={confirmActivate}
+          onCancel={cancelSetup}
+        />
+      );
+    }
+    if (status === null) {
+      return <PanelSkeleton lines={3} />;
+    }
+    if (status.enabled) {
+      return (
+        <div className="flex flex-col gap-3">
+          {/* แบบแถวมีสถานะในหัวแถวแล้ว ไม่ต้องพูดซ้ำ */}
+          {!collapsible && (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check size={15} /> เปิดใช้งานอยู่ · รหัสสำรองเหลือ {status.backupCodesRemaining} ชุด
+            </p>
+          )}
 
-        {showAddDevice ? (
-          <AddDevicePanel
-            qr={addDeviceQr}
-            password={addDevicePassword}
-            onPassword={setAddDevicePassword}
-            busy={busy}
-            onSubmit={doAddDevice}
-            onClose={closeAddDevice}
-          />
-        ) : (
-          <div>
-            <Button size="sm" variant="ghost" onClick={() => setShowAddDevice(true)}>
-              <Smartphone size={13} /> เพิ่มอุปกรณ์ (มือถือเครื่องอื่น)
-            </Button>
-          </div>
-        )}
+          {showAddDevice ? (
+            <AddDevicePanel
+              qr={addDeviceQr}
+              password={addDevicePassword}
+              onPassword={setAddDevicePassword}
+              busy={busy}
+              onSubmit={doAddDevice}
+              onClose={closeAddDevice}
+            />
+          ) : (
+            <div>
+              <Button size="sm" variant="ghost" onClick={() => setShowAddDevice(true)}>
+                <Smartphone size={13} /> เพิ่มอุปกรณ์ (มือถือเครื่องอื่น)
+              </Button>
+            </div>
+          )}
 
-        {showRegen ? (
-          <RegenPanel token={regenToken} onToken={setRegenToken} busy={busy} onSubmit={doRegen} onCancel={cancelRegen} />
-        ) : (
-          <div>
-            <Button size="sm" variant="ghost" onClick={() => setShowRegen(true)}>
-              สร้างรหัสสำรองใหม่
-            </Button>
-          </div>
-        )}
+          {showRegen ? (
+            <RegenPanel token={regenToken} onToken={setRegenToken} busy={busy} onSubmit={doRegen} onCancel={cancelRegen} />
+          ) : (
+            <div>
+              <Button size="sm" variant="ghost" onClick={() => setShowRegen(true)}>
+                สร้างรหัสสำรองใหม่
+              </Button>
+            </div>
+          )}
 
-        {showDisable ? (
-          <DisablePanel
-            password={disablePassword}
-            onPassword={setDisablePassword}
-            busy={busy}
-            onSubmit={doDisable}
-            onCancel={cancelDisable}
-          />
-        ) : (
-          <div>
-            <Button size="sm" variant="dangerQuiet" onClick={() => setShowDisable(true)}>
-              ปิด 2FA
-            </Button>
-          </div>
-        )}
-      </div>
-    );
-  } else {
-    body = <NotEnabledPanel busy={busy} onStart={beginSetup} />;
+          {showDisable ? (
+            <DisablePanel
+              password={disablePassword}
+              onPassword={setDisablePassword}
+              busy={busy}
+              onSubmit={doDisable}
+              onCancel={cancelDisable}
+            />
+          ) : (
+            <div>
+              <Button size="sm" variant="dangerQuiet" onClick={() => setShowDisable(true)}>
+                ปิด 2FA
+              </Button>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return <NotEnabledPanel busy={busy} onStart={beginSetup} />;
   }
+
+  const body = renderBody();
 
   if (collapsible) {
     const expanded = open || backupCodes != null || setup != null;
@@ -568,7 +573,7 @@ export function TwoFactorSettings({
           </div>
           {status && !backupCodes && !setup && (
             <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={expanded}>
-              {expanded ? "ซ่อน" : status.enabled ? "จัดการ" : "เปิดใช้"}
+              {toggleLabel(expanded, status.enabled)}
             </Button>
           )}
         </div>
@@ -604,4 +609,9 @@ export function TwoFactorSettings({
       {body}
     </div>
   );
+}
+
+function toggleLabel(expanded: boolean, enabled: boolean) {
+  if (expanded) return "ซ่อน";
+  return enabled ? "จัดการ" : "เปิดใช้";
 }

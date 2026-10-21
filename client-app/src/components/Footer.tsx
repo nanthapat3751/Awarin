@@ -199,9 +199,14 @@ export function Footer() {
         <div className="max-w-5xl mx-auto px-4 py-4 text-xs text-slate-500 text-center">
           {/* ระหว่างรอไม่ใส่ชื่อสำรองในบรรทัดลิขสิทธิ์ — ชื่อบริษัทจริงมาแล้วค่อยเติม
               ชื่อที่ลงท้ายด้วยจุดอยู่แล้ว ("Co., Ltd.") ไม่เติมจุดซ้ำ — เดิมขึ้นเป็น "Ltd.." */}
-          © {year} {pending ? "" : `${companyName.endsWith(".") ? companyName : `${companyName}.`} `}สงวนลิขสิทธิ์
+          © {year} {pending ? "" : `${withFullStop(companyName)} `}สงวนลิขสิทธิ์
         </div>
       </div>
     </footer>
   );
+}
+
+/** ชื่อที่ลงท้ายด้วยจุดอยู่แล้ว ("Co., Ltd.") ไม่เติมจุดซ้ำ */
+function withFullStop(name: string) {
+  return name.endsWith(".") ? name : `${name}.`;
 }

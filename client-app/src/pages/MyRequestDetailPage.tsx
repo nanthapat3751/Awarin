@@ -159,7 +159,7 @@ function StatusSteps({ lead }: Readonly<{ lead: CustomerLeadDto }>) {
               <span
                 aria-hidden
                 className={`absolute top-3.5 right-1/2 h-0.5 w-full -translate-y-1/2 ${
-                  lineDone ? (step.state === "stopped" ? "bg-rose-300" : "bg-brand") : "bg-slate-200"
+                  lineTone(lineDone, step.state === "stopped")
                 }`}
               />
             )}
@@ -219,7 +219,7 @@ export function MyRequestDetailPage() {
       .catch(() => undefined);
   }, []);
 
-  usePageMeta(loading ? undefined : lead ? `คำขอ ${lead.serviceType}` : "คำขอของฉัน");
+  usePageMeta(loading ? undefined : requestTitle(lead));
 
   if (loading) {
     return (
@@ -370,4 +370,14 @@ export function MyRequestDetailPage() {
       </div>
     </PortalPage>
   );
+}
+
+/** เส้นเชื่อมระหว่างขั้น: ผ่านแล้ว = สีแบรนด์ (ถูกปฏิเสธ = ชมพู) · ยังไม่ถึง = เทา */
+function lineTone(done: boolean, stopped: boolean) {
+  if (!done) return "bg-slate-200";
+  return stopped ? "bg-rose-300" : "bg-brand";
+}
+
+function requestTitle(lead: CustomerLeadDto | null) {
+  return lead ? `คำขอ ${lead.serviceType}` : "คำขอของฉัน";
 }

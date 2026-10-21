@@ -8,13 +8,13 @@
  * แต่ยังกรองซ้ำอีกชั้นเผื่อ state ค้างมาจากที่อื่น — รับเฉพาะ path ภายในเว็บ ("/…" แต่ไม่ใช่ "//…"
  * หรือ "/\…" ซึ่งเบราว์เซอร์ตีความเป็นโดเมนอื่น) กัน open redirect
  */
-const AUTH_PAGES = ["/login", "/register"];
+const AUTH_PAGES = new Set(["/login", "/register"]);
 
 export function returnPathFrom(state: unknown): string {
   const from = (state as { from?: unknown } | null)?.from;
   if (typeof from !== "string" || !from.startsWith("/")) return "/";
   if (from.startsWith("//") || from.startsWith("/\\")) return "/";
   const path = from.split(/[?#]/)[0];
-  if (AUTH_PAGES.includes(path)) return "/";
+  if (AUTH_PAGES.has(path)) return "/";
   return from;
 }

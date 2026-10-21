@@ -276,7 +276,7 @@ describe("ชิ้นส่วนโครงสร้าง + เทียบ�
     // ก่อน: (B1 + B2) เท่ากัน · หลัง: B1 ยาวเป็นสองเท่า → รวม 1.5 เท่า (เหล็กตรงตามความยาว)
     expect(Number(after.quantity)).toBeCloseTo(Number(before.quantity) * 1.5, 0);
     const stored = await prisma.structuralMember.findFirstOrThrow({ where: { key: b1.key } });
-    expect((stored.input as { length: number }).length).toBe(6);
+    expect(stored.input).toMatchObject({ length: 6 });
   });
 
   it("แก้ชิ้นส่วนจนขนาดเหล็กหาย: บรรทัดที่ไม่เหลือแถวถูกลบ · ขนาดใหม่สร้างบรรทัดใหม่", async () => {

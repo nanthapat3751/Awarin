@@ -36,6 +36,8 @@ const STAFF_SELECT = {
   createdAt: true,
 } as const;
 
+const NO_SESSIONS: { count: number; lastSeenAt: Date | null } = { count: 0, lastSeenAt: null };
+
 function toStaffDto(user: {
   id: string;
   username: string | null;
@@ -46,7 +48,7 @@ function toStaffDto(user: {
   role: string;
   active: boolean;
   createdAt: Date;
-}, sessions: { count: number; lastSeenAt: Date | null } = { count: 0, lastSeenAt: null }): StaffUserDto {
+}, sessions: { count: number; lastSeenAt: Date | null } = NO_SESSIONS): StaffUserDto {
   return {
     id: user.id,
     username: user.username,

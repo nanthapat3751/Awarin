@@ -69,7 +69,24 @@ function escapeHtml(value: string): string {
 }
 
 const qty = (v: string | null) => (v == null ? "—" : Number(v).toLocaleString("en-US", { maximumFractionDigits: 3 }));
-const signed = (n: number) => (n > 0 ? `+${money(n)}` : n < 0 ? `−${money(-n)}` : money(0));
+function signed(n: number): string {
+  if (n > 0) return `+${money(n)}`;
+  if (n < 0) return `−${money(-n)}`;
+  return money(0);
+}
+
+function directionOf(total: number): string {
+  if (total > 0) return "เพิ่มขึ้น";
+  if (total < 0) return "ลดลง";
+  return "ไม่เปลี่ยน";
+}
+
+/** เงื่อนไขการเก็บ/หักเงินตามทิศของยอด — ยอดไม่เปลี่ยน = ไม่มีข้อนี้ */
+function paymentTerm(total: number): string | null {
+  if (total > 0) return "ค่างานเพิ่มเรียกเก็บเป็นงวดใหม่ต่อท้ายงวดตามสัญญา เมื่อทำงานตามใบนี้แล้วเสร็จ";
+  if (total < 0) return "ค่างานที่ลดลงหักจากงวดท้ายที่ยังไม่ได้ชำระ";
+  return null;
+}
 
 const KIND_LABEL: Record<ChangeOrderLineDto["kind"], string> = { added: "เพิ่ม", removed: "ตัดออก", changed: "แก้" };
 
@@ -126,14 +143,15 @@ function renderTotals(d: ChangeOrderPdfData): string {
   if (d.vatAmount !== 0) {
     rows.push(row("เพิ่ม/ลดสุทธิก่อนภาษีมูลค่าเพิ่ม", signed(d.netBeforeVat)), row("ภาษีมูลค่าเพิ่ม", signed(d.vatAmount)));
   }
-  const direction = d.totalAmount > 0 ? "เพิ่มขึ้น" : d.totalAmount < 0 ? "ลดลง" : "ไม่เปลี่ยน";
+  const direction = directionOf(d.totalAmount);
   rows.push(row(`มูลค่างาน${direction}สุทธิ`, signed(d.totalAmount), "grand"));
   if (d.amountBefore != null && d.amountAfter != null) {
     rows.push(row("มูลค่าสัญญาก่อนใบนี้", money(d.amountBefore), "sub"), row("มูลค่าสัญญาหลังใบนี้", money(d.amountAfter), "net"));
   }
+  const words = d.totalAmount === 0 ? "ศูนย์บาทถ้วน" : `${direction} ${bahtText(Math.abs(d.totalAmount))}`;
   return `
     <table class="totals">${rows.join("")}</table>
-    <div class="words">(${d.totalAmount === 0 ? "ศูนย์บาทถ้วน" : `${direction} ${bahtText(Math.abs(d.totalAmount))}`})</div>`;
+    <div class="words">(${words})</div>`;
 }
 
 function renderTerms(d: ChangeOrderPdfData): string {
@@ -141,24 +159,20 @@ function renderTerms(d: ChangeOrderPdfData): string {
     d.extensionDays && d.extensionDays > 0
       ? `ขยายระยะเวลาก่อสร้างออกไปอีก ${d.extensionDays} วัน นับต่อจากกำหนดเดิมตามสัญญา`
       : "ระยะเวลาก่อสร้างคงเดิมตามสัญญา",
-    d.totalAmount > 0
-      ? "ค่างานเพิ่มเรียกเก็บเป็นงวดใหม่ต่อท้ายงวดตามสัญญา เมื่อทำงานตามใบนี้แล้วเสร็จ"
-      : d.totalAmount < 0
-        ? "ค่างานที่ลดลงหักจากงวดท้ายที่ยังไม่ได้ชำระ"
-        : null,
+    paymentTerm(d.totalAmount),
     `ข้อความอื่นในสัญญาเลขที่ ${escapeHtml(d.contractNo)} คงเดิมทุกประการ`,
   ].filter(Boolean);
-  const applied =
-    d.installmentChanges?.length && d.status === "APPROVED"
-      ? `<div class="applied">ปรับงวดเงินแล้ว: ${d.installmentChanges
-          .map((c) =>
-            c.from == null
-              ? `งวดที่ ${c.seq} (ใหม่) ${money(Number(c.to))} บาท`
-              : `งวดที่ ${c.seq} ${money(Number(c.from))} → ${money(Number(c.to))} บาท`,
-          )
-          .join(" · ")}</div>`
-      : "";
-  return `<ol class="terms">${items.map((t) => `<li>${t}</li>`).join("")}</ol>${applied}`;
+  const changes = d.installmentChanges?.length && d.status === "APPROVED" ? d.installmentChanges : [];
+  const changeText = changes
+    .map((c) =>
+      c.from == null
+        ? `งวดที่ ${c.seq} (ใหม่) ${money(Number(c.to))} บาท`
+        : `งวดที่ ${c.seq} ${money(Number(c.from))} → ${money(Number(c.to))} บาท`,
+    )
+    .join(" · ");
+  const applied = changes.length > 0 ? `<div class="applied">ปรับงวดเงินแล้ว: ${changeText}</div>` : "";
+  const listItems = items.map((t) => `<li>${t}</li>`).join("");
+  return `<ol class="terms">${listItems}</ol>${applied}`;
 }
 
 function renderSignatures(d: ChangeOrderPdfData): string {
@@ -168,10 +182,9 @@ function renderSignatures(d: ChangeOrderPdfData): string {
        <div class="sign-who"><div>( ${escapeHtml(d.customerName ?? "ผู้ว่าจ้าง")} )</div><div class="sign-date">เมื่อ ${thaiDate(d.respondedAt!)}</div></div>`
     : `<div class="sign-line">ลงชื่อ ....................................... ผู้ว่าจ้าง</div>
        <div class="sign-who"><div>( ${escapeHtml(d.customerName ?? ".......................................")} )</div><div class="sign-date">วันที่ ........./........./.........</div></div>`;
+  const title = d.contractorTitle ? `<div>${escapeHtml(d.contractorTitle)}</div>` : "";
   const contractor = `<div class="sign-line">ลงชื่อ ....................................... ผู้รับจ้าง</div>
-       <div class="sign-who"><div>( ${escapeHtml(d.contractorName ?? d.companyName)} )</div>${
-         d.contractorTitle ? `<div>${escapeHtml(d.contractorTitle)}</div>` : ""
-       }<div class="sign-date">วันที่ ........./........./.........</div></div>`;
+       <div class="sign-who"><div>( ${escapeHtml(d.contractorName ?? d.companyName)} )</div>${title}<div class="sign-date">วันที่ ........./........./.........</div></div>`;
   return `<div class="signers"><div class="sign-col">${owner}</div><div class="sign-col">${contractor}</div></div>`;
 }
 
@@ -181,7 +194,8 @@ function renderStatusMarks(d: ChangeOrderPdfData): string {
     return `<div class="watermark red" aria-hidden="true">ยกเลิก</div><div class="banner">ใบนี้ถูกยกเลิกแล้ว · ใช้อ้างอิงไม่ได้</div>`;
   }
   if (d.status === "REJECTED") {
-    return `<div class="banner">ผู้ว่าจ้างไม่อนุมัติใบนี้${d.respondedAt ? ` เมื่อ ${thaiDate(d.respondedAt)}` : ""} · ไม่มีผลกับสัญญา</div>`;
+    const when = d.respondedAt ? ` เมื่อ ${thaiDate(d.respondedAt)}` : "";
+    return `<div class="banner">ผู้ว่าจ้างไม่อนุมัติใบนี้${when} · ไม่มีผลกับสัญญา</div>`;
   }
   return "";
 }

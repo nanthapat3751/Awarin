@@ -21,18 +21,12 @@ const round3 = (n: number) => Math.round(n * 1000) / 1000;
  * - ชิ้นส่วนที่ถูกลบแถวออกหมดแล้วไม่นับ · บรรทัดเหล็กที่ไม่มีแถวจากชิ้นส่วนเลย = "ไม่มีข้อมูลเทียบ" (ไม่เดา)
  * ทุกตัวเลขเป็นปริมาณสุทธิก่อนเผื่อเสีย (กก.)
  */
-export async function structuralCompare(versionId: string, rules: TakeoffRulePresets): Promise<StructuralCompareDto> {
-  const [members, items] = await Promise.all([
-    prisma.structuralMember.findMany({ where: { projectVersionId: versionId }, orderBy: { createdAt: "asc" } }),
-    prisma.boqItem.findMany({
-      where: { projectVersionId: versionId },
-      select: { id: true, name: true, unit: true, takeoffRows: true },
-    }),
-  ]);
-  const memberByKey = new Map(members.map((m) => [m.key, m]));
+type Share = Map<string, number>;
+type CompareItem = { id: string; takeoffRows: { label: string; count: unknown; length: unknown; width: unknown; height: unknown; barDia: number | null; deduct: boolean; memberKey: string | null }[] };
+type CompareMember = { key: string; input: unknown };
 
-  // แถวเหล็กที่ผูกกับชิ้นส่วนที่ยังมีอยู่: (ชิ้นส่วน, ขนาด) → บรรทัด → น้ำหนักเสนอราคา
-  type Share = Map<string, number>;
+/** แถวเหล็กที่ผูกกับชิ้นส่วนที่ยังมีอยู่: (ชิ้นส่วน, ขนาด) → บรรทัด → น้ำหนักเสนอราคา · แถวเหล็กที่ไม่มีชิ้นส่วน = กรอกเอง */
+function tenderShares(items: CompareItem[], memberByKey: Map<string, CompareMember>) {
   const tenderBy = new Map<string, Share>();
   const manualRows = new Map<string, number>();
   const linkedItems = new Set<string>();
@@ -44,28 +38,29 @@ export async function structuralCompare(versionId: string, rules: TakeoffRulePre
         manualRows.set(item.id, (manualRows.get(item.id) ?? 0) + 1);
         continue;
       }
-      const kg = takeoffRowValue(
-        {
-          label: r.label,
-          count: Number(r.count),
-          length: r.length == null ? null : Number(r.length),
-          width: r.width == null ? null : Number(r.width),
-          height: r.height == null ? null : Number(r.height),
-          barDia: r.barDia,
-        },
-        "กก.",
-      ) * (r.deduct ? -1 : 1);
       const key = `${member.key}|${r.barDia}`;
       const share = tenderBy.get(key) ?? new Map<string, number>();
-      share.set(item.id, (share.get(item.id) ?? 0) + kg);
+      share.set(item.id, (share.get(item.id) ?? 0) + rowKg(r));
       tenderBy.set(key, share);
       linkedItems.add(item.id);
     }
   }
+  return { tenderBy, manualRows, linkedItems };
+}
 
-  // ชิ้นส่วนที่ยังมีแถวอยู่ คิดด้วยชุดสั่งตัด (คิดครั้งเดียวต่อชิ้นส่วน)
+/** น้ำหนักเหล็กของแถวใบถอดแบบหนึ่งแถว (แถวหักติดลบ) */
+function rowKg(r: CompareItem["takeoffRows"][number]): number {
+  const num = (v: unknown) => (v == null ? null : Number(v));
+  const kg = takeoffRowValue(
+    { label: r.label, count: Number(r.count), length: num(r.length), width: num(r.width), height: num(r.height), barDia: r.barDia },
+    "กก.",
+  );
+  return kg * (r.deduct ? -1 : 1);
+}
+
+/** ชิ้นส่วนที่ยังมีแถวอยู่ คิดด้วยชุดสั่งตัด (คิดครั้งเดียวต่อชิ้นส่วน) → (ชิ้นส่วน, ขนาด) → น้ำหนัก/ความยาว */
+function siteWeights(used: CompareMember[], rules: TakeoffRulePresets): Map<string, { kg: number; length: number }> {
   const siteBy = new Map<string, { kg: number; length: number }>();
-  const used = members.filter((m) => [...tenderBy.keys()].some((k) => k.startsWith(`${m.key}|`)));
   for (const m of used) {
     const input = m.input as unknown as StructuralInput;
     const out = structuralTakeoff({ ...input, settings: settingsFromRuleSet(rules.site, input.settings?.cover ?? 0) });
@@ -78,7 +73,11 @@ export async function structuralCompare(versionId: string, rules: TakeoffRulePre
       siteBy.set(key, cur);
     }
   }
+  return siteBy;
+}
 
+/** รวมตามขนาด และแบ่งน้ำหนักสั่งตัดลงแต่ละบรรทัดตามสัดส่วนแถวเสนอราคา (ไม่นับซ้ำ) */
+function spreadSiteOverLines(tenderBy: Map<string, Share>, siteBy: Map<string, { kg: number; length: number }>) {
   const lineMap = new Map<string, { tenderNet: number; siteNet: number }>();
   const diaMap = new Map<number, { tenderNet: number; siteNet: number; siteLength: number }>();
   for (const [key, share] of tenderBy) {
@@ -98,6 +97,21 @@ export async function structuralCompare(versionId: string, rules: TakeoffRulePre
       lineMap.set(itemId, l);
     }
   }
+  return { lineMap, diaMap };
+}
+
+export async function structuralCompare(versionId: string, rules: TakeoffRulePresets): Promise<StructuralCompareDto> {
+  const [members, items] = await Promise.all([
+    prisma.structuralMember.findMany({ where: { projectVersionId: versionId }, orderBy: { createdAt: "asc" } }),
+    prisma.boqItem.findMany({
+      where: { projectVersionId: versionId },
+      select: { id: true, name: true, unit: true, takeoffRows: true },
+    }),
+  ]);
+  const { tenderBy, manualRows, linkedItems } = tenderShares(items, new Map(members.map((m) => [m.key, m])));
+  const used = members.filter((m) => [...tenderBy.keys()].some((k) => k.startsWith(`${m.key}|`)));
+  const siteBy = siteWeights(used, rules);
+  const { lineMap, diaMap } = spreadSiteOverLines(tenderBy, siteBy);
 
   return {
     members: used.map((m) => ({ label: m.label, kind: m.kind, count: m.count })),
