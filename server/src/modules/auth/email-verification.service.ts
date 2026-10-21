@@ -97,14 +97,6 @@ export async function sendVerificationCode(
 ): Promise<SendCodeResult> {
   if (!user.email) throw new AuthError("บัญชีนี้ไม่มีอีเมล", 400);
 
-  const existing = await prisma.emailVerification.findUnique({ where: { userId: user.id } });
-  if (existing) {
-    const waited = Date.now() - existing.sentAt.getTime();
-    if (waited < RESEND_COOLDOWN_MS) {
-      return { sent: false, retryAfterSeconds: Math.ceil((RESEND_COOLDOWN_MS - waited) / 1000) };
-    }
-  }
-
   const code = generateCode();
   const data = {
     codeHash: hashCode(code),
@@ -112,11 +104,23 @@ export async function sendVerificationCode(
     attempts: 0,
     sentAt: new Date(),
   };
-  await prisma.emailVerification.upsert({
-    where: { userId: user.id },
-    create: { userId: user.id, ...data },
-    update: data,
+  const waitSeconds = await prisma.$transaction(async (tx) => {
+    // ล็อกแถวผู้ใช้ก่อนตรวจช่วงพัก — กด "ส่งรหัสใหม่" ซ้อนกันหลายคำขอพร้อมกันต้องได้เมลฉบับเดียว
+    // (เดิมทุกคำขออ่านรหัสเดิมพร้อมกันแล้วส่งคนละฉบับ รหัสคนละตัว ใช้ได้แค่ตัวล่าสุด — BUG-API-006)
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE`;
+    const existing = await tx.emailVerification.findUnique({ where: { userId: user.id } });
+    if (existing) {
+      const waited = Date.now() - existing.sentAt.getTime();
+      if (waited < RESEND_COOLDOWN_MS) return Math.ceil((RESEND_COOLDOWN_MS - waited) / 1000);
+    }
+    await tx.emailVerification.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, ...data },
+      update: data,
+    });
+    return null;
   });
+  if (waitSeconds !== null) return { sent: false, retryAfterSeconds: waitSeconds };
 
   const ok = await sendMail({ to: user.email, ...(await verificationEmail(code, user.fullName, user.email, purpose)) });
   if (!ok) {

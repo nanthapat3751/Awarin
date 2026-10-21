@@ -38,6 +38,17 @@ const PAY_PROJECT_PREFIX = "[โรบอท] ทดสอบชำระเง�
 const API_PROJECT_PREFIX = "[โรบอท] ทดสอบ API";
 /** บัญชีรับเงินของบริษัทในฐานทดสอบ — ชื่อไฟล์สลิปจำลองต้องใช้เลขนี้ (robot-tests/frontend/04_payments.robot) */
 const PAY_ACCOUNT_NO = "7260851635";
+/** โครงการของชุดหน้าจอ: เดินงานขาย (ใบเสนอราคา → ใบเสร็จ) / ปฏิเสธ / ถังขยะ / Excel — ลบของรอบก่อนแล้วสร้างใหม่ทุกรอบ */
+const SALES_PREFIX = "[โรบอท] ทดสอบขายงาน";
+const REJECT_PREFIX = "[โรบอท] ทดสอบปฏิเสธ";
+const TRASH_PREFIX = "[โรบอท] ทดสอบถังขยะ";
+const EXCEL_PREFIX = "[โรบอท] ทดสอบ Excel";
+/** ชุด API R-31: ชื่อลูกค้า/โครงการ/ที่อยู่ที่มี HTML — ต้องพิมพ์ออกมาเป็นตัวอักษร ไม่ใช่ถูกตีเป็นแท็ก */
+const XSS_PREFIX = "[โรบอท] ทดสอบ XSS";
+const XSS_MARK = '<img src=x onerror="alert(1)">';
+/** secret ของ robot_twofa (base32) — Robot คำนวณรหัส 6 หลักเองจากค่านี้ (common.robot ต้องตรงกัน) */
+const TWOFA_SECRET = "KRUGS4ZANFZSA5DFON2CA43FMNZGK5BB";
+const TWOFA_BACKUP_CODES = ["RBTA-AAAA", "RBTB-BBBB"];
 
 /** ต้องตรงกับ robot-tests/common.robot */
 export const ROBOT_ACCOUNTS = {
@@ -57,6 +68,20 @@ export const ROBOT_ACCOUNTS = {
   deact: { email: "robot.deact@example.test", password: "Robot-Deact-2026!", fullName: "ลูกค้าระงับบัญชี โรบอท" },
   // เจ้าของสัญญาชุด API — แยกจาก robot.customer ของชุดหน้าจอ ไม่ให้งวดของสองชุดปนกันในพอร์ทัล
   apiCustomer: { email: "robot.apicust@example.test", password: "Robot-ApiCust-2026!", fullName: "ลูกค้า API โรบอท" },
+  // ชุดหน้าจอส่วนที่เพิ่ม (ช่องว่าง UI-GAP): 2FA · กระดิ่ง · ลืมรหัสผ่าน · เดินงานขาย
+  twofaStaff: { username: "robot_twofa", password: "Robot-TwoFaStaff-2026!", fullName: "โรบอท สองชั้น" },
+  bell: { username: "robot_bell", password: "Robot-Bell-2026!", fullName: "โรบอท กระดิ่ง" },
+  forgotStaff: { username: "robot_forgot", password: "Robot-ForgotStaff-2026!", fullName: "โรบอท ลืมรหัส", email: "robot.staff.forgot@example.test" },
+  forgotCustomer: { email: "robot.forgot@example.test", password: "Robot-Forgot-2026!", fullName: "ลูกค้าลืมรหัส โรบอท" },
+  sales: { email: "robot.sales@example.test", password: "Robot-Sales-2026!", fullName: "ลูกค้าขายงาน โรบอท" },
+  // ชุด API R-31 — ชื่อมี HTML (สร้างตรงลงฐานข้อมูล เหมือนข้อมูลเก่า/นำเข้า ที่ไม่ได้ผ่านกฎชื่อของหน้าสมัคร)
+  xss: { email: "robot.xss@example.test", password: "Robot-Xss-2026!", fullName: `${XSS_MARK} โรบอท` },
+  // ชุด API R-32 (ยิงขอเมลถี่ ๆ) — แยกบัญชีไม่ให้ช่วงพัก 60 วินาทีไปปนกับเคสหน้าจอ
+  mailFlood: { email: "robot.mailflood@example.test", password: "Robot-MailFlood-2026!", fullName: "ลูกค้าเมลถี่ โรบอท" },
+  codeFlood: { email: "robot.codeflood@example.test", password: "Robot-CodeFlood-2026!", fullName: "ลูกค้ารหัสถี่ โรบอท" },
+  // คู่ของสองบัญชีข้างบนสำหรับเคส "ยิงพร้อมกัน" — ช่วงพักของเคสยิงทีละครั้งจะไม่ไปบังผล
+  mailBurst: { email: "robot.mailburst@example.test", password: "Robot-MailBurst-2026!", fullName: "ลูกค้าเมลพร้อมกัน โรบอท" },
+  codeBurst: { email: "robot.codeburst@example.test", password: "Robot-CodeBurst-2026!", fullName: "ลูกค้ารหัสพร้อมกัน โรบอท" },
 } as const;
 
 async function main() {
@@ -70,27 +95,54 @@ async function main() {
     mustChangePassword: false,
     totpEnabled: false,
     totpSecret: null,
+    totpLastStep: null,
     twoFactorFailedCount: 0,
     twoFactorLockedUntil: null,
     twoFactorBackupCodes: [],
   };
 
-  const staffRoles = { owner: "OWNER", lock: "OWNER", admin: "ADMIN", lockApi: "ADMIN" } as const;
-  for (const key of ["owner", "lock", "admin", "lockApi"] as const) {
+  const { hashBackupCode } = await import("../../server/src/lib/totp");
+  const staffRoles = {
+    owner: "OWNER", lock: "OWNER", admin: "ADMIN", lockApi: "ADMIN", twofaStaff: "ADMIN", bell: "ADMIN", forgotStaff: "ADMIN",
+  } as const;
+  for (const key of ["owner", "lock", "admin", "lockApi", "twofaStaff", "bell", "forgotStaff"] as const) {
     const a = ROBOT_ACCOUNTS[key];
     const passwordHash = await hashPassword(a.password);
     const role = staffRoles[key];
-    await prisma.user.upsert({
+    // robot_twofa เปิด 2FA ไว้แล้วทุกรอบ (secret + รหัสสำรองที่รู้ค่า) · robot_forgot มีอีเมลกู้รหัสผ่าน
+    const extra = {
+      ...("email" in a ? { email: a.email, emailVerifiedAt: new Date() } : {}),
+      ...(key === "twofaStaff"
+        ? { totpEnabled: true, totpSecret: TWOFA_SECRET, twoFactorBackupCodes: TWOFA_BACKUP_CODES.map(hashBackupCode) }
+        : {}),
+    };
+    const user = await prisma.user.upsert({
       where: { username: a.username },
-      create: { username: a.username, passwordHash, fullName: a.fullName, role, ...resetFlags },
-      update: { passwordHash, fullName: a.fullName, role, ...resetFlags },
+      create: { username: a.username, passwordHash, fullName: a.fullName, role, ...resetFlags, ...extra },
+      update: { passwordHash, fullName: a.fullName, role, ...resetFlags, ...extra },
     });
+    // กระดิ่งของ robot_bell เริ่มที่ศูนย์ทุกรอบ ชุดทดสอบจึงนับเลขได้แน่นอน
+    if (key === "bell") await prisma.notification.deleteMany({ where: { userId: user.id } });
   }
+  // ลิงก์ตั้งรหัสใหม่ค้างจากรอบก่อน = ขอใหม่ไม่ได้ 60 วินาที (กันยิงเมลถี่) — ล้างทิ้งก่อนทุกรอบ
+  await prisma.passwordResetToken.deleteMany({
+    where: {
+      user: {
+        OR: [
+          { username: ROBOT_ACCOUNTS.forgotStaff.username },
+          { email: { in: [ROBOT_ACCOUNTS.forgotCustomer.email, ROBOT_ACCOUNTS.mailFlood.email, ROBOT_ACCOUNTS.mailBurst.email] } },
+        ],
+      },
+    },
+  });
 
-  for (const key of ["customer", "unverified", "other", "lockCustomer", "twofa", "pwchange", "deleter", "deact", "apiCustomer"] as const) {
+  for (const key of [
+    "customer", "unverified", "other", "lockCustomer", "twofa", "pwchange", "deleter", "deact", "apiCustomer",
+    "forgotCustomer", "sales", "xss", "mailFlood", "codeFlood", "mailBurst", "codeBurst",
+  ] as const) {
     const a = ROBOT_ACCOUNTS[key];
     const passwordHash = await hashPassword(a.password);
-    const emailVerifiedAt = key === "unverified" ? null : new Date();
+    const emailVerifiedAt = key === "unverified" || key === "codeFlood" || key === "codeBurst" ? null : new Date();
     await prisma.user.upsert({
       where: { email: a.email },
       create: {
@@ -105,6 +157,11 @@ async function main() {
       update: { passwordHash, fullName: a.fullName, emailVerifiedAt, ...resetFlags },
     });
   }
+
+  // รหัสยืนยันที่ส่งค้างจากรอบก่อน = ส่งใหม่ไม่ได้ 60 วินาที — ล้างทิ้งก่อนทุกรอบ
+  await prisma.emailVerification.deleteMany({
+    where: { user: { email: { in: [ROBOT_ACCOUNTS.codeFlood.email, ROBOT_ACCOUNTS.codeBurst.email, ROBOT_ACCOUNTS.unverified.email] } } },
+  });
 
   // หมวดงานสามชั้นสำหรับเพิ่มบรรทัด BOQ (บรรทัดต้องผูกกับระดับ ITEM)
   const cat = await prisma.workCategory.upsert({
@@ -126,7 +183,7 @@ async function main() {
   // ใบเสร็จต้องมีที่อยู่ลูกค้า (assertReceiptIssuable) — ลูกค้าเจ้าของสัญญาทดสอบต้องมีเสมอ
   const address = "99 ถนนทดสอบ ตำบลทดสอบ อำเภอเมือง จังหวัดนครปฐม 73000";
   const owners = [];
-  for (const email of [ROBOT_ACCOUNTS.customer.email, ROBOT_ACCOUNTS.apiCustomer.email]) {
+  for (const email of [ROBOT_ACCOUNTS.customer.email, ROBOT_ACCOUNTS.apiCustomer.email, ROBOT_ACCOUNTS.sales.email, ROBOT_ACCOUNTS.xss.email]) {
     const u = await prisma.user.findUniqueOrThrow({ where: { email } });
     await prisma.customerProfile.upsert({
       where: { userId: u.id },
@@ -135,11 +192,17 @@ async function main() {
     });
     owners.push(u);
   }
-  const [customer, apiCustomer] = owners;
+  const [customer, apiCustomer, salesCustomer, xssCustomer] = owners;
 
   await seedPayments(prisma, customer.id, { prefix: PAY_PROJECT_PREFIX, file: "payment-data.json", vars: "PAY", account: ROBOT_ACCOUNTS.customer });
   // ชุดทดสอบ API ใช้สัญญาของตัวเอง — ฝั่งหน้าจอยืนยัน/รับเงินงวด 1–3 ของสัญญาข้างบนไปแล้วก่อน API รัน
   await seedPayments(prisma, apiCustomer.id, { prefix: API_PROJECT_PREFIX, file: "api-data.json", vars: "API", account: ROBOT_ACCOUNTS.apiCustomer });
+  // R-31: ชื่อลูกค้า/โครงการ/ที่ตั้งงานมี HTML แล้วเปิดเอกสาร PDF ทุกใบ
+  await seedPayments(prisma, xssCustomer.id, {
+    prefix: XSS_PREFIX, file: "xss-data.json", vars: "XSS", account: ROBOT_ACCOUNTS.xss,
+    nameSuffix: ` ${XSS_MARK}`, siteAddress: `ที่ตั้ง <script>alert(2)</script> ${XSS_MARK}`,
+  });
+  await seedUiProjects(prisma, salesCustomer.id, customer.id);
 
   console.log("robot seed ok:", Object.values(ROBOT_ACCOUNTS).map((a) => ("username" in a ? a.username : a.email)).join(", "));
   await prisma.$disconnect();
@@ -153,44 +216,20 @@ async function main() {
 async function seedPayments(
   prisma: typeof import("../../server/src/lib/prisma").prisma,
   customerId: string,
-  opts: { prefix: string; file: string; vars: string; account: { email: string; password: string } },
+  opts: {
+    prefix: string; file: string; vars: string; account: { email: string; password: string };
+    nameSuffix?: string; siteAddress?: string;
+  },
 ) {
-  const fs = await import("node:fs");
   const { default: request } = await import("supertest");
   const { app } = await import("../../server/src/app");
   const { todayIso } = await import("../../server/src/lib/business-date");
-  const { evidencePath } = await import("../../server/src/modules/contracts/payment-evidence.files");
 
   // ลบโครงการชำระเงินของรอบก่อน (พร้อมไฟล์สลิป) — ไม่งั้นพอร์ทัลลูกค้าทดสอบมีหลายสัญญาปนกัน
-  const old = await prisma.project.findMany({ where: { name: { startsWith: opts.prefix } }, select: { id: true } });
-  if (old.length > 0) {
-    const ids = old.map((p) => p.id);
-    const files = await prisma.paymentEvidence.findMany({
-      where: {
-        OR: [
-          { notice: { installment: { contract: { projectId: { in: ids } } } } },
-          { payment: { installment: { contract: { projectId: { in: ids } } } } },
-        ],
-      },
-      select: { storedName: true },
-    });
-    for (const f of files) fs.rmSync(evidencePath(f.storedName), { force: true });
-    await prisma.contract.deleteMany({ where: { projectId: { in: ids } } });
-    await prisma.quote.deleteMany({ where: { projectId: { in: ids } } });
-    await prisma.projectVersion.deleteMany({ where: { projectId: { in: ids } } });
-    await prisma.project.deleteMany({ where: { id: { in: ids } } });
-  }
+  await removeProjects(prisma, opts.prefix);
   await prisma.notification.deleteMany({ where: { userId: customerId } });
 
-  const owner = request.agent(app);
-  const login = await owner
-    .post("/api/auth/staff/login")
-    .send({ username: ROBOT_ACCOUNTS.owner.username, password: ROBOT_ACCOUNTS.owner.password });
-  if (login.status !== 200) throw new Error(`seed: staff login ${login.status}`);
-  const ok = (res: { status: number; body: unknown }, what: string) => {
-    if (res.status >= 300) throw new Error(`seed: ${what} ${res.status} ${JSON.stringify(res.body)}`);
-    return res;
-  };
+  const owner = await staffAgent();
 
   ok(
     await owner.patch("/api/settings").send({
@@ -203,8 +242,11 @@ async function seedPayments(
 
   const item = await prisma.workCategory.findUniqueOrThrow({ where: { code: "R-01-01" } });
   const stamp = new Date().toISOString().slice(5, 19).replace(/[-T:]/g, "");
-  const name = `${opts.prefix} ${stamp}`;
-  const proj = ok(await owner.post("/api/projects").send({ name, siteAddress: "ที่ตั้งทดสอบโรบอท", customerId }), "project");
+  const name = `${opts.prefix} ${stamp}${opts.nameSuffix ?? ""}`;
+  const proj = ok(
+    await owner.post("/api/projects").send({ name, siteAddress: opts.siteAddress ?? "ที่ตั้งทดสอบโรบอท", customerId }),
+    "project",
+  );
   const projectId = proj.body.project.id as string;
   ok(
     await owner.post(`/api/projects/${projectId}/boq/items`).send({
@@ -245,8 +287,6 @@ async function seedPayments(
     return d.amountToPay.toFixed(2);
   };
 
-  const outDir = path.resolve(__dirname, "..", "results");
-  fs.mkdirSync(outDir, { recursive: true });
   const v = opts.vars;
   const data: Record<string, string> = {
     [`${v}_PROJECT_ID`]: projectId,
@@ -264,8 +304,114 @@ async function seedPayments(
     [`${v}_AMOUNT_3`]: amount(3),
   };
   inst.forEach((i, idx) => (data[`${v}_INSTALLMENT_${idx + 1}`] = i.id));
-  fs.writeFileSync(path.join(outDir, opts.file), JSON.stringify(data, null, 1));
-  console.log(`${opts.file}:`, JSON.stringify(data));
+  writeVars(opts.file, data);
+}
+
+type Agent = import("supertest").Agent;
+
+function ok<T extends { status: number; body: unknown }>(res: T, what: string): T {
+  if (res.status >= 300) throw new Error(`seed: ${what} ${res.status} ${JSON.stringify(res.body)}`);
+  return res;
+}
+
+/** เซสชัน robot_owner ภายในโปรเซส seed (supertest) — ไม่กินเพดานเข้าสู่ระบบของ API ชุดทดสอบ */
+async function staffAgent(): Promise<Agent> {
+  const { default: request } = await import("supertest");
+  const { app } = await import("../../server/src/app");
+  const owner = request.agent(app);
+  const login = await owner
+    .post("/api/auth/staff/login")
+    .send({ username: ROBOT_ACCOUNTS.owner.username, password: ROBOT_ACCOUNTS.owner.password });
+  if (login.status !== 200) throw new Error(`seed: staff login ${login.status}`);
+  return owner;
+}
+
+function writeVars(file: string, data: Record<string, string>) {
+  const fs = require("node:fs") as typeof import("node:fs");
+  const outDir = path.resolve(__dirname, "..", "results");
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, file), JSON.stringify(data, null, 1));
+  console.log(`${file}:`, JSON.stringify(data));
+}
+
+/** ลบโครงการของรอบก่อนที่ชื่อขึ้นต้นด้วย prefix ให้หมด (รวมที่อยู่ในถังขยะ) พร้อมไฟล์สลิปและเอกสาร */
+async function removeProjects(prisma: typeof import("../../server/src/lib/prisma").prisma, prefix: string) {
+  const fs = await import("node:fs");
+  const { evidencePath } = await import("../../server/src/modules/contracts/payment-evidence.files");
+  const old = await prisma.project.findMany({ where: { name: { startsWith: prefix } }, select: { id: true } });
+  if (old.length === 0) return;
+  const ids = old.map((p) => p.id);
+  const files = await prisma.paymentEvidence.findMany({
+    where: {
+      OR: [
+        { notice: { installment: { contract: { projectId: { in: ids } } } } },
+        { payment: { installment: { contract: { projectId: { in: ids } } } } },
+      ],
+    },
+    select: { storedName: true },
+  });
+  for (const f of files) fs.rmSync(evidencePath(f.storedName), { force: true });
+  await prisma.contract.deleteMany({ where: { projectId: { in: ids } } });
+  await prisma.quote.deleteMany({ where: { projectId: { in: ids } } });
+  await prisma.projectVersion.deleteMany({ where: { projectId: { in: ids } } });
+  await prisma.project.deleteMany({ where: { id: { in: ids } } });
+}
+
+/**
+ * โครงการร่างพร้อมบรรทัด BOQ ให้ชุดหน้าจอเดินต่อเอง (ใบเสนอราคา/สัญญา/วางบิล ทำผ่านหน้าจอทั้งหมด)
+ *   SALES  — ลูกค้า robot.sales ยอมรับ → สัญญา → วางบิล → รับเงิน → ใบเสร็จ
+ *   REJECT — ลูกค้า robot.sales ปฏิเสธ
+ *   TRASH  — สองโครงการ: ลบแล้วกู้คืน / ลบแล้วลบถาวร
+ *   EXCEL  — ส่งออก BOQ แล้วนำไฟล์เดิมกลับเข้าไป
+ */
+async function seedUiProjects(
+  prisma: typeof import("../../server/src/lib/prisma").prisma,
+  salesCustomerId: string,
+  customerId: string,
+) {
+  for (const prefix of [SALES_PREFIX, REJECT_PREFIX, TRASH_PREFIX, EXCEL_PREFIX]) await removeProjects(prisma, prefix);
+  await prisma.notification.deleteMany({ where: { userId: salesCustomerId } });
+  const owner = await staffAgent();
+  const item = await prisma.workCategory.findUniqueOrThrow({ where: { code: "R-01-01" } });
+  const stamp = new Date().toISOString().slice(5, 19).replace(/[-T:]/g, "");
+
+  const make = async (name: string, customer: string | null, lines: { name: string; quantity: number; m: number; l: number }[]) => {
+    const proj = ok(
+      await owner.post("/api/projects").send({ name, siteAddress: "ที่ตั้งทดสอบโรบอท", ...(customer ? { customerId: customer } : {}) }),
+      "ui project",
+    );
+    const id = proj.body.project.id as string;
+    for (const x of lines) {
+      ok(
+        await owner.post(`/api/projects/${id}/boq/items`).send({
+          categoryId: item.id, name: x.name, quantity: x.quantity, unit: "หน่วย", materialUnitPrice: x.m, laborUnitPrice: x.l,
+        }),
+        "ui boq item",
+      );
+    }
+    return id;
+  };
+  const line = [{ name: "งานทดสอบขายงาน", quantity: 10, m: 30_000, l: 20_000 }];
+  const data: Record<string, string> = {
+    SALES_RUN: stamp,
+    SALES_EMAIL: ROBOT_ACCOUNTS.sales.email,
+    SALES_PASSWORD: ROBOT_ACCOUNTS.sales.password,
+    SALES_FULLNAME: ROBOT_ACCOUNTS.sales.fullName,
+    SALES_PROJECT_NAME: `${SALES_PREFIX} ${stamp}`,
+    REJECT_PROJECT_NAME: `${REJECT_PREFIX} ${stamp}`,
+    TRASH_RESTORE_NAME: `${TRASH_PREFIX} กู้คืน ${stamp}`,
+    TRASH_PURGE_NAME: `${TRASH_PREFIX} ลบถาวร ${stamp}`,
+    EXCEL_PROJECT_NAME: `${EXCEL_PREFIX} ${stamp}`,
+  };
+  data.SALES_PROJECT_ID = await make(data.SALES_PROJECT_NAME, salesCustomerId, line);
+  data.REJECT_PROJECT_ID = await make(data.REJECT_PROJECT_NAME, salesCustomerId, line);
+  data.TRASH_RESTORE_ID = await make(data.TRASH_RESTORE_NAME, null, []);
+  data.TRASH_PURGE_ID = await make(data.TRASH_PURGE_NAME, null, []);
+  data.EXCEL_PROJECT_ID = await make(data.EXCEL_PROJECT_NAME, customerId, [
+    { name: "งานทดสอบ Excel ก", quantity: 4, m: 1_000, l: 500 },
+    { name: "งานทดสอบ Excel ข", quantity: 2, m: 2_500, l: 1_000 },
+  ]);
+  writeVars("ui-data.json", data);
 }
 
 main().catch((err) => {

@@ -74,7 +74,38 @@ API_DEFECTS_BASE = {
     },
 }
 
-API_ROUND_LABELS = {1: "ก่อนแก้บัค"}
+API_DEFECTS_BASE.update({
+    "TC_API_MAIL_002": {
+        "id": "BUG-API-005",
+        "severity": "Medium",
+        "priority": "P2",
+        "title": "ยิงลืมรหัสผ่านพร้อมกันหลายคำขอ ช่วงพัก 60 วินาทีกันไม่อยู่ — อีเมลเดียวได้เมลหลายฉบับ",
+        "impact": "10 คำขอที่มาพร้อมกัน (คนละไอพี) ได้เมล 8 และ 10 ฉบับในสองรอบที่รัน แทน 1 ฉบับ (ทดลองแยก 5 คำขอ ได้ 4–5 ฉบับทั้ง 3 รอบ) · ใช้ขยายสแปมใส่อีเมลคนอื่น "
+        "(ชื่อเสียงโดเมน/โควตา Gmail) · รหัสและลิงก์ในเมลแต่ละฉบับต่างกันแต่ใช้ได้แค่ฉบับล่าสุด เจ้าของบัญชีสับสน · ยิงทีละครั้งกันได้ปกติ",
+        "fix": "ทำการเช็กช่วงพักกับการสร้างลิงก์ให้เป็นขั้นเดียวที่ atomic เช่น สร้างแถวด้วยเงื่อนไขเวลาใน transaction ที่ล็อกแถวผู้ใช้ "
+        "(SELECT … FOR UPDATE) หรือเก็บเวลาที่ขอล่าสุดบน User แล้ว updateMany where lastResetAt < now-60s ให้ได้แค่คำขอเดียว",
+        "where": "server/src/modules/auth/password-reset.service.ts (issueReset — findFirst latest แล้วค่อย deleteMany+create)",
+        "change": "password-reset.service.ts issueReset: ตรวจช่วงพักกับลบ/สร้างลิงก์ใหม่อยู่ใน transaction เดียวที่ล็อกแถวผู้ใช้ก่อน "
+        "(SELECT … FOR UPDATE แบบเดียวกับ billing-docs) คำขอที่มาพร้อมกันจึงเข้าทีละคำขอ คำขอหลังเห็นลิงก์ที่เพิ่งสร้างแล้วไม่ส่งเมล · "
+        "เพิ่มเทสต์ jest ยิงพร้อมกัน 10 คำขอใน password-reset.test.ts",
+    },
+    "TC_API_MAIL_005": {
+        "id": "BUG-API-006",
+        "severity": "Low",
+        "priority": "P3",
+        "title": "กดส่งรหัสยืนยันอีเมลใหม่พร้อมกันหลายคำขอ ช่วงพัก 60 วินาทีกันไม่อยู่ — ได้เมลหลายฉบับ",
+        "impact": "10 คำขอพร้อมกันได้ sent=true หลายคำขอและเมล 3 และ 6 ฉบับในสองรอบที่รัน แต่ละฉบับรหัสต่างกัน ใช้ได้แค่ตัวล่าสุด · "
+        "กระทบเฉพาะบัญชีที่ยังไม่ยืนยัน และมีเพดาน 10 ครั้ง/ชั่วโมง/ไอพีช่วยจำกัดอยู่",
+        "fix": "เหมือน BUG-API-005: ตรวจ sentAt กับเขียนรหัสใหม่ในขั้นเดียว เช่น updateMany where sentAt < now-60s แล้วส่งเมลเฉพาะเมื่อแถวถูกแก้ 1 แถว",
+        "where": "server/src/modules/auth/email-verification.service.ts (sendVerificationCode — findUnique แล้วค่อย upsert)",
+        "change": "email-verification.service.ts sendVerificationCode: ตรวจ sentAt กับ upsert รหัสใหม่ใน transaction เดียวที่ล็อกแถวผู้ใช้ก่อน "
+        "· เพิ่มเทสต์ jest ยิงพร้อมกัน 10 คำขอใน email-verification.test.ts",
+    },
+})
+
+API_ROUND_LABELS = {1: "ก่อนแก้บัค", 2: "หลังแก้ BUG-API-001–004", 3: "เพิ่มเคส R-30–32"}
+# BUG-API-005/006 พบในรอบที่ 3 (เคสเพิ่งเพิ่ม) — ผลก่อนแก้อ่านจากโฟลเดอร์รอบที่ 3 (ดู build_report.FOUND_IN)
+FOUND_IN_ROUND3 = ("TC_API_MAIL_002", "TC_API_MAIL_005")
 
 API_REMARKS = {
     "TC_API_LOGIN_S_005": "จับเวลาบนเครื่องเดียวกับเซิร์ฟเวอร์ — ระบบจริงผ่านเครือข่ายเวลาจะแกว่งกว่านี้",
@@ -142,13 +173,57 @@ RISKS = [
      "TC_API_MONEY_004–005", "กั้นถูก (409)", "-"),
     ("User behavior", "คนเดียวบันทึกเองยืนยันเอง", "ทุจริต/พิมพ์ผิดไม่มีใครตรวจ", "Medium",
      "TC_API_MONEY_002", "ADMIN ยืนยันของตัวเองไม่ได้ (403) · OWNER ยืนยันของตัวเองได้ (ตั้งใจ)", "ถ้ามีพนักงานบัญชีเพิ่ม ควรห้าม OWNER ยืนยันของตัวเองด้วย"),
-    ("ยังไม่ได้ทดสอบ", "สองคนกดยืนยัน/ออกใบเสร็จพร้อมกัน · เลขเอกสารชนกัน", "เลขเอกสารซ้ำ", "Medium",
-     "ไม่มีใน Robot (jest มี document-sequence-concurrency)", "-", "เพิ่มเคสยิงพร้อมกันใน Robot"),
-    ("ยังไม่ได้ทดสอบ", "Stored XSS: ชื่อลูกค้า/บันทึกเป็น HTML แล้วไปแสดงใน PDF หรือหน้าพนักงาน", "สคริปต์ทำงานบนเครื่องพนักงาน", "Medium",
-     "ไม่มี", "-", "เพิ่มเคส: ตั้งชื่อเป็น <img onerror> แล้วเปิด PDF/หน้าแฟ้มลูกค้า"),
-    ("ยังไม่ได้ทดสอบ", "ใช้ปลายทางส่งเมล (ลืมรหัส/ส่งรหัสยืนยัน) ยิงสแปมหาอีเมลคนอื่น", "ชื่อเสียงโดเมนเสีย / โควตา Gmail หมด", "Medium",
-     "มีเพดาน 20 ครั้ง/15 นาที แต่ยังไม่มีเคส", "-", "เพิ่มเคสเพดานของ forgot-password และ resend"),
+    ("Concurrency", "สองคนกดวางบิล/ออกใบเสร็จรายการเดียวกันพร้อมกัน · วางบิลหลายงวดพร้อมกันแล้วเลขเอกสารชนกัน", "เอกสารซ้ำ / เลขเอกสารซ้ำ", "Medium",
+     "TC_API_CONC_001–003 (ยิงพร้อมกันจริงด้วย Barrier)", "ไม่พบ — สำเร็จคำขอเดียว อีกคำขอ 409 · 6 งวดพร้อมกันได้เลขไม่ซ้ำ", "-"),
+    ("Security", "Stored XSS: ชื่อลูกค้า/ชื่อโครงการ/ที่ตั้งเป็น HTML แล้วไปแสดงใน PDF หน้าพนักงาน หรือพอร์ทัล", "สคริปต์ทำงานบนเครื่องพนักงาน/ลูกค้า", "Medium",
+     "TC_API_XSS_001–003 · TC_XSS_UI_001–003 (รายงานหน้าจอ)", "ไม่พบ — PDF 6 ใบและหน้าจอทั้งสองฝั่งพิมพ์แท็กเป็นตัวอักษร ไม่มี alert",
+     "ถ้าเพิ่มจุดที่แสดง HTML ดิบ (dangerouslySetInnerHTML / แม่แบบสัญญาแบบ HTML) ต้อง escape ค่าของลูกค้าก่อน"),
+    ("Security", "ใช้ปลายทางส่งเมล (ลืมรหัส/ส่งรหัสยืนยัน) ยิงสแปมหาอีเมลคนอื่น", "ชื่อเสียงโดเมนเสีย / โควตา Gmail หมด", "Medium",
+     "TC_API_MAIL_001–006", "พบแล้วแก้ — ยิงพร้อมกันทะลุช่วงพัก 60 วินาที (BUG-API-005, BUG-API-006 Closed) · ยิงทีละครั้งกันได้ · เพดานต่อไอพีทำงาน (20/15 นาที · 10/ชั่วโมง)",
+     "ตรวจช่วงพักกับสร้างรหัสใน transaction ที่ล็อกแถวผู้ใช้ (ทำแล้ว)"),
 ]
+
+# เคสหน้าจอที่ปิดช่องว่างแต่ละข้อ (รอบที่ 6 ของรายงาน UI) — สถานะในชีตอ่านจากผลรันจริง results/output.xml
+UI_GAP_TESTS = {
+    1: ["TC_SALE_001", "TC_SALE_002", "TC_SALE_003"], 2: ["TC_SALE_004", "TC_SALE_005"], 3: ["TC_SALE_006", "TC_SALE_007"],
+    4: ["TC_LEAD_001", "TC_LEAD_002", "TC_LEAD_STAFF_001", "TC_LEAD_STAFF_002"],
+    5: ["TC_ROLE_001", "TC_ROLE_002", "TC_ROLE_003", "TC_ROLE_004"],
+    6: ["TC_2FA_UI_001", "TC_2FA_UI_002", "TC_2FA_UI_003", "TC_2FA_UI_004", "TC_2FA_UI_005"],
+    7: ["TC_FORGOT_C_001", "TC_FORGOT_C_002", "TC_FORGOT_C_003", "TC_FORGOT_C_004", "TC_FORGOT_S_001", "TC_FORGOT_S_002", "TC_FORGOT_S_003"],
+    8: ["TC_REG_OK_001", "TC_REG_OK_002", "TC_REG_OK_003"], 9: ["TC_SALE_008", "TC_SALE_009"],
+    10: ["TC_CUSTFILE_001", "TC_CUSTFILE_002", "TC_CUSTFILE_003", "TC_CUSTFILE_004"],
+    11: ["TC_BOQX_001", "TC_BOQX_002", "TC_BOQX_003"],
+    12: ["TC_MOB_001", "TC_MOB_002", "TC_MOB_003", "TC_MOB_004", "TC_IPAD_001", "TC_IPAD_002", "TC_IPAD_003"],
+    13: ["TC_TRASH_001", "TC_TRASH_002", "TC_TRASH_003", "TC_TRASH_004", "TC_TRASH_005"],
+    14: ["TC_BELL_001", "TC_BELL_002", "TC_BELL_003"], 15: ["TC_XB_001", "TC_XB_002", "TC_XB_003"],
+    16: ["TC_KEY_C_001", "TC_KEY_C_002", "TC_KEY_C_003", "TC_KEY_S_001", "TC_KEY_S_002", "TC_KEY_S_003"],
+}
+
+
+# หมายเหตุขอบเขตของช่องว่างบางข้อ (ผู้ใช้ตัดสินใจเอง)
+UI_GAP_NOTES = {15: " · เฉพาะ Edge — Firefox ตัดออกจากขอบเขต (21 ต.ค.)"}
+
+
+def ui_gap_status(output_xml) -> dict:
+    """ผลของเคสหน้าจอต่อช่องว่าง (เขียนแล้วกี่เคส ผ่าน/ไม่ผ่าน/ข้ามเท่าไร) จากผลรัน Robot จริง"""
+    from robot.api import ExecutionResult
+
+    res = ExecutionResult(str(output_xml))
+    status = {}
+    for t in res.suite.all_tests:
+        status[t.name.split(" ", 1)[0]] = t.status
+    out = {}
+    for n, ids in UI_GAP_TESTS.items():
+        got = [status.get(i) for i in ids]
+        if not any(got):
+            out[n] = "ยังไม่ได้เขียนเคส"
+            continue
+        p, f, k = got.count("PASS"), got.count("FAIL"), got.count("SKIP")
+        span = ids[0] if len(ids) == 1 else f"{ids[0]} … {ids[-1]}"
+        out[n] = (f"เขียนแล้ว {len(ids)} เคส ({span}) · ผ่าน {p}" + (f" · ไม่ผ่าน {f}" if f else "")
+                  + (f" · ข้าม {k}" if k else "") + UI_GAP_NOTES.get(n, "") + " — ผลอยู่ในรายงานหน้าจอ")
+    return out
+
 
 UI_GAPS = [
     # (ส่วน, สิ่งที่ควรเพิ่ม, เหตุผล, ระดับ)
@@ -179,13 +254,23 @@ def api_plan(rows, meta, cov):
     deep = total - len(cov)
     day = meta["start"].strftime("%d/%m/%Y")
     first_day = meta["history"][0]["start"].strftime("%d/%m/%Y") if meta.get("history") else day
-    closed = sorted({x["defect"] for x in rows if x["defect_state"] == "Closed"})
+    round3 = next((h for h in meta.get("history", []) if h["n"] == 3), None)
+    round3_day = round3["start"].strftime("%d/%m/%Y") if round3 else day
+    # ขั้นที่ 5 = ข้อบกพร่องที่พบตั้งแต่รอบแรก · ที่พบในเคสรอบหลัง (FOUND_IN) อยู่ขั้นที่ 6–7
+    later = {DEFECT["id"] for tc, DEFECT in API_DEFECTS_BASE.items() if tc in FOUND_IN_ROUND3}
+    closed = sorted({x["defect"] for x in rows if x["defect_state"] == "Closed"} - later)
     still_open = sorted({x["defect"] for x in rows if x["defect_state"] == "Open"})
     passed = sum(1 for x in rows if x["status"] == "Pass")
+    # ข้อบกพร่องที่พบตั้งแต่รอบแรกคือของขั้นที่ 5 · ที่พบในเคสที่เพิ่มรอบหลัง (R-30–32) ไปอยู่ขั้นที่ 6
+    new_open = sorted({x["defect"] for x in rows if x["defect_state"] == "Open" and x["defect"] in ("BUG-API-005", "BUG-API-006")})
+    still_open = [d for d in still_open if d not in new_open]
     if still_open:
         fix_status = "ค้าง " + ", ".join(still_open)
     elif closed:
-        fix_status = f"เสร็จ {day} — แก้ {', '.join(closed)} แล้ว รันซ้ำทั้งชุดผ่าน {passed}/{total}"
+        # ใช้ผลรอบที่ 2 (รอบที่แก้ชุดนี้จริง) ถ้ามีในประวัติ — รอบปัจจุบันอาจเป็นรอบหลังที่เพิ่มเคสอื่นแล้ว
+        round2 = next((h for h in meta.get("history", []) if h["n"] == 2), None)
+        fix_status = (f"เสร็จ {round2['start']:%d/%m/%Y} — แก้ {', '.join(closed)} แล้ว รันซ้ำทั้งชุดผ่าน {round2['pass']}/{round2['total']}"
+                      if round2 else f"เสร็จ {day} — แก้ {', '.join(closed)} แล้ว รันซ้ำทั้งชุดผ่าน {passed}/{total}")
     else:
         fix_status = "ไม่มีข้อบกพร่องให้แก้"
     return [
@@ -199,11 +284,11 @@ def api_plan(rows, meta, cov):
              f"แยกตามกลุ่มสิทธิ์: สาธารณะ {groups.get('PUBLIC', 0)} · ผู้ใช้ทุกบทบาท {groups.get('ANY', 0)} · ลูกค้า {groups.get('CUSTOMER', 0)} · "
              f"พนักงาน {groups.get('STAFF', 0)} · เฉพาะ OWNER {groups.get('OWNER', 0)}"),
             ("เส้นสำคัญ (ครบทุกแบบ)", f"{deep} เคส: เข้าสู่ระบบพนักงาน/ลูกค้า · บัญชีและเซสชัน · เงิน · เอกสาร · ข้อมูลลูกค้า · เพดานจำนวนครั้ง"),
-            ("เส้นที่มีผลข้างเคียง", "สำรองข้อมูล/ลบถาวร/ส่งเมล ยิงในฐานข้อมูลทดสอบเท่านั้น · เมลโหมด silent · สำรองข้อมูลปิด · สลิปจำลอง"),
+            ("เส้นที่มีผลข้างเคียง", "สำรองข้อมูล/ลบถาวร/ส่งเมล ยิงในฐานข้อมูลทดสอบเท่านั้น · เมลโหมด console (พิมพ์ลง log ไม่ส่งออก) · สำรองข้อมูลปิด · สลิปจำลอง"),
             ("นอกขอบเขต", "ทดสอบโหลด/ความเร็วภายใต้ผู้ใช้จำนวนมาก · ระบบจริงหลัง deploy · การต่อ SlipOK จริง · เนื้อหาอีเมล (มีใน jest)"),
         ]),
         ("3. สภาพแวดล้อม", [
-            ("API", "http://localhost:4100 · ฐานข้อมูลทดสอบ (DATABASE_URL_TEST) · MAIL_TRANSPORT=silent · SLIP_PROVIDER=mock · TRUST_PROXY=loopback"),
+            ("API", "http://localhost:4100 · ฐานข้อมูลทดสอบ (DATABASE_URL_TEST) · MAIL_TRANSPORT=console · SLIP_PROVIDER=mock · TRUST_PROXY=loopback"),
             ("เครื่องมือ", "Python 3.13 · Robot Framework 7.5 · RequestsLibrary 0.9.7 · ตัวช่วย ApiHelpers.py (multipart, TOTP, คุกกี้, ไอพีจำลอง)"),
             ("บัญชีทดสอบ", "OWNER robot_owner · ADMIN robot_admin · ลูกค้าเจ้าของข้อมูล robot.apicust · ลูกค้าคนที่สอง robot.other · "
              "บัญชีใช้แล้วทิ้ง (ล็อก/2FA/เปลี่ยนรหัส/ลบบัญชี/ระงับ) — seed สร้างคืนทุกรอบ"),
@@ -217,7 +302,10 @@ def api_plan(rows, meta, cov):
             ("2", "จัดกลุ่มสิทธิ์ตามหลักการ เทียบกับโค้ด (tools/policy.py)", "api/coverage.json + 01_access_matrix.robot", f"เสร็จ {first_day}"),
             ("3", "เขียนเคสเส้นสำคัญ (02–07, 99)", "robot-tests/api/*.robot", f"เสร็จ {first_day}"),
             ("4", "รันทั้งชุด 2 รอบ + วิเคราะห์เคสที่ไม่ผ่าน", "BUG-API-001–004", f"เสร็จ {first_day}"),
-            ("5", "แก้ข้อบกพร่องแล้วรันซ้ำทั้งชุด (regression)", "เคสที่ไม่ผ่านกลายเป็น Pass", fix_status),
+            ("5", "แก้ BUG-API-001–004 แล้วรันซ้ำทั้งชุด (regression)", "เคสที่ไม่ผ่านกลายเป็น Pass", fix_status),
+            ("6", "เพิ่มเคส Risk R-30–32 (ยิงพร้อมกัน · Stored XSS · ยิงเมลถี่)", "api/08–10 · 12 เคส", f"เสร็จ {round3_day} — พบ BUG-API-005, BUG-API-006"),
+            ("7", "แก้ BUG-API-005/006 แล้วรันซ้ำทั้งชุด (regression)", "TC_API_MAIL_002/005 ผ่าน",
+             (f"ค้าง {', '.join(new_open)}" if new_open else f"เสร็จ {day} — แก้แล้ว รันซ้ำทั้งชุดผ่าน {passed}/{total}")),
         ]),
     ]
 
@@ -347,10 +435,12 @@ def main():
     br.EVIDENCE_PLACEHOLDER = "คำขอ/คำตอบทุกครั้งอยู่ใน log.html (testcase-evidence-api/)"
     br.TC_COLUMNS = [(n, 26 if n == "Screenshot / Evidence Link" else w) for n, w in br.TC_COLUMNS]
     br.ENVIRONMENT = "DEV (localhost:4100) · ฐานข้อมูลทดสอบ · RequestsLibrary"
-    br.ENVIRONMENT_FULL = "DEV · API localhost:4100 · ฐานข้อมูลทดสอบ · เมล silent · สลิปจำลอง"
+    br.ENVIRONMENT_FULL = "DEV · API localhost:4100 · ฐานข้อมูลทดสอบ · เมล console (ไม่ส่งออก) · สลิปจำลอง"
     br.TESTER = "Robot Framework 7.5 + RequestsLibrary (อัตโนมัติ)"
 
     br.FIXED_NOTE = "ผลก่อน/หลังแก้อยู่ในชีต Defects"
+    round3_dir = out.parent / "testcase-evidence-api-round3"
+    br.FOUND_IN = {tc: (round3_dir, "รอบที่ 3") for tc in FOUND_IN_ROUND3} if round3_dir.exists() else {}
     round1 = out.parent / "testcase-evidence-api-round1"
     rows, meta = br.collect(round1, include=("api",), evidence_dir="testcase-evidence-api")
     # ประวัติ: ทุกโฟลเดอร์ testcase-evidence-api-round<N> (ผลรันจริงที่เก็บไว้) — นับเฉพาะชุด api
@@ -396,9 +486,10 @@ def main():
     write_table(ws_risk, "Risk Analysis — Edge case · Security · User behavior ที่ QA มักมองข้าม (และสิ่งที่ยังไม่ได้ทดสอบ)",
                 [("ID", 7), ("หมวด", 14), ("สถานการณ์", 46), ("ผลกระทบ", 30), ("ระดับ", 9), ("ตรวจด้วยเคส", 34), ("ผลที่พบ", 34), ("คำแนะนำ", 40)],
                 [(f"R-{i:02d}", *row) for i, row in enumerate(RISKS, start=1)], "9A3412", level_col=5)
-    write_table(ws_gap, "ช่องว่างของชุดทดสอบหน้าจอ (UI) — สิ่งที่ควรเพิ่ม (ยังไม่ได้เขียนสคริปต์ตามที่ตกลง)",
-                [("ID", 10), ("ส่วนของระบบ", 22), ("เคสที่ควรเพิ่ม", 60), ("เหตุผล", 44), ("ระดับ", 9)],
-                [(f"UI-GAP-{i:02d}", *row) for i, row in enumerate(UI_GAPS, start=1)], "1E3A8A", level_col=5)
+    gap_status = ui_gap_status(br.RESULTS / "output.xml")
+    write_table(ws_gap, "ช่องว่างของชุดทดสอบหน้าจอ (UI) ที่พบตอนทำชุด API — และสถานะเคสหน้าจอที่เขียนเพิ่มแล้ว",
+                [("ID", 10), ("ส่วนของระบบ", 22), ("เคสที่ควรเพิ่ม", 52), ("เหตุผล", 38), ("ระดับ", 9), ("สถานะรอบนี้", 46)],
+                [(f"UI-GAP-{i:02d}", *row, gap_status[i]) for i, row in enumerate(UI_GAPS, start=1)], "1E3A8A", level_col=5)
     br.write_summary(ws_sum, rows, meta, tc_last)
     ws_sum["B2"] = "รายงานผลการทดสอบ API ระบบ SystemBOQ (Automated API Testing)"
     ws_sum["B3"] = f"API ทุกเส้น {len(cov)} เส้น — ตรวจสิทธิ์ทุกเส้น + เส้นสำคัญครบทุกแบบ · Robot Framework + RequestsLibrary"

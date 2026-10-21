@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import request from "supertest";
 
 import { app } from "../../src/app";
+import * as mailer from "../../src/lib/mailer";
 import { clearOutbox, lastMailTo } from "../../src/lib/mailer";
 import { hashPassword } from "../../src/lib/password";
 import { resetAllRateLimits } from "../../src/lib/rate-limit";
@@ -118,6 +119,24 @@ describe("customer password reset", () => {
     clearOutbox();
     await ask(email);
     expect(lastMailTo(email)).toBeUndefined();
+  });
+
+  it("sends a single link when many requests for the same email arrive at once", async () => {
+    // ช่วงพักต้องกันคำขอที่มาพร้อมกันได้ด้วย — เดิมทุกคำขออ่าน "ยังไม่มีลิงก์" พร้อมกันแล้วส่งคนละฉบับ (BUG-API-005)
+    const { email, id } = await makeCustomer("burst");
+    const spy = jest.spyOn(mailer, "sendMail");
+    try {
+      const answers = await Promise.all(
+        Array.from({ length: 10 }, () => request(app).post("/api/auth/customer/forgot-password").send({ email })),
+      );
+      expect(answers.map((r) => r.status)).toEqual(Array(10).fill(200));
+      await new Promise((r) => setTimeout(r, 1500));
+      const sentToVictim = spy.mock.calls.filter(([m]) => m.to === email);
+      expect(sentToVictim).toHaveLength(1);
+      expect(await prisma.passwordResetToken.count({ where: { userId: id } })).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   // ── ตัว token เอง ──

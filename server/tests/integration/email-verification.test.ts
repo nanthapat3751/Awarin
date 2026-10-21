@@ -1,8 +1,10 @@
 import request from "supertest";
 
 import { app } from "../../src/app";
+import * as mailer from "../../src/lib/mailer";
 import { clearOutbox, lastMailTo } from "../../src/lib/mailer";
 import { prisma } from "../../src/lib/prisma";
+import { resetAllRateLimits } from "../../src/lib/rate-limit";
 
 /**
  * ยืนยันอีเมลด้วยรหัส 6 หลัก — เดินครบทุกขั้นเหมือนของจริง
@@ -151,6 +153,29 @@ describe("customer email verification", () => {
       .post("/api/auth/customer/verify-email")
       .send({ email, code: codeFrom(email) });
     expect(fresh.status).toBe(200);
+  });
+
+  it("sends a single code when many resend requests arrive at once", async () => {
+    // ช่วงพักต้องกันคำขอที่มาพร้อมกันได้ด้วย — เดิมทุกคำขออ่านรหัสเดิมพร้อมกันแล้วส่งคนละฉบับ (BUG-API-006)
+    const email = await registerFresh("burst");
+    const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    await prisma.emailVerification.update({
+      where: { userId: user!.id },
+      data: { sentAt: new Date(Date.now() - 90_000) },
+    });
+    await resetAllRateLimits(); // เพดานขอรหัสใหม่ 10 ครั้ง/ชั่วโมง/ไอพี — เคสข้างบนใช้ไปแล้วบางส่วน
+    const spy = jest.spyOn(mailer, "sendMail");
+    try {
+      const answers = await Promise.all(
+        Array.from({ length: 10 }, () => request(app).post("/api/auth/customer/verify-email/resend").send({ email })),
+      );
+      expect(answers.map((r) => r.status)).toEqual(Array(10).fill(200));
+      expect(answers.filter((r) => r.body.sent === true)).toHaveLength(1);
+      expect(spy.mock.calls.filter(([m]) => m.to === email)).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+      await resetAllRateLimits(); // คืนโควตาที่เคสนี้ใช้ไป 10 ครั้ง ให้เคสถัดไป
+    }
   });
 
   it("answers the same way for an email that has no pending account", async () => {

@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import itertools
+import random
 import struct
 import time
 from http.cookies import SimpleCookie
@@ -15,6 +16,8 @@ PNG_1PX = base64.b64decode(
 )
 
 _ip_counter = itertools.count(1)
+# ไอพีจำลองขึ้นต้นต่างกันทุกครั้งที่เปิด Robot — รันซ้ำกับ API ตัวเดิม (ไม่ได้เปิดใหม่) จะไม่ไปชนโควตาที่รอบก่อนใช้ไป
+_ip_base = random.randrange(1, 250)
 
 
 class ApiHelpers:
@@ -24,7 +27,7 @@ class ApiHelpers:
         """ไอพีจำลองที่ไม่ซ้ำ (ส่งใน X-Forwarded-For) — เพดานเข้าสู่ระบบนับต่อไอพี แต่ละเคสจึงไม่กินโควตากัน
         ระบบทดสอบตั้ง TRUST_PROXY=loopback (เชื่อ header นี้เฉพาะคำขอที่มาจากเครื่องตัวเอง เหมือนมี nginx อยู่หน้า)"""
         n = next(_ip_counter)
-        return f"10.77.{n // 250}.{n % 250 + 1}"
+        return f"10.{_ip_base}.{n // 250}.{n % 250 + 1}"
 
     def ip_header(self, ip: str | None = None) -> dict:
         return {"X-Forwarded-For": ip or self.fresh_ip()}
@@ -108,3 +111,48 @@ class ApiHelpers:
 
     def file_part(self, field: str, filename: str, content: bytes, mime: str) -> list:
         return [(field, (filename, content, mime))]
+
+    def parallel_calls(self, *calls) -> list:
+        """ยิงหลายคำขอ "พร้อมกันจริง" (ปล่อยทุกเธรดด้วย Barrier เดียว) — จำลองสองคนกดปุ่มเดียวกันในวินาทีเดียว
+
+        แต่ละรายการคือ [alias, method, url] หรือ [alias, method, url, body] ใช้คุกกี้/header ของเซสชันนั้น
+        แต่เปิด requests.Session ใหม่ต่อเธรด (Session ตัวเดียวใช้ข้ามเธรดไม่ปลอดภัย) · คืน response ตามลำดับที่ส่งมา"""
+        import threading
+
+        import requests
+        from robot.libraries.BuiltIn import BuiltIn
+
+        lib = BuiltIn().get_library_instance("RequestsLibrary")
+        barrier = threading.Barrier(len(calls))
+        results: list = [None] * len(calls)
+
+        def run(i, alias, method, url, body=None):
+            src = lib._cache.switch(alias)
+            s = requests.Session()
+            s.headers.update(src.headers)
+            s.cookies.update(src.cookies)
+            barrier.wait()
+            try:
+                results[i] = s.request(method, f"{src.url}{url}", json=body if body is not None else {}, timeout=60)
+            except Exception as err:  # เก็บไว้ให้เคสรายงาน ไม่ให้เธรดตายเงียบ
+                results[i] = err
+
+        threads = [threading.Thread(target=run, args=(i, *c)) for i, c in enumerate(calls)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(90)
+        for i, r in enumerate(results):
+            if not hasattr(r, "status_code"):
+                raise AssertionError(f"คำขอที่ {i + 1} ไม่ได้คำตอบ: {r!r}")
+        return results
+
+    def pdf_text(self, response) -> str:
+        """ข้อความทั้งหมดในไฟล์ PDF (ต่อบรรทัดที่ถูกตัดด้วยช่องว่าง) — ไว้ตรวจว่าข้อมูลออกมาเป็นตัวอักษรตามจริง"""
+        import pymupdf
+
+        body = response.content
+        if body[:4] != b"%PDF":
+            raise AssertionError(f"ไม่ใช่ไฟล์ PDF (สถานะ {response.status_code}): {body[:120]!r}")
+        doc = pymupdf.open(stream=body, filetype="pdf")
+        return " ".join(page.get_text() for page in doc).replace("\n", " ")

@@ -187,19 +187,22 @@ async function issueReset(
   // จะค้างในฐานข้อมูลตลอดกาล ทั้งที่ไม่มีประโยชน์อะไรแล้ว · ถูกอยู่แล้วเพราะมี index ที่ expiresAt
   await prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
 
-  const latest = await prisma.passwordResetToken.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  if (latest && Date.now() - latest.createdAt.getTime() < RESEND_COOLDOWN_MS) return;
-
   const { raw, hash } = generateToken();
   const code = generateCode();
-  // เหลือลิงก์ (และรหัส) ที่ใช้ได้ทีละหนึ่งชุดเสมอ — ชุดเก่าที่ส่งไปแล้วต้องตายทันทีที่ขอใหม่
-  await prisma.$transaction([
-    prisma.passwordResetToken.deleteMany({ where: { userId: user.id } }),
-    prisma.passwordResetToken.create({
+  const issued = await prisma.$transaction(async (tx) => {
+    // ล็อกแถวผู้ใช้ก่อนตรวจช่วงพัก — คำขอที่มาพร้อมกัน (เช่น ยิงจากหลายไอพีในวินาทีเดียว) ต้องเข้าทีละคำขอ
+    // ไม่งั้นทุกคำขออ่านเจอ "ยังไม่มีลิงก์" พร้อมกันแล้วส่งเมลคนละฉบับ ทะลุช่วงพัก 60 วินาที (BUG-API-005)
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE`;
+    const latest = await tx.passwordResetToken.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    if (latest && Date.now() - latest.createdAt.getTime() < RESEND_COOLDOWN_MS) return false;
+
+    // เหลือลิงก์ (และรหัส) ที่ใช้ได้ทีละหนึ่งชุดเสมอ — ชุดเก่าที่ส่งไปแล้วต้องตายทันทีที่ขอใหม่
+    await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
+    await tx.passwordResetToken.create({
       data: {
         userId: user.id,
         tokenHash: hash,
@@ -208,8 +211,10 @@ async function issueReset(
         expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
         requestIp: requestIp ?? null,
       },
-    }),
-  ]);
+    });
+    return true;
+  });
+  if (!issued) return;
 
   const mail =
     audience === "staff"

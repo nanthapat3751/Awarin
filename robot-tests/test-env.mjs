@@ -2,7 +2,7 @@
 /**
  * เปิดระบบ "ชุดทดสอบ" สำหรับ Robot Framework — แยกจาก dev server ทุกอย่าง
  *
- *   API        http://localhost:4100   ฐานข้อมูลทดสอบ (DATABASE_URL_TEST) · เมลโหมด silent (ไม่ส่งจริง)
+ *   API        http://localhost:4100   ฐานข้อมูลทดสอบ (DATABASE_URL_TEST) · เมลโหมด console (ไม่ส่งจริง พิมพ์ลง log)
  *   หลังบ้าน    http://localhost:5183   staff-app ชี้ API 4100
  *   หน้าบ้าน    http://localhost:5184   client-app ชี้ API 4100
  *
@@ -50,7 +50,9 @@ const apiEnv = {
   PORT: String(API_PORT),
   DATABASE_URL: serverEnv.DATABASE_URL_TEST,
   DATABASE_URL_RUNTIME: serverEnv.DATABASE_URL_TEST_RUNTIME,
-  MAIL_TRANSPORT: "silent",
+  // ไม่ส่งเมลออกจริงเด็ดขาด — พิมพ์เนื้อเมลลง results/env-api*.log แทน ชุดทดสอบอ่านรหัสยืนยัน/ลิงก์ตั้งรหัสจากตรงนั้น
+  // (ลืมรหัสผ่าน · สมัครสมาชิก · เพดานส่งเมล) ด้วย ApiHelpers.Last Mail To
+  MAIL_TRANSPORT: "console",
   RATE_LIMIT_STORE: "memory",
   EMAIL_MX_CHECK: "off",
   BACKUP_ENABLED: "false",
@@ -156,18 +158,33 @@ if (!process.argv.includes("--run")) {
 } else {
   // รันทีละชุด และเปิด API ใหม่ก่อนแต่ละชุดถัดไป: ทั้งหมดเข้าสู่ระบบเกิน 20 ครั้ง ถ้ารันรวดเดียวจะชนเพดาน
   // ลำดับสำคัญ — ฝั่งหลังบ้านยืนยันการแจ้งโอนที่ฝั่งหน้าบ้านส่งไว้ (ส่วนชำระเงิน) · ชุด API ใช้สัญญาของตัวเอง
+  // ชุดหน้าจอแบ่งเป็นกลุ่ม (ชุดเดิม 01–04 / ชุดช่องว่าง UI-GAP) เพราะรวมกันเข้าสู่ระบบเกิน 20 ครั้ง — ทุกกลุ่มตั้งชื่อชุด
+  // บนสุดเป็น Frontend/Backend เหมือนเดิม รายงาน (build_report.py) จึงรวมกลุ่มที่ชื่อเดียวกันเป็นฝั่งเดียวกัน
+  const files = (side, from, to) =>
+    fs.readdirSync(path.join(here, side))
+      .filter((f) => /^\d\d_.*\.robot$/.test(f) && Number(f.slice(0, 2)) >= from && Number(f.slice(0, 2)) <= to)
+      .sort()
+      .map((f) => path.join(here, side, f));
+  const phases = [
+    { side: "frontend", out: "frontend", name: "Frontend", paths: files("frontend", 1, 4) },
+    { side: "frontend", out: "frontend-gap", name: "Frontend", paths: files("frontend", 5, 99) },
+    { side: "backend", out: "backend", name: "Backend", paths: files("backend", 1, 4) },
+    { side: "backend", out: "backend-gap-a", name: "Backend", paths: files("backend", 5, 9) },
+    { side: "backend", out: "backend-gap-b", name: "Backend", paths: files("backend", 10, 99) },
+    { side: "api", out: "api", name: "Api", paths: [path.join(here, "api")] },
+  ].filter((p) => p.paths.length > 0);
   let failed = 0;
-  const sides = ["frontend", "backend", "api"];
-  for (const side of sides) {
-    if (side !== "frontend") await startApi(`api-${side}`);
+  for (const [i, phase] of phases.entries()) {
+    if (i > 0) await startApi(`api-${phase.out}`);
     const run = spawnSync(
       "python",
-      ["-X", "utf8", "-m", "robot", "--outputdir", results, "--output", `output-${side}.xml`, "--log", "NONE", "--report", "NONE",
-        path.join(here, side)],
+      ["-X", "utf8", "-m", "robot", "--name", phase.name, "--outputdir", results, "--output", `output-${phase.out}.xml`,
+        "--log", "NONE", "--report", "NONE", ...phase.paths],
       { cwd: root, stdio: "inherit" },
     );
     if (run.status !== 0) failed += run.status ?? 1;
   }
+  const sides = phases.map((p) => p.out);
   stopAll();
   // รวมผลสองฝั่งเป็นรายงานเดียว (output.xml/log.html/report.html) ให้ build_report.py อ่าน
   const merge = spawnSync(

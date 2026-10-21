@@ -38,6 +38,8 @@ HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
 
 ENVIRONMENT = "DEV (localhost) · Chrome 155 headless · Windows 11"
+# โมดูลที่ไม่ได้รันบน Chrome — ช่อง Environment ของเคสในโมดูลนี้ต้องบอกเบราว์เซอร์ที่ใช้จริง
+MODULE_ENVIRONMENT = {"Cross Browser": "DEV (localhost) · Microsoft Edge 155 headless · Windows 11"}
 ENVIRONMENT_FULL = "DEV (localhost · ฐานข้อมูลทดสอบ) · Windows 11 · Chrome 155 (headless) · 1366×900"
 TESTER = "Robot Framework 7.5 (อัตโนมัติ)"
 
@@ -90,7 +92,19 @@ REMARKS = {
 }
 
 # ชื่อของรอบที่เก็บไว้ (testcase-evidence-round<N>) — รอบปัจจุบันตั้งด้วย --label
-ROUND_LABELS = {1: "ก่อนแก้บัค", 2: "หลังแก้ BUG-001/002", 3: "หลังเพิ่ม/ปรับส่วนชำระเงิน", 4: "หลังแก้หลังบ้านกลับหน้าเดิม"}
+ROUND_LABELS = {1: "ก่อนแก้บัค", 2: "หลังแก้ BUG-001/002", 3: "หลังเพิ่ม/ปรับส่วนชำระเงิน", 4: "หลังแก้หลังบ้านกลับหน้าเดิม",
+                5: "เพิ่มเคสส่วนชำระเงิน", 6: "ปิดช่องว่าง UI-GAP 16 ข้อ"}
+
+# โมดูลที่เพิ่มในรอบปิดช่องว่าง UI-GAP-01–16 (ชื่อตรงกับ module: ในไฟล์ .robot) — ใช้เขียนขอบเขตในแผนการทดสอบ
+GAP_MODULES = [
+    ("Quote", "ใบเสนอราคา"), ("Contract", "สัญญา"), ("Billing", "วางบิล/ยกเลิกใบ"),
+    ("Customer Payment History", "ประวัติการชำระของลูกค้า"), ("Contact Request", "ฟอร์มติดต่อ"),
+    ("Lead To Project", "คำขอ → โครงการ"), ("Role Visibility", "สิทธิ์ ADMIN บนหน้าจอ"), ("Two Factor Login", "2FA"),
+    ("Customer Forgot Password", "ลืมรหัสลูกค้า"), ("Staff Forgot Password", "ลืมรหัสพนักงาน"),
+    ("Register Success", "สมัครจนเข้าพอร์ทัล"), ("Customer File", "แฟ้มลูกค้า"), ("BOQ Excel", "Excel BOQ"),
+    ("Mobile Layout", "มือถือ 390 px"), ("iPad Layout", "iPad"), ("Trash", "ถังขยะ"), ("Notifications", "กระดิ่ง"),
+    ("Cross Browser", "Edge"), ("Keyboard Access", "คีย์บอร์ด/ป้ายอ่านหน้าจอ"), ("Stored XSS UI", "ชื่อที่มี HTML"),
+]
 
 STATUS_MAP = {"PASS": "Pass", "FAIL": "Fail", "SKIP": "Block", "NOT RUN": "Untested"}
 
@@ -197,6 +211,9 @@ UI_SUITES = ("frontend", "backend")
 EVIDENCE_PLACEHOLDER = "ไม่มีภาพ"
 # หมายเหตุท้ายเคสที่รอบแรกไม่ผ่านแล้วแก้ผ่าน (รายงาน API ไม่มีภาพ จึงเปลี่ยนข้อความได้)
 FIXED_NOTE = "ภาพก่อน/หลังแก้อยู่ในชีต Defects"
+# ข้อบกพร่องที่พบในรอบหลัง (เคสเพิ่งมีในรอบนั้น รอบที่ 1 ไม่มี) — {รหัสเคส: (โฟลเดอร์ผลรอบที่พบ, "รอบที่ N")}
+# ผลก่อนแก้/วันที่พบอ่านจากโฟลเดอร์นั้นแทน testcase-evidence-round1 · ว่าง = ทุกบัคพบในรอบที่ 1 (รายงาน UI)
+FOUND_IN: dict[str, tuple[Path, str]] = {}
 
 
 def collect(round1_dir: Path, include=UI_SUITES, evidence_dir: str = "testcase-evidence") -> tuple[list[dict], dict]:
@@ -204,6 +221,7 @@ def collect(round1_dir: Path, include=UI_SUITES, evidence_dir: str = "testcase-e
     result = ExecutionResult(str(RESULTS / "output.xml"))
     round1, round1_stats = read_round(round1_dir / "output.xml", include)
     rows: list[dict] = []
+    later_rounds = {d: read_round(d / "output.xml", include)[0] or {} for d, _ in FOUND_IN.values()}
 
     def walk(suite, layer):
         for t in suite.tests:
@@ -213,7 +231,8 @@ def collect(round1_dir: Path, include=UI_SUITES, evidence_dir: str = "testcase-e
             module = next((tag.split(":", 1)[1] for tag in t.tags if tag.startswith("module:")), suite.name)
             status = STATUS_MAP.get(t.status, "Untested")
             known = DEFECTS.get(tc_id)
-            before = (round1 or {}).get(tc_id)
+            found_dir, found_label = FOUND_IN.get(tc_id, (round1_dir, "รอบที่ 1"))
+            before = (later_rounds[found_dir] if tc_id in FOUND_IN else (round1 or {})).get(tc_id)
             fixed = bool(known and status == "Pass" and before is not None and before.status == "FAIL")
             defect = known if (status == "Fail" or fixed) else None
             if status == "Pass":
@@ -227,10 +246,10 @@ def collect(round1_dir: Path, include=UI_SUITES, evidence_dir: str = "testcase-e
             if status == "Fail" and not defect:
                 remarks = (remarks + " · " if remarks else "") + "ไม่ผ่านโดยยังไม่ได้วิเคราะห์ — ตรวจว่าเป็นบัคหรือสคริปต์ก่อนออก Defect ID"
             if fixed:
-                remarks = (f"รอบที่ 1 ไม่ผ่าน ({known['id']}) → แก้แล้ว ทดสอบซ้ำรอบที่ 2 ผ่าน · "
+                remarks = (f"{found_label} ไม่ผ่าน ({known['id']}) → แก้แล้ว ทดสอบซ้ำผ่าน · "
                            f"{FIXED_NOTE}") + (" · " + remarks if remarks else "")
             evidence = RESULTS / "evidence" / f"{tc_id}.png"
-            before_evidence = round1_dir / "evidence" / f"{tc_id}.png"
+            before_evidence = found_dir / "evidence" / f"{tc_id}.png"
             rows.append(
                 {
                     "id": tc_id,
@@ -252,7 +271,7 @@ def collect(round1_dir: Path, include=UI_SUITES, evidence_dir: str = "testcase-e
                     "defect_state": "Closed" if fixed else ("Open" if defect else ""),
                     "before_actual": before.message if fixed else "",
                     "before_date": before.start_time if fixed else None,
-                    "before_evidence": (f"testcase-evidence-round1/evidence/{tc_id}.png"
+                    "before_evidence": (f"{found_dir.name}/evidence/{tc_id}.png"
                                         if fixed and before_evidence.exists() else ""),
                 }
             )
@@ -378,24 +397,37 @@ def plan_sections(rows, meta):
              f'สร้างโครงการ + BOQ + การคิดราคา {cnt["Project"] + cnt["BOQ"] + cnt["BOQ Pricing"]}'
              + (f'\nส่วนชำระเงิน {cnt["Customer Payments"] + cnt["Staff Payments"]} เคส: ลูกค้าแจ้งโอน/ตรวจสลิป/ยกเลิก {cnt["Customer Payments"]} · '
                 f'พนักงานยืนยันการแจ้ง/บันทึกรับเงิน/ตรวจทาน/ยืนยันกับบัญชี/ออกใบเสร็จ {cnt["Staff Payments"]}'
-                if cnt["Customer Payments"] + cnt["Staff Payments"] else "")),
+                if cnt["Customer Payments"] + cnt["Staff Payments"] else "")
+             + (("\nปิดช่องว่าง UI-GAP-01–16 " + str(sum(cnt[m] for m, _ in GAP_MODULES)) + " เคส: "
+                 + " · ".join(f"{label} {cnt[m]}" for m, label in GAP_MODULES if cnt[m]))
+                if any(cnt[m] for m, _ in GAP_MODULES) else "")),
             ("นอกขอบเขต (รอบถัดไป)",
-             "ใบเสนอราคา/สัญญา (สร้าง ส่ง ลงนาม) · วางบิล · การสร้าง PDF (ใบแจ้งหนี้ ใบเสร็จ) · ต่อ SlipOK จริง · QR พร้อมเพย์ · เงินประกันผลงาน · ADMIN ยืนยันรายการของตัวเอง · 2FA · ลืมรหัสผ่าน (ต้องอ่านเมล) · นำเข้า/ส่งออก Excel · "
-             "จอมือถือ/iPad · เบราว์เซอร์อื่นนอกจาก Chrome · ประสิทธิภาพและการรับโหลด"),
+             ("ต่อ SlipOK จริง · QR พร้อมเพย์ · เงินประกันผลงาน · งานเพิ่ม-ลด (VO) · Firefox (ผู้ใช้ตัดออกจากขอบเขต 21 ต.ค. — ลูกค้าส่วนใหญ่ใช้ Chrome/Edge/Safari) · "
+              "มือถือ/iPad เครื่องจริง (Safari) · ประสิทธิภาพและการรับโหลด"
+              if any(cnt[m] for m, _ in GAP_MODULES) else
+              "ใบเสนอราคา/สัญญา (สร้าง ส่ง ลงนาม) · วางบิล · การสร้าง PDF (ใบแจ้งหนี้ ใบเสร็จ) · ต่อ SlipOK จริง · QR พร้อมเพย์ · เงินประกันผลงาน · "
+              "ADMIN ยืนยันรายการของตัวเอง · 2FA · ลืมรหัสผ่าน (ต้องอ่านเมล) · นำเข้า/ส่งออก Excel · "
+              "จอมือถือ/iPad · เบราว์เซอร์อื่นนอกจาก Chrome · ประสิทธิภาพและการรับโหลด")),
             ("ทดสอบในระดับอื่นแล้ว",
              "ตรรกะฝั่งเซิร์ฟเวอร์ (คิดราคา ภาษี สิทธิ์ API อีเมล) ครอบด้วย Jest + supertest ใน server/tests — "
              "รายงานนี้เน้นสิ่งที่ผู้ใช้เห็นบนหน้าจอ"),
         ] + ([(f'หมายเหตุรอบที่ {len(meta["history"]) + 1}', meta["note"])] if meta.get("note") else [])),
         ("3. รายการที่ทดสอบ (Test Items)", [("__table__", ["ส่วนของระบบ", "ที่อยู่ (ระบบทดสอบ)", "เทคโนโลยี", "บัญชีทดสอบ"]),
-            ("หน้าบ้าน (client-app)", "http://localhost:5184", "React + Vite", "robot.customer@example.test (ยืนยันแล้ว)\nrobot.unverified@example.test (ยังไม่ยืนยัน)"),
-            ("หลังบ้าน (staff-app)", "http://localhost:5183", "React + Vite", "robot_owner (OWNER ไม่เปิด 2FA)\nrobot_lock (ใช้ทดสอบล็อกบัญชี)"),
+            ("หน้าบ้าน (client-app)", "http://localhost:5184", "React + Vite",
+             "robot.customer@example.test (ยืนยันแล้ว) · robot.unverified (ยังไม่ยืนยัน)\nrobot.sales (เดินงานขาย) · robot.forgot (ลืมรหัส) · "
+             "robot.xss (ชื่อมี HTML)\nrobot.reg.<รอบ>@example.com (สมัครใหม่ทุกรอบ)"),
+            ("หลังบ้าน (staff-app)", "http://localhost:5183", "React + Vite",
+             "robot_owner (OWNER) · robot_lock (ทดสอบล็อกบัญชี) · robot_admin (ADMIN)\n"
+             "robot_twofa (ADMIN เปิด 2FA) · robot_bell (ADMIN กระดิ่ง) · robot_forgot (ADMIN ลืมรหัส)"),
             ("API (server)", "http://localhost:4100", "Node.js + Express + Prisma", "—"),
             ("ฐานข้อมูล", "DATABASE_URL_TEST", "PostgreSQL (Docker)", "ฐานเดียวกับ Jest แยกจากฐาน dev"),
         ]),
         ("4. สภาพแวดล้อมการทดสอบ", [
-            ("เครื่อง/เบราว์เซอร์", "Windows 11 · Google Chrome 155 แบบ headless · ขนาดจอ 1366×900 · Python 3.13 · Robot Framework 7.5 · SeleniumLibrary 6.9"),
+            ("เครื่อง/เบราว์เซอร์", "Windows 11 · Google Chrome 155 แบบ headless · ขนาดจอ 1366×900 (มือถือจำลอง 390×844 · iPad 1024×1366) · "
+             "Microsoft Edge 155 (เคสเบราว์เซอร์อื่น) · Python 3.13 · Robot Framework 7.5 · SeleniumLibrary 6.9"),
             ("แยกจาก dev", "เปิดชุดทดสอบที่พอร์ต 4100/5183/5184 คู่กับ dev server (4000/5173/5174) ได้โดยไม่ชนกัน"),
-            ("อีเมล", "MAIL_TRANSPORT=silent — ระบบไม่ส่งอีเมลจริงระหว่างทดสอบ (dev server ปกติส่งจริงผ่าน Gmail)"),
+            ("อีเมล", "MAIL_TRANSPORT=console — ระบบไม่ส่งอีเมลจริงระหว่างทดสอบ พิมพ์เนื้อเมลลง log แทน (dev server ปกติส่งจริงผ่าน Gmail) · "
+             "เคสสมัคร/ลืมรหัสอ่านรหัส 6 หลักและลิงก์จาก log (robot-tests/MailLog.py)"),
             ("สลิป", "SLIP_PROVIDER=mock — อ่านผลจากชื่อไฟล์สลิป ไม่เรียก SlipOK จริง (server/.env ต่อ SlipOK ไว้และโควตามีจำกัด)"),
             ("อื่น ๆ", "RATE_LIMIT_STORE=memory · ปิดสำรองข้อมูลอัตโนมัติ · ไฟล์อัปโหลดลงโฟลเดอร์ชั่วคราว · ปิดเช็ค MX"),
         ]),
@@ -416,16 +448,23 @@ def plan_sections(rows, meta):
             ("7", "Smoke test บนระบบจริง (อ่านอย่างเดียว ไม่ส่งเมล)", "ยืนยันว่าระบบจริงเปิดได้", "รอดำเนินการ"),
         ]),
         ("7. ความเสี่ยงและวิธีรับมือ", [("__table__", ["ความเสี่ยง", "ผลกระทบ", "วิธีรับมือ"]),
-            ("ระบบส่งอีเมลจริงระหว่างเทสต์", "ลูกค้า/คนอื่นได้อีเมลทดสอบ", "ชุดทดสอบตั้ง MAIL_TRANSPORT=silent และใช้โดเมน example.test/example.com"),
+            ("ระบบส่งอีเมลจริงระหว่างเทสต์", "ลูกค้า/คนอื่นได้อีเมลทดสอบ",
+             "ชุดทดสอบตั้ง MAIL_TRANSPORT=console (พิมพ์ลง log ไม่ส่งออก) และใช้โดเมน example.test/example.com"),
             ("สลิปทดสอบไปกินโควตา SlipOK จริง", "โควตาหมดก่อนใช้งานจริง", "ชุดทดสอบบังคับ SLIP_PROVIDER=mock และล้าง SLIPOK_API_KEY ทั้งใน API และ seed"),
             ("เพดานเข้าสู่ระบบ 20 ครั้ง/15 นาที/ไอพี (ใช้ร่วมกันทั้งพนักงานและลูกค้า)", "รันซ้ำติดกันแล้วเทสต์ล้มแบบสุ่ม · ทั้งชุดเข้าสู่ระบบ 21 ครั้ง เกินเพดานถ้ารันรวดเดียว",
-             "test-env.mjs --run รันหน้าบ้านก่อน แล้วเปิด API ใหม่ก่อนรันหลังบ้าน (ตัวนับอยู่ในหน่วยความจำ เริ่มที่ศูนย์) แล้วรวมผลเป็นรายงานเดียว"),
+             "test-env.mjs --run แบ่งเป็นกลุ่ม (หน้าบ้านเดิม · หน้าบ้าน UI-GAP · หลังบ้านเดิม · หลังบ้าน UI-GAP 2 กลุ่ม · API) เปิด API ใหม่ก่อนทุกกลุ่ม "
+             "(ตัวนับอยู่ในหน่วยความจำ เริ่มที่ศูนย์) แล้วรวมผลเป็นรายงานเดียว"),
             ("หน้าจอโหลดไม่ทันตอนเทสต์ตรวจ", "เคสล้มแบบสุ่มทั้งที่ระบบไม่พัง", "ทุกเคสรอสิ่งที่ตัวเองใช้ก่อนตรวจ (พบที่ TC_PAY_CUS_002 รอบทดลอง แก้แล้ว รันซ้ำ 2 รอบผ่านครบ)"),
             ("สถานะค้างข้ามเคส", "เคสก่อนทิ้ง \"หน้าที่ตั้งใจเปิด\" ไว้ เคสถัดไปเข้าสู่ระบบแล้วไปผิดหน้า",
              "keyword เปิดหน้าเข้าสู่ระบบผ่าน about:blank ก่อนเสมอ (พบในรอบที่ 4 แก้แล้ว)"),
             ("ข้อมูลค้างจากรอบก่อน/จาก Jest", "ผลไม่นิ่ง", "seed รีเซ็ตบัญชีทุกรอบ · ชื่อโครงการต่อท้ายด้วยวันเวลา"),
             ("ข้อความหน้าจอเปลี่ยน", "selector หาไม่เจอ เคสล้มทั้งที่ระบบไม่พัง", "ใช้ id/aria-label ก่อนข้อความ · วิเคราะห์ทุกเคสที่ล้มก่อนออก Defect ID"),
-            ("ทดสอบเฉพาะ Chrome บนจอคอม", "บั๊กบนมือถือ/เบราว์เซอร์อื่นหลุด", "บันทึกเป็นนอกขอบเขต วางแผนรอบถัดไป"),
+            ("ทดสอบเฉพาะ Chrome บนจอคอม", "บั๊กบนมือถือ/เบราว์เซอร์อื่นหลุด",
+             "รอบที่ 6 เพิ่มมือถือจำลอง 390 px · iPad 1024 px · Edge — Firefox ตัดออกจากขอบเขต (ผู้ใช้ตัดสินใจ) · เครื่องจริง/Safari ยังไม่ได้ทดสอบ"),
+            ("เคสที่ต้องอ่านเมล (สมัคร/ลืมรหัส)", "ถ้าส่งเมลจริงจะไปถึงคนอื่น / อ่านรหัสจากฐานข้อมูลไม่ได้ (เก็บแต่แฮช)",
+             "ระบบทดสอบพิมพ์เมลลง log · MailLog.py อ่านฉบับล่าสุดของอีเมลนั้นจาก log ของ API ที่เปิดอยู่"),
+            ("เคสที่ต่อกันเป็นลำดับ (งานขาย → กระดิ่ง · ฟอร์มติดต่อ → คำขอ)", "เคสแรกล้มแล้วเคสหลังล้มตาม",
+             "เคสหลังข้าม (Block) พร้อมบอกว่ารอเคสไหน · วิเคราะห์จากเคสแรกที่ล้มเสมอ"),
         ]),
         ("8. บทบาทและสิ่งที่ส่งมอบ", [
             ("ผู้รับผิดชอบการทดสอบ", "(กรอกชื่อ — ช่องสีเหลืองในชีตสรุปผล)"),
@@ -450,10 +489,17 @@ def strategy_sections():
             ("Boundary Value", "รหัสผ่านสั้นกว่า 8 ตัว (TC_REG_005) · จำนวน BOQ = 0 (TC_BOQ_006) · ผิดครบ 5 ครั้ง (TC_STAFF_LOGIN_007)"),
             ("Security", "ไม่บอกว่าบัญชีมีจริงไหม (TC_STAFF_LOGIN_003) · ล็อกบัญชี (TC_STAFF_LOGIN_007) · หน้าภายในต้องเข้าสู่ระบบ (TC_*_ACCESS_001) · ลูกค้าเข้าหลังบ้านไม่ได้ (TC_STAFF_ACCESS_002)"),
             ("Calculation / Data", "ยอดบรรทัด 2×(100+50)=300 · กำไร 10% · VAT 7% · ราคาสุทธิ 353.10 (TC_BOQ_001/003)"),
-            ("State / Workflow", "เข้าสู่ระบบ → ออกจากระบบ → เปิดหน้าภายในไม่ได้ (TC_STAFF_LOGIN_008, TC_CUS_LOGIN_005)"),
+            ("State / Workflow", "เข้าสู่ระบบ → ออกจากระบบ → เปิดหน้าภายในไม่ได้ (TC_STAFF_LOGIN_008, TC_CUS_LOGIN_005) · "
+             "ใบเสนอราคา → สัญญา → วางบิล → แจ้งโอน → ใบเสร็จ (TC_SALE_001–009)"),
+            ("Cross-browser / Responsive", "Edge (TC_XB_001–003) · มือถือ 390 px (TC_MOB_001–004) · iPad 1024 px (TC_IPAD_001–003)"),
+            ("Accessibility", "คีย์บอร์ดล้วน Tab/Enter/Esc · ช่องกรอกและปุ่มมีชื่อ (TC_KEY_C_001–003, TC_KEY_S_001–003)"),
+            ("Role-based (สิทธิ์บนหน้าจอ)", "ADMIN ไม่เห็นกำไร/ไอพี/ปุ่มของ OWNER (TC_ROLE_001–004) · ลบถาวรเฉพาะ OWNER (TC_TRASH_004)"),
         ]),
         ("3. การจัดการข้อมูลทดสอบ", [
-            ("บัญชีทดสอบ", "robot-tests/seed/seed-robot.ts สร้าง/รีเซ็ตบัญชี 4 บัญชี และหมวดงาน R / R-01 / R-01-01 ทุกครั้งก่อนรัน (รันซ้ำได้)"),
+            ("บัญชีทดสอบ", "robot-tests/seed/seed-robot.ts สร้าง/รีเซ็ตบัญชีทดสอบทั้งหมดและหมวดงาน R / R-01 / R-01-01 ทุกครั้งก่อนรัน (รันซ้ำได้) · "
+             "robot_twofa เปิด 2FA ด้วย secret ที่รู้ค่า (Robot คำนวณรหัส 6 หลักเอง) และรหัสสำรอง 2 ชุด"),
+            ("ข้อมูลเดินงานขาย/ถังขยะ/Excel", "seed สร้างโครงการร่างพร้อม BOQ ใหม่ทุกรอบ (results/ui-data.json) — "
+             "ใบเสนอราคา สัญญา วางบิล ลบ/กู้คืน นำเข้า/ส่งออก ทำผ่านหน้าจอทั้งหมด"),
             ("ข้อมูลที่เทสต์สร้าง", "โครงการใหม่ต่อท้ายชื่อด้วยวันเวลา (เช่น \"โครงการโรบอท 1018202430\") จึงไม่ชนกันข้ามรอบ"),
             ("ข้อมูลส่วนชำระเงิน", "seed สร้างโครงการ \"[โรบอท] ทดสอบชำระเงิน …\" ใหม่ทุกรอบผ่าน API จริง (ใบเสนอราคา → ยอมรับ → สัญญา → ลงนาม → วางบิลงวด 1–3) "
              "และลบของรอบก่อนทิ้ง · ยอดแต่ละงวดเขียนลง results/payment-data.json ให้เทสต์อ่าน ไม่พิมพ์ตัวเลขไว้ในสคริปต์"),
@@ -528,7 +574,7 @@ def write_test_cases(ws, rows):
     for r, x in enumerate(rows, start=3):
         values = [x["id"], x["module"], x["title"], x["pre"], x["steps"], x["data"], x["expected"],
                   x["actual"], x["status"], x["defect"], x["severity"],
-                  ENVIRONMENT, TESTER, x["date"], "" if x["evidence"] else EVIDENCE_PLACEHOLDER, x["remarks"]]
+                  MODULE_ENVIRONMENT.get(x["module"], ENVIRONMENT), TESTER, x["date"], "" if x["evidence"] else EVIDENCE_PLACEHOLDER, x["remarks"]]
         for c, v in enumerate(values, start=1):
             cell = ws.cell(r, c, v)
             cell.font = f(9)
@@ -868,7 +914,7 @@ def main():
         m = re.fullmatch(r"testcase-evidence-round(\d+)", d.name)
         if not m:
             continue
-        _, stats = read_round(d / "output.xml")
+        _, stats = read_round(d / "output.xml", UI_SUITES)  # รอบหลัง ๆ มีชุด API ในไฟล์เดียวกัน — นับเฉพาะหน้าจอ
         if stats:
             n = int(m.group(1))
             history.append({"n": n, "label": ROUND_LABELS.get(n, "รอบก่อนหน้า"), **stats})
