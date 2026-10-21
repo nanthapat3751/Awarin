@@ -149,7 +149,8 @@ function cover(s) {
     <dt>สแกนรอบที่ 2 เมื่อ</dt><dd>${s.scannedAt ? esc(thDateTime(s.scannedAt)) : "—"}</dd>
     <dt>ดึงตัวเลขเมื่อ</dt><dd>${esc(thDateTime(s.fetchedAt))}</dd>
     <dt>เซิร์ฟเวอร์</dt><dd>${esc(HOST)} · SonarQube Community Build ${esc(s.serverVersion)}</dd>
-    <dt>ไฟล์ issues รอบนี้</dt><dd><span class="code">issues_round2_page1.json</span> … (ข้อที่ยังเปิดอยู่ ${fmt(s.openIssues)} ข้อ)</dd>
+    <dt>ไฟล์ issues ก่อนแก้</dt><dd><span class="code">issues_round2_page1.json</span> – <span class="code">page3.json</span> (466 ข้อ หน้าละ 200)</dd>
+    <dt>ไฟล์ issues หลังแก้</dt><dd><span class="code">issues_round2_after.json</span> (ข้อที่ยังเปิดอยู่ ${fmt(s.openIssues)} ข้อ)</dd>
   </dl>
 
   <h2>Quality Gate</h2>
