@@ -9,7 +9,7 @@
  *
  * ใช้งาน (จากโฟลเดอร์ราก):
  *   SONAR_TOKEN=<token> node sonar-reports/build-round2-report.cjs --scanned-at <ISO> --tests "1,537/1,537"
- *     [--e2e "457/457 เคส"] [--fixed-from 443]   (ส่วน "สิ่งที่ทำก่อนสแกนรอบนี้" ขึ้นเมื่อใส่สองตัวนี้)
+ *     [--e2e "457/457 เคส"] [--fixed-from 443] [--old-fixed 22]   (ส่วน "สิ่งที่ทำก่อนสแกนรอบนี้" ขึ้นเมื่อใส่สองตัวนี้)
  * ตัวเลขทุกตัวบนหน้าปกดึงจาก SonarQube ตอนรัน (ยกเว้นวันเวลาสแกนกับผลเทสต์ที่ส่งเข้ามา) และเซฟไว้ที่
  * sonar-reports/round2-snapshot.json เป็นหลักฐาน — SonarQube ลบข้อที่ปิดแล้วทิ้งหลัง 30 วัน
  */
@@ -75,6 +75,7 @@ async function collect() {
     tests: arg("--tests"),
     e2e: arg("--e2e"),
     fixedFrom: arg("--fixed-from"),
+    oldFixed: arg("--old-fixed"),
     serverVersion: status.version,
     project,
     parts,
@@ -170,7 +171,7 @@ function cover(s) {
     s.fixedFrom
       ? `<h2>สิ่งที่ทำก่อนสแกนรอบนี้</h2>
   <ul>
-    <li>แก้ปัญหาในโค้ดใหม่ (new code) ที่ Quality Gate นับ จาก <b>${fmt(s.fixedFrom)}</b> ข้อ เหลือ <b>${fmt(p.new_violations)}</b> ข้อ
+    <li>แก้ปัญหาในโค้ดใหม่ (new code) ที่ Quality Gate นับ จาก <b>${fmt(s.fixedFrom)}</b> ข้อ เหลือ <b>${fmt(p.new_violations)}</b> ข้อ และปัญหาที่ค้างในโค้ดเก่าอีก ${fmt(s.oldFixed ?? 0)} ข้อ — ปัญหาที่เปิดอยู่ทั้งโปรเจกต์เหลือ <b>${fmt(p.violations)}</b> ข้อ
         — แก้ที่ตัวโค้ดจริงทุกข้อ ไม่ได้กด “Won't fix / False positive” ในหน้า SonarQube</li>
     <li>ตรวจว่าระบบไม่พังหลังแก้: เทสต์ Jest ของ server <b>${esc(s.tests ?? "—")}</b>
         · Robot Framework (หน้าจอ + API) <b>${esc(s.e2e ?? "—")}</b> · build staff-app และ client-app ผ่าน</li>

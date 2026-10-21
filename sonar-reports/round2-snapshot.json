@@ -1,31 +1,32 @@
 {
- "fetchedAt": "2026-10-21T12:55:54.705Z",
- "scannedAt": "2026-10-21T12:52:44Z",
+ "fetchedAt": "2026-10-21T13:54:36.391Z",
+ "scannedAt": "2026-10-21T13:52:01Z",
  "tests": "1,537/1,537 เคส (137 ชุด)",
  "e2e": "457/457 เคส (หน้าจอ 119 + API 338)",
  "fixedFrom": "443",
+ "oldFixed": "22",
  "serverVersion": "26.9.0.129388",
  "project": {
   "coverage": "90.5",
   "reliability_rating": "1.0",
   "duplicated_lines_density": "2.2",
-  "code_smells": "22",
+  "code_smells": "0",
   "security_rating": "1.0",
   "new_coverage": "90.5",
-  "violations": "22",
+  "violations": "0",
   "security_hotspots": "0",
   "sqale_rating": "1.0",
   "bugs": "0",
   "alert_status": "OK",
-  "lines_to_cover": "13445",
-  "uncovered_conditions": "1216",
-  "uncovered_lines": "716",
+  "lines_to_cover": "13444",
+  "uncovered_conditions": "1218",
+  "uncovered_lines": "720",
   "branch_coverage": "82.3",
   "new_violations": "0",
-  "ncloc": "91598",
+  "ncloc": "91629",
   "vulnerabilities": "0",
-  "line_coverage": "94.7",
-  "conditions_to_cover": "6884"
+  "line_coverage": "94.6",
+  "conditions_to_cover": "6882"
  },
  "parts": [
   {
@@ -34,8 +35,8 @@
    "excluded": null,
    "m": {
     "coverage": "90.5",
-    "lines_to_cover": "12183",
-    "uncovered_lines": "647",
+    "lines_to_cover": "12182",
+    "uncovered_lines": "651",
     "ncloc": "28911",
     "violations": "0"
    }
@@ -45,7 +46,7 @@
    "label": "packages/shared-types — กติกากลางที่ server กับหน้าจอใช้ร่วมกัน",
    "excluded": null,
    "m": {
-    "coverage": "90.5",
+    "coverage": "90.4",
     "lines_to_cover": "1262",
     "uncovered_lines": "69",
     "ncloc": "4460",
@@ -57,8 +58,8 @@
    "label": "staff-app — หน้าจอพนักงาน (React)",
    "excluded": "หน้าจอ — ทดสอบผ่านเบราว์เซอร์ด้วย Robot Framework",
    "m": {
-    "ncloc": "41726",
-    "violations": "10"
+    "ncloc": "41745",
+    "violations": "0"
    }
   },
   {
@@ -66,8 +67,8 @@
    "label": "client-app — หน้าจอลูกค้า (React)",
    "excluded": "หน้าจอ — ทดสอบผ่านเบราว์เซอร์ด้วย Robot Framework",
    "m": {
-    "ncloc": "15794",
-    "violations": "2"
+    "ncloc": "15806",
+    "violations": "0"
    }
   },
   {
@@ -104,7 +105,7 @@
     "metricKey": "new_duplicated_lines_density",
     "comparator": "GT",
     "errorThreshold": "3",
-    "actualValue": "1.73901"
+    "actualValue": "1.73808"
    },
    {
     "status": "OK",
@@ -121,6 +122,6 @@
   },
   "caycStatus": "compliant"
  },
- "openIssues": 22,
+ "openIssues": 0,
  "issuesIncludingClosed": 998
 }

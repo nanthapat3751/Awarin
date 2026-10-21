@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "../lib/api";
 import { applyCatalogPrices, getPriceDrift, keepCurrentPrices } from "../lib/boq-api";
+import { rowKey } from "../lib/row-keys";
 import { useToast } from "../lib/toast-context";
 import { Button } from "./Button";
 
@@ -44,14 +45,14 @@ export function BoqPriceDriftNotice({
   refreshKey,
   onChanged,
   onLines,
-}: {
+}: Readonly<{
   projectId: string;
   /** เปลี่ยนเมื่อ BOQ เปลี่ยน (เวอร์ชัน/ยอด) — โหลดสถานะใหม่ */
   refreshKey: string;
   onChanged: () => void;
   /** id บรรทัดที่ควรตรวจราคา (ว่าง = ไม่มี) — หน้าโครงการใช้ขึ้นจุดบนแท็บหมวด */
   onLines?: (itemIds: Set<string>) => void;
-}) {
+}>) {
   const toast = useToast();
   const [drift, setDrift] = useState<BoqPriceDriftDto | null>(null);
   const [open, setOpen] = useState(false);
@@ -82,7 +83,7 @@ export function BoqPriceDriftNotice({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, refreshKey, reloadTick]);
 
-  if (!drift || !drift.applicable || drift.lines.length === 0) return null;
+  if (!drift?.applicable || drift.lines.length === 0) return null;
 
   const lines = drift.lines;
   const chosen = lines.filter((l) => selected.has(l.itemId));
@@ -190,8 +191,8 @@ export function BoqPriceDriftNotice({
                           {Number(l.quantity).toLocaleString("th-TH")} {l.unit} · คลังเปลี่ยนเมื่อ{" "}
                           {formatDay(l.catalogUpdatedAt)}
                         </div>
-                        {l.components.map((c, i) => (
-                          <div key={i} className="text-xs text-slate-500">
+                        {l.components.map((c) => (
+                          <div key={rowKey(c)} className="text-xs text-slate-500">
                             {c.name} {money(c.from)} → {money(c.to)} /{c.unit}
                           </div>
                         ))}

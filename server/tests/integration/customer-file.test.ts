@@ -236,9 +236,12 @@ describe("แฟ้มลูกค้า (customer file)", () => {
   });
 
   it("ไม่เปิดแฟ้มของพนักงาน และไม่บอกด้วยว่าบัญชีนั้นมีอยู่ (404 ไม่ใช่ 403)", async () => {
-    await owner.agent.get(`/api/customers/${admin.userId}`).expect(404);
+    const staff = await owner.agent.get(`/api/customers/${admin.userId}`).expect(404);
     await owner.agent.get(`/api/customers/${admin.userId}/activity`).expect(404);
-    await owner.agent.get("/api/customers/ไม่มีบัญชีนี้").expect(404);
+    const missing = await owner.agent.get("/api/customers/ไม่มีบัญชีนี้").expect(404);
+    // ไม่มีข้อมูลบัญชีหลุดมากับคำตอบ และข้อความเหมือนบัญชีที่ไม่มีจริงทุกตัวอักษร (เดาไม่ได้ว่ามีพนักงานคนนี้)
+    expect(staff.body.customer).toBeUndefined();
+    expect(staff.body.error).toBe(missing.body.error);
   });
 
   it("โครงการที่อยู่ในถังขยะไม่โผล่ในแฟ้ม", async () => {
@@ -412,8 +415,10 @@ describe("แฟ้มลูกค้า (customer file)", () => {
   });
 
   it("ลูกค้าเปิดแฟ้มของคนอื่น (หรือของตัวเอง) ไม่ได้", async () => {
-    await customer.agent.get(`/api/customers/${customer.userId}`).expect(403);
-    await customer.agent.get("/api/customers/directory").expect(403);
+    const own = await customer.agent.get(`/api/customers/${customer.userId}`).expect(403);
+    const directory = await customer.agent.get("/api/customers/directory").expect(403);
+    expect(own.body.customer).toBeUndefined();
+    expect(directory.body.customers).toBeUndefined();
   });
 
   // ---------- งานที่พนักงานทำกับบัญชีลูกค้า ----------
@@ -565,7 +570,9 @@ describe("แฟ้มลูกค้า (customer file)", () => {
         .post(`/api/customers/${c.userId}/active`)
         .send({ active: false })
         .expect(200);
-      await owner.agent.post(`/api/customers/${c.userId}/access-link`).expect(400);
+      const res = await owner.agent.post(`/api/customers/${c.userId}/access-link`).expect(400);
+      expect(res.body.url).toBeUndefined();
+      expect(await prisma.accountAccessToken.count({ where: { userId: c.userId } })).toBe(0);
     });
 
     it("บัญชีที่ลูกค้าขอลบไปแล้ว แก้ไข/เปิดใช้งาน/ออกลิงก์ ไม่ได้ทุกทาง", async () => {
@@ -599,6 +606,10 @@ describe("แฟ้มลูกค้า (customer file)", () => {
         .post(`/api/customers/${c.userId}/active`)
         .send({ active: false })
         .expect(403);
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: c.userId } });
+      expect(after.active).toBe(true);
+      const profile = await prisma.customerProfile.findUnique({ where: { userId: c.userId } });
+      expect(profile?.phone).toBe("0855555555");
     });
 
     it("ลูกค้าเรียกเส้นทางเขียนข้อมูลเองไม่ได้", async () => {
@@ -606,6 +617,10 @@ describe("แฟ้มลูกค้า (customer file)", () => {
       await c.agent.patch(`/api/customers/${c.userId}`).send({ phone: "0866666666" }).expect(403);
       await c.agent.post(`/api/customers/${c.userId}/access-link`).expect(403);
       await c.agent.post(`/api/customers/${c.userId}/active`).send({ active: false }).expect(403);
+      // ไม่มีอะไรถูกแก้จริง
+      const profile = await prisma.customerProfile.findUnique({ where: { userId: c.userId } });
+      expect(profile?.phone).not.toBe("0866666666");
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: c.userId } })).active).toBe(true);
     });
 
     it("งานที่พนักงานทำโผล่ในไทม์ไลน์ของลูกค้า พร้อมชื่อคนทำ แต่ไม่ปนเข้าฟีดรวม", async () => {
@@ -793,6 +808,11 @@ describe("แฟ้มลูกค้า (customer file)", () => {
       await admin.agent.delete(`/api/customers/${c.userId}/notes/${ownerNoteId}`).expect(403);
       // OWNER ลบของแอดมินได้
       await owner.agent.delete(`/api/customers/${c.userId}/notes/${adminNoteId}`).expect(200);
+
+      // เหลือบันทึกของ OWNER ฉบับเดิมที่ไม่ถูกแก้ · บันทึกของแอดมินหายไปแล้ว
+      const left = await prisma.customerNote.findMany({ where: { customerId: c.userId } });
+      expect(left.map((n) => n.id)).toEqual([ownerNoteId]);
+      expect(left[0].body).toBe("บันทึกของเจ้าของระบบ");
     });
 
     it("ยิง noteId ของลูกค้าคนอื่นมาที่ path ของเราไม่ได้", async () => {
@@ -808,6 +828,9 @@ describe("แฟ้มลูกค้า (customer file)", () => {
         .patch(`/api/customers/${b.userId}/notes/${noteId}`)
         .send({ body: "พยายามแก้ข้ามลูกค้า" })
         .expect(404);
+      const note = await prisma.customerNote.findUniqueOrThrow({ where: { id: noteId } });
+      expect(note.body).toBe("บันทึกของลูกค้า A");
+      expect(note.customerId).toBe(a.userId);
     });
 
     it("ลูกค้าขอลบข้อมูล — บันทึกการติดต่อเกี่ยวกับเขาต้องถูกลบไปด้วย", async () => {
@@ -832,6 +855,7 @@ describe("แฟ้มลูกค้า (customer file)", () => {
         .post(`/api/customers/${c.userId}/notes`)
         .send({ body: "ลูกค้าพยายามเขียนเอง" })
         .expect(403);
+      expect(await prisma.customerNote.count({ where: { customerId: c.userId } })).toBe(0);
     });
   });
 
@@ -890,6 +914,10 @@ describe("แฟ้มลูกค้า (customer file)", () => {
         .patch(`/api/customers/${c.userId}`)
         .send({ customerType: "COMPANY", companyName: "บริษัท ก จำกัด", taxId: "123" })
         .expect(400);
+      // ปฏิเสธทั้งคำขอ — ไม่ใช่บันทึกส่วนที่ถูกแล้วทิ้งส่วนที่ผิด
+      const profile = await prisma.customerProfile.findUnique({ where: { userId: c.userId } });
+      expect(profile?.taxId ?? null).toBeNull();
+      expect(profile?.customerType ?? "INDIVIDUAL").toBe("INDIVIDUAL");
     });
 
     it("กลับไปเป็นบุคคลธรรมดาแล้วข้อมูลบริษัทต้องถูกล้าง ไม่ใช่ซ่อนไว้", async () => {
@@ -1133,8 +1161,10 @@ describe("แฟ้มลูกค้า (customer file)", () => {
 
     it("สำเนาข้อมูลส่วนบุคคล (PDPA) — OWNER เท่านั้น", async () => {
       const c = await freshCustomer("test-custfile-pdpa-role");
-      await admin.agent.get(`/api/customers/${c.userId}/export`).expect(403);
-      await owner.agent.get(`/api/customers/${c.userId}/export`).expect(200);
+      const denied = await admin.agent.get(`/api/customers/${c.userId}/export`).expect(403);
+      expect(denied.headers["content-disposition"]).toBeUndefined();
+      const res = await owner.agent.get(`/api/customers/${c.userId}/export`).expect(200);
+      expect(res.headers["content-disposition"]).toMatch(/attachment/);
     });
 
     it("ไฟล์สำเนาข้อมูลรวมทุกส่วนที่เก็บไว้ และบอกตรง ๆ ว่าอะไรไม่ได้รวม", async () => {

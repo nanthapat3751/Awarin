@@ -252,8 +252,7 @@ export function CustomerContactCard({
               onChange={(e) => setIncludeNotes(e.target.checked)}
             />
             <span>
-              <span>รวมบันทึกการติดต่อของพนักงาน</span>
-              <span className="block text-xs text-slate-500">
+              รวมบันทึกการติดต่อของพนักงาน<span className="block text-xs text-slate-500">
                 บันทึกเหล่านี้เป็นข้อมูลส่วนบุคคลของลูกค้าเช่นกัน ถ้าเอาออก ไฟล์จะระบุไว้ว่าไม่ได้รวม
               </span>
             </span>

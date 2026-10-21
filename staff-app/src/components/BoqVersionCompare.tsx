@@ -11,6 +11,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { ApiError } from "../lib/api";
 import { compareBoqVersions } from "../lib/boq-api";
+import { rowKey } from "../lib/row-keys";
 
 function money(value: string | number): string {
   return Number(value).toLocaleString("th-TH", { minimumFractionDigits: 2 });
@@ -273,13 +274,13 @@ export function BoqVersionCompare({
                   </tr>
                 </thead>
                 <tbody className="text-slate-700">
-                  {lines.map((l, i) => {
+                  {lines.map((l) => {
                     const tag = KIND_TAG[l.kind];
                     const removed = l.kind === "removed";
                     const delta = Number(l.lineTotalDelta);
                     return (
                       <tr
-                        key={i}
+                        key={rowKey(l)}
                         className={`border-t border-slate-100 align-top ${removed || !tag ? "text-slate-400" : ""}`}
                       >
                         <td className={`whitespace-nowrap py-2.5 pl-3 pr-3 text-xs text-slate-400 ${tag?.bar ?? ""}`}>

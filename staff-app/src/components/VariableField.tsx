@@ -3,6 +3,7 @@ import { type FocusEvent, useLayoutEffect, useRef } from "react";
 import { ALLOW_BLOCKS_ATTR, NO_VARIABLES_ATTR } from "../lib/text-field";
 import type { FieldMode } from "../lib/variable-autocomplete";
 import { fieldProblems, segmentVariables, type SegmentKind, type Vocabulary } from "../lib/variable-highlight";
+import { contentKeys } from "../lib/content-keys";
 import { AutoTextarea } from "./AutoTextarea";
 
 /*
@@ -68,6 +69,7 @@ export function VariableField({
   const ready = vocab.variables.length > 0;
   const segments = ready ? segmentVariables(value, vocab, mode) : [{ text: value, kind: "text" as const }];
   const problems = ready ? fieldProblems(segments, vocab, mode) : [];
+  const segmentKeys = contentKeys(segments.map((s) => s.text));
 
   const backdropRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -101,7 +103,7 @@ export function VariableField({
             s.kind === "text" ? (
               s.text
             ) : (
-              <mark key={i} className={`box-decoration-clone rounded-sm text-transparent ${MARK[s.kind]}`}>
+              <mark key={segmentKeys[i]} className={`box-decoration-clone rounded-sm text-transparent ${MARK[s.kind]}`}>
                 {s.text}
               </mark>
             ),

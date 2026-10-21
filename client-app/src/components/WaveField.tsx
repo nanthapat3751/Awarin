@@ -1,5 +1,7 @@
 import { useMemo, type InputHTMLAttributes, type ReactNode } from "react";
 
+import { contentKeys } from "../lib/content-keys";
+
 // แยกข้อความเป็น "กลุ่มพยางค์" (grapheme) เพื่อให้สระ/วรรณยุกต์ไทยติดกับพยัญชนะ ไม่หลุดตอนทำเวฟ
 // เช่น "อีเมล" → ["อี","เ","ม","ล"] แทนที่จะเป็น ["อ","ี","เ","ม","ล"]
 function toGraphemes(str: string): string[] {
@@ -33,6 +35,7 @@ export function WaveField({
   ...rest
 }: WaveFieldProps) {
   const graphemes = useMemo(() => toGraphemes(label), [label]);
+  const letterKeys = useMemo(() => contentKeys(graphemes), [graphemes]);
   // ผูกข้อความผิดพลาดเข้ากับช่องด้วย aria-describedby — aria-invalid บอกได้แค่ว่า "ช่องนี้ผิด"
   // แต่ไม่ได้บอกว่าผิดยังไง คนที่ใช้โปรแกรมอ่านหน้าจอจะได้ยินแค่ "ไม่ถูกต้อง" แล้วจบ
   const errorId = `${id}-error`;
@@ -54,7 +57,7 @@ export function WaveField({
         {/* aria-label ให้ screen reader อ่านทั้งคำ ส่วน span แต่ละตัว (อักษรเดี่ยว) ซ่อนจากการอ่าน */}
         <label htmlFor={id} aria-label={label}>
           {graphemes.map((g, i) => (
-            <span key={i} aria-hidden style={{ transitionDelay: `${i * STEP_MS}ms` }}>
+            <span key={letterKeys[i]} aria-hidden style={{ transitionDelay: `${i * STEP_MS}ms` }}>
               {g === " " ? " " : g}
             </span>
           ))}

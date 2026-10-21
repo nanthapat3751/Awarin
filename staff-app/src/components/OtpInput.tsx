@@ -91,9 +91,9 @@ export function OtpInput({
 
   return (
     <div className={`flex justify-center gap-2 ${status === "error" ? "otp-shake" : ""}`.trim()}>
-      {Array.from({ length }).map((_, i) => (
+      {Array.from({ length }, (_, n) => `otp-box-${n + 1}`).map((boxKey, i) => (
         <input
-          key={i}
+          key={boxKey}
           ref={(el) => {
             refs.current[i] = el;
           }}

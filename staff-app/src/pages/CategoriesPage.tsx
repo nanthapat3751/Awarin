@@ -37,13 +37,13 @@ function money(value: string | number): string {
  * ราคา 0 ให้จางกว่าราคาจริง — ของจริงมีค่าแรง 0 อยู่ 45 รายการ (งานเหมาเก็บยอดไว้ฝั่งเดียว)
  * ถ้าพิมพ์ดำเท่ากันหมดจะแยกไม่ออกว่า "ราคาเป็นศูนย์จริง" หรือ "ยังไม่ได้กรอก"
  */
-function MoneyCell({ value }: { value: string | number }) {
+function MoneyCell({ value }: Readonly<{ value: string | number }>) {
   const n = Number(value);
   return <span className={n === 0 ? "text-slate-400" : "text-slate-800"}>{money(n)}</span>;
 }
 
 /** เผื่อเสีย (%) — ว่าง = ยังไม่ได้ตั้ง แสดงเป็นขีดจาง ๆ เหมือนหน้าวัสดุ */
-function WasteCell({ value }: { value: string | null }) {
+function WasteCell({ value }: Readonly<{ value: string | null }>) {
   if (value === null) return <span className="text-slate-300">—</span>;
   return <span className="text-slate-700">{Number(value)}%</span>;
 }

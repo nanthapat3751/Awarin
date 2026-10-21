@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { contentKeys } from "../lib/content-keys";
 import { getPublicSettings } from "../lib/public-api";
 import { usePageMeta } from "../lib/page-meta";
 
@@ -55,10 +56,11 @@ function Section({ id, title, children }: Readonly<{ id: string; title: string; 
 }
 
 function Bullets({ items }: Readonly<{ items: ReactNode[] }>) {
+  const keys = contentKeys(items.map((item) => (typeof item === "string" ? item : "ข้อ")));
   return (
     <ul className="ml-5 list-disc space-y-1.5 marker:text-slate-400">
       {items.map((item, i) => (
-        <li key={i}>{item}</li>
+        <li key={keys[i]}>{item}</li>
       ))}
     </ul>
   );

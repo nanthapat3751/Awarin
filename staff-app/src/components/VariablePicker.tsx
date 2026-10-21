@@ -58,18 +58,28 @@ export function VariablePickerList({
   emptyText?: string;
 }>) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeName]);
 
+  // กัน mousedown ทั้งกล่อง (ยกเว้นช่องค้นหา) — ฟังที่ตัวกล่องโดยตรง ไม่ผูก onMouseDown บน div ที่ไม่ใช่ปุ่ม
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const keepFocus = (e: MouseEvent) => {
+      if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+    };
+    box.addEventListener("mousedown", keepFocus);
+    return () => box.removeEventListener("mousedown", keepFocus);
+  }, []);
+
   return (
     <div
+      ref={boxRef}
       className="flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-lg"
       style={{ width: POPUP_WIDTH, maxHeight: POPUP_MAX_HEIGHT }}
-      onMouseDown={(e) => {
-        if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
-      }}
     >
       {header && <div className="border-b border-slate-100 p-2">{header}</div>}
       <div role="listbox" aria-label="ตัวแปรในแม่แบบสัญญา" className="min-h-0 flex-1 overflow-y-auto py-1">
