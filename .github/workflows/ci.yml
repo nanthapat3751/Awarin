@@ -1,0 +1,97 @@
+# ตรวจทุก push / PR: type ทั้ง 3 ส่วน + เทสต์เซิร์ฟเวอร์ทั้งชุด (ฐานข้อมูลทดสอบใน container ชั่วคราว)
+# + ลอง build image ทั้งสองตัว (ไม่ push) — Deploy (deploy.yml) เริ่มเองเมื่อ CI บน main ผ่าน
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: boq
+          # ฐานข้อมูลทิ้งได้ที่อยู่แค่ใน job นี้ — ไม่ใช่รหัสผ่านของระบบจริง
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: systemboq_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U boq -d systemboq_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # role boq_app / boq_backup ถูกสร้างด้วยรหัส dev ตามที่เทสต์คาดไว้ (tests/setup-env.ts)
+      DATABASE_URL_TEST: postgresql://boq:ci_password@localhost:5432/systemboq_test?schema=public
+      DATABASE_URL_TEST_RUNTIME: postgresql://boq_app:boq_app_dev_password@localhost:5432/systemboq_test?schema=public
+      BACKUP_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+      MAIL_TRANSPORT: silent
+      RATE_LIMIT_STORE: memory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # pg_dump ต้องไม่เก่ากว่าเซิร์ฟเวอร์ (17) — เทสต์สำรองข้อมูลเรียกของจริง
+      - name: ติดตั้ง PostgreSQL client 17
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - run: npm ci
+      - run: npm run build -w packages/shared-types
+      - run: npx -w server prisma generate
+
+      - name: ตรวจ type
+        run: |
+          (cd server && npx tsc --noEmit -p .)
+          (cd staff-app && npx tsc --noEmit -p tsconfig.app.json)
+          (cd client-app && npx tsc --noEmit -p tsconfig.app.json)
+
+      - name: เตรียมฐานข้อมูลทดสอบ
+        working-directory: server
+        run: |
+          npm run db:test:migrate
+          npm run db:test:grant
+          DATABASE_URL="$DATABASE_URL_TEST" npx tsx prisma/grant-backup-role.ts
+
+      - name: เทสต์เซิร์ฟเวอร์
+        working-directory: server
+        run: npx jest --forceExit
+
+  docker-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: build api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/api.Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      - name: build web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web.Dockerfile
+          push: false
+          build-args: |
+            API_BASE_URL=https://api.example.com
+            CLIENT_BASE_URL=https://example.com
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max

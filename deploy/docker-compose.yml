@@ -1,0 +1,81 @@
+# ระบบจริงบน VPS — อยู่ที่ ~/app บนเครื่อง (คู่กับ .env, app.env, db-init/)
+#   docker compose pull && docker compose up -d
+# ทุกพอร์ตผูกกับ 127.0.0.1 เท่านั้น: คนนอกเข้าได้ทาง nginx บนเครื่อง (HTTPS) ทางเดียว
+# (Docker เปิดพอร์ตทะลุ ufw ได้ ถ้าผูกกับ 0.0.0.0 — ห้ามเปลี่ยน)
+# ไม่มี pgAdmin และไม่เปิดพอร์ต 5432 ออกนอกเครื่องโดยตั้งใจ
+
+name: awarin
+
+x-db-urls: &db-urls
+  DATABASE_URL_RUNTIME: postgresql://boq_app:${APP_DB_PASSWORD}@db:5432/systemboq
+  BACKUP_DATABASE_URL: postgresql://boq_backup:${BACKUP_DB_PASSWORD}@db:5432/systemboq
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: boq
+      POSTGRES_PASSWORD: ${DB_OWNER_PASSWORD}
+      POSTGRES_DB: systemboq
+      # ใช้แค่ตอนสร้างฐานข้อมูลครั้งแรก (db-init/01-roles.sh)
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boq -d systemboq"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # สร้าง/อัปเดตตาราง + สิทธิ์ แล้วจบ (Exited 0) — API รอให้ตัวนี้สำเร็จก่อน
+  migrate:
+    image: ${API_IMAGE}:${TAG:-latest}
+    env_file: app.env
+    environment:
+      <<: *db-urls
+      DATABASE_URL: postgresql://boq:${DB_OWNER_PASSWORD}@db:5432/systemboq
+    command: ["sh", "/app/deploy/migrate.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ${API_IMAGE}:${TAG:-latest}
+    restart: unless-stopped
+    env_file: app.env
+    environment:
+      <<: *db-urls
+      # Prisma ต้องเห็น DATABASE_URL — ให้เป็น role จำกัดสิทธิ์ ไม่ใช่เจ้าของฐานข้อมูล
+      DATABASE_URL: postgresql://boq_app:${APP_DB_PASSWORD}@db:5432/systemboq
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - uploads:/app/server/uploads
+      - private_uploads:/app/server/private-uploads
+      - backups:/app/server/backups
+      - geoip:/app/server/data/geoip
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Chromium (สร้าง PDF) ใช้ /dev/shm — ค่าเริ่มต้น 64MB ไม่พอกับเอกสารหลายหน้า
+    shm_size: "512mb"
+
+  web:
+    image: ${WEB_IMAGE}:${TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
+
+volumes:
+  db_data:
+  uploads:
+  private_uploads:
+  backups:
+  geoip:

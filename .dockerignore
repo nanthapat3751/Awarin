@@ -1,0 +1,29 @@
+# ไม่ส่งเข้า docker build — ทั้งเพื่อความเร็วและกันความลับ/ข้อมูลจริงหลุดเข้า image
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.production.example
+.git
+.github
+.claude
+**/coverage
+**/*.log
+**/*.tsbuildinfo
+
+# ข้อมูลจริง (ไฟล์ลูกค้า สำรองข้อมูล ฐานข้อมูล IP) — อยู่ใน volume บนเซิร์ฟเวอร์ ไม่ใช่ใน image
+server/uploads
+server/private-uploads
+server/backups
+backups
+server/data/geoip
+server/_tmp_*
+
+# ของที่ไม่เกี่ยวกับการรันระบบ
+docs
+robot-tests
+sonar-reports
+*.docx
+*.xlsx
+*.pdf

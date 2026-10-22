@@ -1,0 +1,113 @@
+# build image จริง → push ขึ้น GHCR (private) → สั่ง VPS ดึงไปรัน
+# เริ่มเองเมื่อ CI บน main ผ่าน หรือกด Run workflow เอง
+#
+# ต้องตั้งใน Settings → Secrets and variables → Actions:
+#   Secrets:   VPS_SSH_KEY (private key ของ deploy) · VPS_HOST · VPS_USER
+#   Variables: APP_URL (เช่น https://awarin.tech) · API_URL (เช่น https://api.awarin.tech)
+#              TURNSTILE_SITE_KEY (ไม่บังคับ — ไม่ตั้ง = ใช้คีย์ทดสอบของ Cloudflare)
+# ยังไม่ตั้ง APP_URL = build-push อย่างเดียว ไม่ deploy (job deploy เป็น skipped)
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/awarin
+
+jobs:
+  build-push:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run ต้องเช็กเอาต์ commit ที่ CI ตรวจผ่าน ไม่ใช่หัว main ล่าสุด
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: meta
+        run: echo "tag=sha-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build + push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/api.Dockerfile
+          push: true
+          build-args: APP_VERSION=${{ steps.meta.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-api:latest
+            ${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      - name: build + push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web.Dockerfile
+          push: true
+          build-args: |
+            API_BASE_URL=${{ vars.API_URL || 'https://api.awarin.tech' }}
+            CLIENT_BASE_URL=${{ vars.APP_URL || 'https://awarin.tech' }}
+            TURNSTILE_SITE_KEY=${{ vars.TURNSTILE_SITE_KEY }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-web:latest
+            ${{ env.IMAGE_PREFIX }}-web:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    needs: build-push
+    if: vars.APP_URL != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: เตรียม SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      - name: ส่งไฟล์ compose ล่าสุด + ดึง image ใหม่แล้วรัน
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          TAG: ${{ needs.build-push.outputs.tag }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key $VPS_USER@$VPS_HOST"
+          scp -i ~/.ssh/deploy_key -r deploy/docker-compose.yml deploy/db-init "$VPS_USER@$VPS_HOST:app/"
+          # ปักรุ่นที่เพิ่ง build (แทน latest) — ย้อนรุ่นได้ด้วยการแก้ TAG ใน ~/app/.env แล้ว up -d
+          $SSH "cd ~/app && sed -i 's/^TAG=.*/TAG=$TAG/' .env && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f"
+      - name: ตรวจว่าเว็บขึ้นจริง
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          API_URL: ${{ vars.API_URL || 'https://api.awarin.tech' }}
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS "$API_URL/api/health" && curl -fsS -o /dev/null "$APP_URL"; then echo; echo "ขึ้นแล้ว"; exit 0; fi
+            sleep 6
+          done
+          echo "เว็บไม่ตอบหลัง deploy"; exit 1
