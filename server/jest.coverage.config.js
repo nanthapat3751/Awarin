@@ -24,6 +24,7 @@ module.exports = {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "<rootDir>/server/tsconfig.json" }],
   },
   setupFiles: ["<rootDir>/server/tests/setup-env.ts"],
+  globalSetup: "<rootDir>/server/tests/global-setup.ts",
   globalTeardown: "<rootDir>/server/tests/global-teardown.ts",
   maxWorkers: 1,
   moduleNameMapper: {

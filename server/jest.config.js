@@ -5,6 +5,8 @@ module.exports = {
   rootDir: ".",
   testMatch: ["<rootDir>/tests/**/*.test.ts"],
   setupFiles: ["<rootDir>/tests/setup-env.ts"],
+  // ของกลางที่ฐานทดสอบใหม่ (CI) ยังไม่มี — แม่แบบสัญญาเริ่มต้น (ดู tests/global-setup.ts)
+  globalSetup: "<rootDir>/tests/global-setup.ts",
   // ลบโฟลเดอร์ชั่วคราวของไฟล์ทดสอบ/ชุดสำรองทดสอบ (ดู tests/setup-env.ts)
   globalTeardown: "<rootDir>/tests/global-teardown.ts",
   // Integration tests share one real Postgres instance (no per-worker DB isolation).
