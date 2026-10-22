@@ -12,6 +12,7 @@ import { createAndLoginAdmin, createAndLoginOwner } from "../helpers/test-auth";
  *   เจ้าของบัญชี: กระดิ่ง + อีเมล (ถ้ายืนยันอีเมลแล้ว) · OWNER/ADMIN คนอื่น: กระดิ่ง
  * แจ้งครั้งเดียวตอนเริ่มระงับ ไม่ใช่ทุกครั้งที่โดนกันระหว่างระงับ
  */
+// ล็อกอินผิด 10 รอบ (argon2 ช้าโดยตั้งใจ) — บนเครื่อง 2 คอร์ของ CI เกินเพดาน 5 วินาทีเริ่มต้นของ jest
 describe("แจ้งเตือนเมื่อขั้น 2FA ถูกระงับ", () => {
   const createdUserIds: string[] = [];
 
@@ -73,7 +74,7 @@ describe("แจ้งเตือนเมื่อขั้น 2FA ถูก�
     // โดนกันระหว่างระงับ ไม่แจ้งซ้ำ
     expect((await wrongCode(owner)).status).toBe(423);
     expect(await notesOf(owner.userId)).toHaveLength(1);
-  });
+  }, 20_000);
 
   it("อีเมลยังไม่ยืนยัน = แจ้งในแอปอย่างเดียว ไม่ส่งเมล", async () => {
     const owner = await createAndLoginOwner("2fa-alert-unverified");
@@ -86,5 +87,5 @@ describe("แจ้งเตือนเมื่อขั้น 2FA ถูก�
     expect(await notesOf(owner.userId)).toHaveLength(1);
     await new Promise((r) => setTimeout(r, 300));
     expect(lastMailTo(owner.email)).toBeUndefined();
-  });
+  }, 20_000);
 });
