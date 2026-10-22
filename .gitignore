@@ -36,3 +36,6 @@ server/data/geoip/
 
 # ผลรัน Robot Framework (สร้างใหม่ทุกรอบด้วย node robot-tests/test-env.mjs --run)
 robot-tests/results/
+
+# ผลเทสต์แบบ JSON ที่ CI ใช้ทำ annotation (.github/scripts/jest-annotate.cjs)
+server/jest-results.json

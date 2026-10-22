@@ -68,7 +68,12 @@ jobs:
 
       - name: เทสต์เซิร์ฟเวอร์
         working-directory: server
-        run: npx jest --forceExit
+        run: npx jest --forceExit --json --outputFile=jest-results.json
+
+      # เขียนเทสต์ที่พังเป็น annotation — เห็นสาเหตุในหน้าสรุปของรอบโดยไม่ต้องไล่ log
+      - name: สรุปเทสต์ที่พัง
+        if: failure()
+        run: node .github/scripts/jest-annotate.cjs server/jest-results.json
 
   docker-build:
     runs-on: ubuntu-24.04
