@@ -7,8 +7,9 @@ build/
 coverage/
 .DS_Store
 # ชุดสำรองข้อมูล — มีข้อมูลลูกค้าทั้งหมด ห้ามขึ้น git
-server/backups/
-backups/
+# ต้องมี / นำหน้า: "backups/" เฉย ๆ เคยกันโฟลเดอร์โค้ด server/src/modules/backups/ ไปด้วย (ไฟล์ไม่เคยขึ้น git)
+/server/backups/
+/backups/
 
 # ไฟล์ที่ผู้ใช้อัปโหลด (รูป/ไฟล์แนบลูกค้า) — ข้อมูลจริง ไม่ใช่โค้ด
 server/uploads/
