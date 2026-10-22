@@ -91,6 +91,8 @@ export function checkDeployConfig(env: NodeJS.ProcessEnv): DeployProblem[] {
     ...checkBaseUrl(env, "STAFF_BASE_URL", "CORS_ORIGIN_STAFF", "พนักงาน"),
   ];
 
+  problems.push(...checkUploadBase(env));
+
   if (env.COOKIE_SECURE !== "true") {
     problems.push({
       level: "error",
@@ -101,6 +103,32 @@ export function checkDeployConfig(env: NodeJS.ProcessEnv): DeployProblem[] {
 
   problems.push(...checkMail(env));
   return problems;
+}
+
+/**
+ * รูปที่อัปโหลดเก็บเป็น path สัมพัทธ์ แล้ว API ต่อโดเมนนี้ให้ตอนส่งออก (ดู lib/upload-urls.ts)
+ * ไม่ตั้ง = ใช้ http://localhost:4000 → รูปแบบบ้าน/ผลงาน/รูปหน้าเว็บพังทุกรูปบนเว็บจริง
+ * (เคยเกิดตอนขึ้นระบบครั้งแรก — หน้าเว็บเปิดได้ปกติ จึงไม่มีอะไรเตือน)
+ */
+function checkUploadBase(env: NodeJS.ProcessEnv): DeployProblem[] {
+  const key = "PUBLIC_UPLOAD_BASE_URL";
+  const raw = env[key]?.trim();
+  if (!raw) {
+    return [{ level: "error", key, message: `ยังไม่ได้ตั้ง ${key} (เช่น https://api.<โดเมน>) — รูปทุกรูปบนเว็บจะชี้ไปที่ localhost และไม่ขึ้น` }];
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return [{ level: "error", key, message: `${key} ไม่ใช่ที่อยู่เว็บที่ถูกต้อง: "${raw}"` }];
+  }
+  if (isLocalHost(url.hostname)) {
+    return [{ level: "error", key, message: `${key} ยังชี้ไปที่เครื่องนี้ (${url.origin}) — คนอื่นเปิดรูปไม่ได้` }];
+  }
+  if (url.protocol !== "https:") {
+    return [{ level: "error", key, message: `${key} ต้องขึ้นต้นด้วย https:// (ตอนนี้ ${url.origin}) — เว็บ https โหลดรูปจาก http ไม่ได้` }];
+  }
+  return [];
 }
 
 /** เมลต้องส่งจริง (smtp) · ผู้ส่งไม่ควรเป็นอีเมลส่วนตัว หรือคนละโดเมนกับเว็บ */

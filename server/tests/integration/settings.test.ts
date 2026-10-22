@@ -5,6 +5,8 @@ import request from "supertest";
 
 import { app } from "../../src/app";
 import { prisma } from "../../src/lib/prisma";
+import { mockSlipProvider } from "../../src/lib/slip/mock-provider";
+import { setSlipProviderForTests } from "../../src/lib/slip/provider";
 import { createAndLoginCustomer, createAndLoginOwner } from "../helpers/test-auth";
 
 describe("settings module", () => {
@@ -70,6 +72,17 @@ describe("settings module", () => {
     expect(res.body.settings).toHaveProperty("companyName");
     expect(res.body.settings).not.toHaveProperty("overheadProfitPercent");
     expect(res.body.settings).not.toHaveProperty("vatPercent");
+  });
+
+  it("บอกหน้าเว็บว่าเปิดตรวจสลิปอัตโนมัติอยู่ไหม (หน้านโยบายความเป็นส่วนตัวเขียนถึง SlipOK เฉพาะตอนเปิด)", async () => {
+    try {
+      setSlipProviderForTests(null);
+      expect((await request(app).get("/api/public/settings")).body.features).toEqual({ slipCheck: false });
+      setSlipProviderForTests(mockSlipProvider);
+      expect((await request(app).get("/api/public/settings")).body.features).toEqual({ slipCheck: true });
+    } finally {
+      setSlipProviderForTests(undefined);
+    }
   });
 
   it("rejects a CUSTOMER reading or updating staff settings", async () => {

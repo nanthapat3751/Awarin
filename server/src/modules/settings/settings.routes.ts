@@ -13,6 +13,7 @@ import { requireAuth } from "../../middleware/auth";
 import { isValidPromptPayId, promptPayQrDataUrl } from "../../lib/promptpay";
 import { requireRole } from "../../middleware/rbac";
 import { getTakeoffRules, saveTakeoffRules } from "../../lib/takeoff-rules";
+import { slipProvider } from "../../lib/slip/provider";
 import { takeoffRulesSchema, updateSettingsSchema } from "./settings.schemas";
 import { getAllSettings, getPublicSettings, SettingsError, updateSettings } from "./settings.service";
 
@@ -132,5 +133,6 @@ export const publicSettingsRouter = Router();
 
 publicSettingsRouter.get("/", async (_req, res) => {
   const settings = await getPublicSettings();
-  res.json({ settings });
+  // ระบบที่เปิดอยู่จริงบนเซิร์ฟเวอร์ — หน้านโยบายความเป็นส่วนตัวบอกผู้รับข้อมูลตามนี้ (ไม่เขียนถึงบริการที่ไม่ได้ใช้)
+  res.json({ settings, features: { slipCheck: slipProvider() !== null } });
 });

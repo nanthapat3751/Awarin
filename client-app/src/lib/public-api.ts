@@ -44,10 +44,15 @@ export function getPortfolioItem(id: string): Promise<{ item: PortfolioDto }> {
  * ไม่ต้องรอเครือข่าย — สคริปต์ใน index.html อ่านคีย์เดียวกันนี้เพื่อสั่งโหลดรูป hero ล่วงหน้า
  */
 export const PUBLIC_SETTINGS_CACHE_KEY = "awarin:public-settings";
-let settingsPromise: Promise<{ settings: Record<string, string> }> | null = null;
+/** ระบบที่เซิร์ฟเวอร์เปิดอยู่จริง — ใช้ในหน้านโยบายความเป็นส่วนตัว */
+export interface PublicFeatures {
+  slipCheck: boolean;
+}
+type PublicSettingsResponse = { settings: Record<string, string>; features?: PublicFeatures };
+let settingsPromise: Promise<PublicSettingsResponse> | null = null;
 
-export function getPublicSettings(): Promise<{ settings: Record<string, string> }> {
-  settingsPromise ??= apiFetch<{ settings: Record<string, string> }>("/api/public/settings").then(
+export function getPublicSettings(): Promise<PublicSettingsResponse> {
+  settingsPromise ??= apiFetch<PublicSettingsResponse>("/api/public/settings").then(
     (res) => {
       try {
         localStorage.setItem(PUBLIC_SETTINGS_CACHE_KEY, JSON.stringify(res.settings));

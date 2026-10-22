@@ -5,6 +5,7 @@ const READY: NodeJS.ProcessEnv = {
   NODE_ENV: "production",
   CLIENT_BASE_URL: "https://www.example-construction.co.th",
   STAFF_BASE_URL: "https://staff.example-construction.co.th",
+  PUBLIC_UPLOAD_BASE_URL: "https://api.example-construction.co.th",
   COOKIE_SECURE: "true",
   MAIL_TRANSPORT: "smtp",
   MAIL_FROM: "Awarin Engineering <no-reply@example-construction.co.th>",
@@ -34,6 +35,15 @@ describe("ตรวจค่าตั้งก่อนเปิดระบบ�
     expect(keysOf({ ...READY, CLIENT_BASE_URL: "http://localhost:5174" }, "error")).toContain("CLIENT_BASE_URL");
     expect(keysOf({ ...READY, CLIENT_BASE_URL: "http://www.example-construction.co.th" }, "error")).toContain("CLIENT_BASE_URL");
     expect(keysOf({ ...READY, CLIENT_BASE_URL: "ไม่ใช่ลิงก์" }, "error")).toContain("CLIENT_BASE_URL");
+  });
+
+  it("โดเมนรูปที่อัปโหลดไม่ได้ตั้ง / เป็น localhost / เป็น http = ห้ามเปิด (รูปทั้งเว็บพัง)", () => {
+    expect(keysOf({ ...READY, PUBLIC_UPLOAD_BASE_URL: undefined }, "error")).toContain("PUBLIC_UPLOAD_BASE_URL");
+    expect(keysOf({ ...READY, PUBLIC_UPLOAD_BASE_URL: "http://localhost:4000" }, "error")).toContain("PUBLIC_UPLOAD_BASE_URL");
+    expect(keysOf({ ...READY, PUBLIC_UPLOAD_BASE_URL: "http://api.example-construction.co.th" }, "error")).toContain(
+      "PUBLIC_UPLOAD_BASE_URL",
+    );
+    expect(keysOf({ ...READY, PUBLIC_UPLOAD_BASE_URL: "ไม่ใช่ลิงก์" }, "error")).toContain("PUBLIC_UPLOAD_BASE_URL");
   });
 
   it("ใช้ค่า CORS แทนได้ แต่เตือนให้ตั้งตรง ๆ", () => {
