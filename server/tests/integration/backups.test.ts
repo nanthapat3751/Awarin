@@ -22,6 +22,9 @@ import { createAndLoginAdmin, createAndLoginCustomer, createAndLoginOwner } from
  * สำรองข้อมูลจริง (pg_dump ของฐานข้อมูลทดสอบ ด้วย role boq_backup) ลงโฟลเดอร์ชั่วคราว
  * — setup-env.ts บังคับ BACKUP_DIR / BACKUP_DATABASE_URL ให้ไม่มีทางแตะของจริง
  */
+/** ชื่อชุดสำรองผูกกับวินาทีที่เริ่ม (ซ้ำ = 409 โดยตั้งใจ) — เครื่องเร็วอย่าง CI สำรองสองชุดในวินาทีเดียวกันได้ จึงรอข้ามวินาทีก่อน */
+const nextSecond = () => new Promise((r) => setTimeout(r, 1000 - (Date.now() % 1000) + 20));
+
 describe("backups", () => {
   const cfg = readBackupConfig();
   const createdUserIds: string[] = [];
@@ -100,6 +103,7 @@ describe("backups", () => {
   }, 120_000);
 
   it("สั่งซ้อนกันไม่ได้ — ครั้งที่สองได้ 409 ระหว่างที่ครั้งแรกยังไม่เสร็จ", async () => {
+    await nextSecond();
     const first = runBackup("manual", cfg);
     await expect(runBackup("manual", cfg)).rejects.toMatchObject({ status: 409 });
     await first;
@@ -114,6 +118,7 @@ describe("backups", () => {
 
     const withMirrors = { ...cfg, mirrorDirs: parseMirrorDirs(` ${drive} ; ${usb} ;`) };
     expect(withMirrors.mirrorDirs).toEqual([drive, usb]);
+    await nextSecond();
     const m = await runBackup("manual", withMirrors);
 
     // ชุดใหม่ + ชุดเก่าที่มีอยู่ก่อนตั้งสำเนา ไปครบ และตรงกับต้นฉบับ
@@ -139,8 +144,14 @@ describe("backups", () => {
   }, 120_000);
 
   it("ชื่อสำเนาบนหน้าจอเป็นชื่อย่อ ไม่ใช่ path เต็ม", () => {
-    expect(mirrorLabel(path.resolve("G:\\My Drive\\งาน\\systemboq-backups"))).toMatch(/^G:\\…\\systemboq-backups$/);
-    expect(mirrorLabel(path.resolve("E:\\systemboq-backups"))).toBe("E:\\systemboq-backups");
+    // path แบบ Windows มีความหมายแค่บน Windows — บน Linux (CI / เซิร์ฟเวอร์จริง) ทดสอบด้วย path แบบ posix
+    if (process.platform === "win32") {
+      expect(mirrorLabel(path.resolve("G:\\My Drive\\งาน\\systemboq-backups"))).toMatch(/^G:\\…\\systemboq-backups$/);
+      expect(mirrorLabel(path.resolve("E:\\systemboq-backups"))).toBe("E:\\systemboq-backups");
+    } else {
+      expect(mirrorLabel("/mnt/My Drive/งาน/systemboq-backups")).toBe("/…/systemboq-backups");
+      expect(mirrorLabel("/systemboq-backups")).toBe("/systemboq-backups");
+    }
   });
 
   it("ลบชุดเก่าตามอายุ แต่เหลือชุดล่าสุดไว้เสมอ และไม่แตะโฟลเดอร์อื่น", () => {
