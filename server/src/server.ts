@@ -8,7 +8,7 @@ import { startBackupScheduler } from "./lib/backup/scheduler";
 import { startGeoipUpdater } from "./lib/geoip";
 import { startDraining } from "./lib/lifecycle";
 import { reportMailOnStartup } from "./lib/mailer";
-import { closePdfBrowser } from "./lib/pdf/browser";
+import { closePdfBrowser, warmUpPdfBrowser } from "./lib/pdf/browser";
 import { prisma, reportDatabasePool } from "./lib/prisma";
 import { LEAD_RETENTION_DAYS, sweepStaleLeads } from "./lib/lead-retention";
 import { sweepRateLimitBuckets } from "./lib/rate-limit";
@@ -26,6 +26,7 @@ const server = app.listen(port, () => {
   console.log(`server listening on http://localhost:${port} (${INSTANCE_ID})`);
   void reportMailOnStartup();
   void reportDatabasePool();
+  warmUpPdfBrowser();
 });
 
 // keep-alive ต้องนานกว่าตัว LB/reverse proxy — ค่าเริ่มต้นของ Node คือ 5 วินาที สั้นกว่า nginx

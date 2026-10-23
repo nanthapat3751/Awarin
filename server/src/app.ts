@@ -1,3 +1,4 @@
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
@@ -68,6 +69,10 @@ if (trustProxy) {
 }
 
 app.use(helmet());
+// บีบอัด gzip ตามที่เบราว์เซอร์ขอ (Accept-Encoding) — performance test รอบ 1 (perf-tests/): BOQ /
+// รายละเอียดโครงการ / คลังวัสดุ ตอบ 50–70 KB ต่อครั้ง และเป็นเส้นที่ช้าสุด · gzip ลดเหลือ 8–9 KB (84–87%)
+// ข้ามเองเมื่อเล็กกว่า 1 KB และชนิดที่บีบอยู่แล้ว (PDF, xlsx, รูป) · zlib ทำงานใน thread pool ไม่ถ่วง event loop
+app.use(compression());
 app.use(requestId);
 // ตรวจสุขภาพสำหรับ load balancer — อยู่ก่อนตัวแปลง body/คุกกี้/session เพื่อไม่ให้ขึ้นกับอะไรเลย
 // นอกจาก process เอง (ready เช็ค DB แยกต่างหาก) ดู lib/lifecycle.ts

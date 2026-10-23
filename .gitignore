@@ -39,3 +39,7 @@ robot-tests/results/
 
 # ผลเทสต์แบบ JSON ที่ CI ใช้ทำ annotation (.github/scripts/jest-annotate.cjs)
 server/jest-results.json
+
+# performance test: ผลดิบรายคำขอ (ใหญ่ สร้างใหม่ได้) + cache ของ Python
+perf-tests/results-*/*-requests.csv.gz
+perf-tests/__pycache__/

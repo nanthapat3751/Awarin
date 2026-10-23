@@ -66,6 +66,37 @@ export async function renderHtmlToPdf(
   return meta ? applyPdfMetadata(bytes, meta) : bytes;
 }
 
+/**
+ * เปิด Chromium และวาดหน้าเปล่า 1 หน้าไว้ก่อนตั้งแต่เปิดเซิร์ฟเวอร์ — performance test รอบ 1:
+ * PDF ใบแรกหลังเปิดเซิร์ฟเวอร์ใช้ ~12 วินาที (เปิด Chromium + หน้าแรก) ใบต่อ ๆ ไป ~2 วินาที
+ * อุ่นไว้ก่อน = คนแรกของวันไม่ต้องรอ · ทำเบื้องหลัง ล้มก็แค่ log (ใบจริงจะลองเปิดใหม่เอง)
+ * ปิดได้ด้วย PDF_WARMUP=false · ไม่ทำในเทสต์
+ */
+export function warmUpPdfBrowser(): void {
+  if (process.env.NODE_ENV === "test" || process.env.PDF_WARMUP === "false") return;
+  const started = Date.now();
+  const launch = getBrowser();
+  launch
+    .then(async (browser) => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent("<p>พร้อม</p>", { waitUntil: "load" });
+        await page.pdf({ format: "a4" });
+      } finally {
+        await page.close();
+      }
+      console.log(`[pdf] อุ่น Chromium เสร็จใน ${((Date.now() - started) / 1000).toFixed(1)} วินาที`);
+    })
+    .catch((err: unknown) => {
+      console.error("[pdf] อุ่น Chromium ไม่สำเร็จ:", err);
+    });
+  // เปิด Chromium ไม่สำเร็จ = ล้างไว้ให้คำขอ PDF จริงลองเปิดใหม่ (ไม่ค้างคำตอบที่ล้มตลอดอายุโปรเซส)
+  // แค่วาดหน้าอุ่นพลาดแต่เปิดได้ = เก็บตัวเดิมไว้ใช้ต่อ
+  launch.catch(() => {
+    if (browserPromise === launch) browserPromise = null;
+  });
+}
+
 export async function closePdfBrowser(): Promise<void> {
   if (browserPromise) {
     const browser = await browserPromise;
